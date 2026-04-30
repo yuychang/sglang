@@ -792,7 +792,7 @@ jobs:
           docker exec ci_sglang rocm-smi --showmeminfo vram 2>/dev/null || echo "rocm-smi not available"
 
       - name: Run diffusion server tests (2-GPU)
-        timeout-minutes: 80
+        timeout-minutes: 150
         env:
           PARTITION_PLAN_JSON: ${{ needs.compute-diffusion-partitions.outputs.plan-2gpu }}
         run: |

@@ -7,11 +7,11 @@ AST parsing to extract parametrized cases plus standalone files from source.
 """
 
 import argparse
+import importlib.util
 import json
 import math
 import os
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 from diffusion_case_parser import (
@@ -22,10 +22,22 @@ from diffusion_case_parser import (
     resolve_case_config_path,
 )
 
-SUITE_OUTPUT_NAMES = {
-    "1-gpu": "1gpu",
-    "2-gpu": "2gpu",
-}
+
+def _load_partitioning_helpers():
+    repo_root = Path(__file__).resolve().parents[4]
+    helper_path = repo_root / "python/sglang/multimodal_gen/test/partitioning.py"
+    spec = importlib.util.spec_from_file_location(
+        "diffusion_test_partitioning", helper_path
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module.PartitionItem, module.partition_items_by_lpt
+
+
+PartitionItem, partition_items_by_lpt = _load_partitioning_helpers()
+
+SUITE_OUTPUT_NAMES = {"1-gpu": "1gpu", "2-gpu": "2gpu", "1-gpu-b200": "b200"}
 DEFAULT_STANDALONE_EST_TIME_SECONDS = 300.0
 
 # The perf baselines are not AMD CI cold-start estimates: they undercount ROCm
@@ -38,14 +50,6 @@ AMD_CI_CASE_ESTIMATE_OVERRIDES = {
         "qwen_image_edit_2511_ti2i": 900.0,
     },
 }
-
-
-@dataclass(frozen=True)
-class PartitionItem:
-    kind: str
-    item_id: str
-    est_time: float
-    used_fallback_estimate: bool = False
 
 
 def validate_suite_case_coverage(suites: dict[str, DiffusionSuiteInfo]) -> None:
@@ -105,7 +109,9 @@ def get_amd_ci_case_est_time(suite_name: str, case_id: str, base_est_time: float
     return est_time
 
 
-def build_partition_items(suite_info: DiffusionSuiteInfo) -> list[PartitionItem]:
+def build_partition_items(
+    suite_info: DiffusionSuiteInfo, include_standalone: bool = True
+) -> list[PartitionItem]:
     items = [
         PartitionItem(
             kind="case",
@@ -116,6 +122,9 @@ def build_partition_items(suite_info: DiffusionSuiteInfo) -> list[PartitionItem]
         )
         for case in suite_info.cases
     ]
+    if not include_standalone:
+        return items
+
     items.extend(
         PartitionItem(
             kind="standalone",
@@ -130,27 +139,6 @@ def build_partition_items(suite_info: DiffusionSuiteInfo) -> list[PartitionItem]
         for standalone_file in suite_info.standalone_files
     )
     return items
-
-
-def lpt_partition(
-    items: list[PartitionItem], num_partitions: int
-) -> list[list[PartitionItem]]:
-    if not items or num_partitions <= 0:
-        return []
-
-    sorted_items = sorted(
-        items,
-        key=lambda item: (-item.est_time, item.kind, item.item_id),
-    )
-    partitions: list[list[PartitionItem]] = [[] for _ in range(num_partitions)]
-    partition_sums = [0.0] * num_partitions
-
-    for item in sorted_items:
-        min_idx = partition_sums.index(min(partition_sums))
-        partitions[min_idx].append(item)
-        partition_sums[min_idx] += item.est_time
-
-    return partitions
 
 
 def build_matrix(partition_count: int) -> dict:
@@ -206,11 +194,20 @@ def print_suite_summary(
     suite_name: str,
     suite_info: DiffusionSuiteInfo,
     partitions: list[list[PartitionItem]],
+    include_standalone: bool = True,
 ) -> None:
-    total_time = sum(item.est_time for item in build_partition_items(suite_info))
+    total_time = sum(
+        item.est_time
+        for item in build_partition_items(
+            suite_info, include_standalone=include_standalone
+        )
+    )
     print(f"{suite_name.upper()} suite:")
     print(f"  Cases: {len(suite_info.cases)}")
-    print(f"  Standalone files: {len(suite_info.standalone_files)}")
+    standalone_label = "Standalone files"
+    if not include_standalone:
+        standalone_label = "Standalone files ignored"
+    print(f"  {standalone_label}: {len(suite_info.standalone_files)}")
     print(
         f"  Missing standalone estimates: {len(suite_info.missing_standalone_estimates)}"
     )
@@ -273,6 +270,11 @@ def main():
         default=10,
         help="Maximum number of partitions (default: 10)",
     )
+    parser.add_argument(
+        "--parametrized-only",
+        action="store_true",
+        help="Only partition DiffusionTestCase parametrized cases.",
+    )
     args = parser.parse_args()
 
     script_dir = Path(__file__).resolve().parent
@@ -307,7 +309,9 @@ def main():
         if suite_name not in SUITE_OUTPUT_NAMES:
             continue
 
-        items = build_partition_items(suite_info)
+        items = build_partition_items(
+            suite_info, include_standalone=not args.parametrized_only
+        )
         total_time = sum(item.est_time for item in items)
         partition_count = compute_partition_count(
             total_time_seconds=total_time,
@@ -316,9 +320,14 @@ def main():
             max_time_seconds=args.max_time,
             max_partitions=args.max_partitions,
         )
-        partitions = lpt_partition(items, partition_count)
+        partitions = partition_items_by_lpt(items, partition_count)
 
-        print_suite_summary(suite_name, suite_info, partitions)
+        print_suite_summary(
+            suite_name,
+            suite_info,
+            partitions,
+            include_standalone=not args.parametrized_only,
+        )
 
         output_name = SUITE_OUTPUT_NAMES[suite_name]
         output_github_value(f"matrix-{output_name}", build_matrix(partition_count))
