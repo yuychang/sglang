@@ -157,8 +157,8 @@ class BenchArgs:
             type=str,
             nargs="+",
             default=("CPU", "GPU"),
-            choices=["CPU", "GPU", "XPU"],
-            help="Profiler activities: CPU, GPU, XPU. use torch profiler.",
+            choices=["CPU", "GPU", "XPU", "CUDA_PROFILER"],
+            help="Profiler activities: CPU, GPU, XPU, CUDA_PROFILER.",
         )
         parser.add_argument(
             "--profile-start-step",

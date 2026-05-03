@@ -46,6 +46,9 @@ from sglang.srt.distributed import (
     get_tensor_model_parallel_world_size,
     tensor_model_parallel_all_reduce,
 )
+from sglang.srt.distributed.communication_op import (
+    attention_tensor_model_parallel_all_reduce,
+)
 from sglang.srt.environ import envs
 from sglang.srt.eplb.expert_distribution import get_global_expert_distribution_recorder
 from sglang.srt.eplb.expert_location import ModelConfigForExpertLocation
@@ -60,6 +63,7 @@ from sglang.srt.layers.attention.nsa.utils import (
     nsa_use_prefill_cp,
 )
 from sglang.srt.layers.communicator import (
+    FUSE_ALLREDUCE_MAX_BATCH_SIZE,
     LayerCommunicator,
     LayerScatterModes,
     enable_moe_dense_fully_dp,
@@ -73,6 +77,10 @@ from sglang.srt.layers.dp_attention import (
     get_attention_tp_rank,
     get_attention_tp_size,
     is_dp_attention_enabled,
+)
+from sglang.srt.layers.flashinfer_comm_fusion import (
+    flashinfer_allreduce_residual_rmsnorm,
+    is_flashinfer_allreduce_unavailable,
 )
 from sglang.srt.layers.layernorm import RMSNorm
 from sglang.srt.layers.linear import (
@@ -2018,6 +2026,77 @@ class DeepseekV2Model(nn.Module):
     def get_input_embeddings(self) -> torch.Tensor:
         return self.embed_tokens
 
+    def _embed_with_fused_input_layernorm(
+        self, input_ids: torch.Tensor
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """Embed input_ids and try to fuse the TP all-reduce with the first
+        layer's input_layernorm via trtllm/flashinfer.
+
+        Returns (hidden_states, residual):
+        - On fusion: hidden_states is post-norm, residual is post-allreduce
+          embedding, and hidden_states carries the `_sglang_skip_input_layernorm`
+          attribute so layer 0's prepare_attn skips re-applying input_layernorm.
+        - Otherwise: hidden_states is the post-allreduce embedding and
+          residual is None (existing behavior).
+        """
+        layer0 = self.layers[self.start_layer]
+        try_fuse = (
+            _is_cuda
+            and self.pp_group.is_first_rank
+            and not self.nsa_enable_prefill_cp
+            and isinstance(layer0.layer_communicator, LayerCommunicator)
+            and not get_attn_tp_context().input_scattered
+            and get_global_server_args().enable_flashinfer_allreduce_fusion
+            and not is_flashinfer_allreduce_unavailable()
+            and 0 < input_ids.shape[0] <= FUSE_ALLREDUCE_MAX_BATCH_SIZE
+        )
+
+        use_attn_tp_group = is_dp_attention_enabled()
+        if use_attn_tp_group:
+            reduce_world_size = get_attention_tp_size()
+            do_allreduce = attention_tensor_model_parallel_all_reduce
+        else:
+            reduce_world_size = self.embed_tokens.tp_size
+            do_allreduce = tensor_model_parallel_all_reduce
+        try_fuse = try_fuse and reduce_world_size > 1
+
+        hidden_states = self.embed_tokens(input_ids, skip_tp_reduction=try_fuse)
+        if not try_fuse:
+            return hidden_states, None
+
+        # Cache a max-size zero buffer; residual_in is read-only inside the
+        # kernel, so one one-time fill replaces a per-step zeros_like.
+        cached = getattr(self, "_fused_ar_zero_residual", None)
+        needed = hidden_states.shape[0] * hidden_states.shape[-1]
+        if (
+            cached is None
+            or cached.dtype != hidden_states.dtype
+            or cached.device != hidden_states.device
+            or cached.numel() < needed
+        ):
+            cached = torch.zeros(
+                FUSE_ALLREDUCE_MAX_BATCH_SIZE * hidden_states.shape[-1],
+                dtype=hidden_states.dtype,
+                device=hidden_states.device,
+            )
+            self._fused_ar_zero_residual = cached
+        zero_residual = cached[:needed].view_as(hidden_states)
+        norm_out, residual_out = flashinfer_allreduce_residual_rmsnorm(
+            input_tensor=hidden_states,
+            residual=zero_residual,
+            weight=layer0.input_layernorm.weight,
+            eps=layer0.input_layernorm.variance_epsilon,
+            use_attn_tp_group=use_attn_tp_group,
+            fp32_acc=True,
+        )
+        if norm_out is None:
+            # Fusion declined; perform the all-reduce we skipped.
+            hidden_states = do_allreduce(hidden_states)
+            return hidden_states, None
+
+        norm_out._sglang_skip_input_layernorm = True
+        return norm_out, residual_out
+
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -2029,10 +2108,12 @@ class DeepseekV2Model(nn.Module):
         total_num_layers = self.end_layer - self.start_layer
         if self.pp_group.is_first_rank:
             if input_embeds is None:
-                hidden_states = self.embed_tokens(input_ids)
+                hidden_states, residual = self._embed_with_fused_input_layernorm(
+                    input_ids
+                )
             else:
                 hidden_states = input_embeds
-            residual = None
+                residual = None
         else:
             assert pp_proxy_tensors is not None
             hidden_states = pp_proxy_tensors["hidden_states"]

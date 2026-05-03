@@ -511,6 +511,12 @@ class LayerCommunicator:
             )
         if hidden_states.shape[0] == 0:
             residual = hidden_states
+        elif getattr(hidden_states, "_sglang_skip_input_layernorm", False):
+            # input_layernorm was already fused with the upstream all-reduce
+            # (e.g. trtllm fused AR+RMSNorm of the embedding). hidden_states is
+            # already the post-norm tensor and residual carries the post-AR
+            # value used for the skip connection.
+            pass
         else:
             if (
                 residual is not None

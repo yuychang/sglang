@@ -24,7 +24,14 @@ from torch import nn
 from transformers import PretrainedConfig
 
 from sglang.srt.configs.model_config import is_deepseek_nsa
-from sglang.srt.distributed import get_pp_group, get_tensor_model_parallel_world_size
+from sglang.srt.distributed import (
+    get_pp_group,
+    get_tensor_model_parallel_world_size,
+    tensor_model_parallel_all_reduce,
+)
+from sglang.srt.distributed.communication_op import (
+    attention_tensor_model_parallel_all_reduce,
+)
 from sglang.srt.environ import envs
 from sglang.srt.eplb.expert_distribution import get_global_expert_distribution_recorder
 from sglang.srt.layers.attention.nsa.utils import (
@@ -32,10 +39,19 @@ from sglang.srt.layers.attention.nsa.utils import (
     is_nsa_enable_prefill_cp,
     nsa_use_prefill_cp,
 )
+from sglang.srt.layers.communicator import (
+    FUSE_ALLREDUCE_MAX_BATCH_SIZE,
+    get_attn_tp_context,
+)
 from sglang.srt.layers.dp_attention import (
     get_attention_cp_rank,
     get_attention_cp_size,
+    get_attention_tp_size,
     is_dp_attention_enabled,
+)
+from sglang.srt.layers.flashinfer_comm_fusion import (
+    flashinfer_allreduce_residual_rmsnorm,
+    is_flashinfer_allreduce_unavailable,
 )
 from sglang.srt.layers.layernorm import RMSNorm
 from sglang.srt.layers.linear import ReplicatedLinear
@@ -154,6 +170,67 @@ class DeepseekModelNextN(nn.Module):
         else:
             self.cp_size = None
 
+    def _embed_and_enorm(
+        self, input_ids: torch.Tensor
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """Embed input_ids and try to fuse the TP all-reduce with enorm via
+        trtllm/flashinfer. Mirrors DeepseekV2Model._embed_with_fused_input_layernorm
+        so MTP draft and main-model verifier share the same numerical path.
+
+        Returns (post_AR_hidden_states, enorm_output):
+        - On fusion: enorm_output is the trtllm-fused post-norm tensor.
+        - Otherwise: enorm_output is None and the caller must run self.enorm.
+        """
+        try_fuse = (
+            _is_cuda
+            and not self.nsa_enable_prefill_cp
+            and not get_attn_tp_context().input_scattered
+            and get_global_server_args().enable_flashinfer_allreduce_fusion
+            and not is_flashinfer_allreduce_unavailable()
+            and 0 < input_ids.shape[0] <= FUSE_ALLREDUCE_MAX_BATCH_SIZE
+        )
+
+        use_attn_tp_group = is_dp_attention_enabled()
+        if use_attn_tp_group:
+            reduce_world_size = get_attention_tp_size()
+            do_allreduce = attention_tensor_model_parallel_all_reduce
+        else:
+            reduce_world_size = self.embed_tokens.tp_size
+            do_allreduce = tensor_model_parallel_all_reduce
+        try_fuse = try_fuse and reduce_world_size > 1
+
+        hidden_states = self.embed_tokens(input_ids, skip_tp_reduction=try_fuse)
+        if not try_fuse:
+            return hidden_states, None
+
+        cached = getattr(self, "_fused_ar_zero_residual", None)
+        needed = hidden_states.shape[0] * hidden_states.shape[-1]
+        if (
+            cached is None
+            or cached.dtype != hidden_states.dtype
+            or cached.device != hidden_states.device
+            or cached.numel() < needed
+        ):
+            cached = torch.zeros(
+                FUSE_ALLREDUCE_MAX_BATCH_SIZE * hidden_states.shape[-1],
+                dtype=hidden_states.dtype,
+                device=hidden_states.device,
+            )
+            self._fused_ar_zero_residual = cached
+        zero_residual = cached[:needed].view_as(hidden_states)
+        norm_out, residual_out = flashinfer_allreduce_residual_rmsnorm(
+            input_tensor=hidden_states,
+            residual=zero_residual,
+            weight=self.enorm.weight,
+            eps=self.enorm.variance_epsilon,
+            use_attn_tp_group=use_attn_tp_group,
+            fp32_acc=True,
+        )
+        if norm_out is None:
+            hidden_states = do_allreduce(hidden_states)
+            return hidden_states, None
+        return residual_out, norm_out
+
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -173,14 +250,16 @@ class DeepseekModelNextN(nn.Module):
         )
 
         if input_embeds is None:
-            hidden_states = self.embed_tokens(input_ids)
+            hidden_states, enorm_out = self._embed_and_enorm(input_ids)
         else:
-            hidden_states = input_embeds
+            hidden_states, enorm_out = input_embeds, None
 
         if hidden_states.shape[0] > 0:
+            if enorm_out is None:
+                enorm_out = self.enorm(hidden_states)
             eh_input = torch.cat(
                 (
-                    self.enorm(hidden_states),
+                    enorm_out,
                     self.hnorm(
                         forward_batch.spec_info.hidden_states
                         if self.rot_weight is None

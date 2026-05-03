@@ -284,6 +284,41 @@ def flashinfer_fused_allreduce_rmsnorm_fp4_quant(
     )
 
 
+def custom_ar_allreduce_rmsnorm(
+    input_tensor: torch.Tensor,
+    residual: Optional[torch.Tensor],
+    rms_gamma: torch.Tensor,
+    rms_eps: float,
+    norm_out: Optional[torch.Tensor] = None,
+):
+    """Explicit custom allreduce (cross_device_reduce_2stage) + rmsnorm."""
+    from sglang.srt.distributed import get_tp_group
+
+    ca_comm = get_tp_group().ca_comm
+    if ca_comm is None or ca_comm.disabled:
+        raise RuntimeError("Custom allreduce communicator not available")
+    allreduce_out = ca_comm.custom_all_reduce(input_tensor)
+    if allreduce_out is None:
+        raise RuntimeError(
+            "Custom allreduce not selected for this tensor "
+            "(not full NVLink or tensor too large)"
+        )
+    if residual is not None:
+        if SGL_FUSED_ADD_RMS_NORM is not None:
+            SGL_FUSED_ADD_RMS_NORM(allreduce_out, residual, rms_gamma, rms_eps)
+        else:
+            rms = RMSNorm(allreduce_out.shape[-1], eps=rms_eps)
+            rms.weight.data = rms_gamma
+            rms.forward_native(allreduce_out, residual)
+    else:
+        if SGL_RMS_NORM is not None:
+            _ = SGL_RMS_NORM(allreduce_out, rms_gamma, rms_eps)
+        else:
+            rms = RMSNorm(allreduce_out.shape[-1], eps=rms_eps)
+            rms.weight.data = rms_gamma
+            _ = rms.forward_native(allreduce_out)
+
+
 def standard_allreduce_rmsnorm(
     input_tensor: torch.Tensor,
     residual: Optional[torch.Tensor],
@@ -636,6 +671,21 @@ def run_benchmarks(
     rmsnorm_layer.weight.data = rms_gamma
 
     if quant_mode in ["all", "none"]:
+        # Custom AllReduce (cross_device_reduce_2stage) + RMSNorm
+        try:
+            time_ms = benchmark_operation(
+                custom_ar_allreduce_rmsnorm,
+                input_tensor,
+                norm_out=norm_out,
+                residual=residual,
+                rms_gamma=rms_gamma,
+                rms_eps=rms_eps,
+            )
+            results["custom_ar_allreduce_rmsnorm"] = time_ms
+        except Exception as e:
+            logger.error("Custom AR AllReduce+RMSNorm failed: %s", e)
+            results["custom_ar_allreduce_rmsnorm"] = float("inf")
+
         # Standard AllReduce + RMSNorm
         try:
             time_ms = benchmark_operation(
@@ -910,6 +960,7 @@ def prepare_results_with_speedups(results_dict):
             ]
         else:
             candidates = [
+                "custom_ar_allreduce_rmsnorm",
                 "standard_allreduce_rmsnorm",
                 "standard_allreduce_rmsnorm_native_compiled",
             ]
@@ -934,8 +985,11 @@ def prepare_results_with_speedups(results_dict):
     for op_name in results_dict:
         if (
             op_name.startswith("flashinfer_")
-            or op_name.startswith("standard_")
-            and not op_name.endswith("_native_compiled")
+            or op_name.startswith("custom_ar_")
+            or (
+                op_name.startswith("standard_")
+                and not op_name.endswith("_native_compiled")
+            )
         ):
             dynamic_baseline_mapping[op_name] = get_fastest_baseline(
                 op_name, results_dict
