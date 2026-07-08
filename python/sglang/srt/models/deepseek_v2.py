@@ -1118,7 +1118,7 @@ class DeepseekV2MoE(nn.Module):
         hidden_states: torch.Tensor,
         topk_output,
         shared_output: Optional[torch.Tensor],
-        main_stream: "torch.cuda.Stream",
+        main_stream: torch.cuda.Stream,
         state,
         is_capture: bool = False,
     ) -> torch.Tensor:
@@ -1127,7 +1127,6 @@ class DeepseekV2MoE(nn.Module):
             p1_self_check_matches,
             rocm_aiter_routed_no_combine,
             rocm_kimi_mxfp4_p1_enabled,
-            rocm_mxfp4_moe_add_shared,
             rocm_mxfp4_moe_finalize_fuse_shared,
         )
 
@@ -1142,9 +1141,9 @@ class DeepseekV2MoE(nn.Module):
             p1_state = "p0_this_call"
 
         # ---- P1: deferred routed finalize + fused shared combine ----
-        if (
-            rocm_kimi_mxfp4_p1_enabled()
-            and p1_state not in ("disabled", "p0_this_call")
+        if rocm_kimi_mxfp4_p1_enabled() and p1_state not in (
+            "disabled",
+            "p0_this_call",
         ):
             partial = None
             try:

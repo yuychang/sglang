@@ -127,9 +127,7 @@ class TestQuarkKimiMXFP4Config(CustomTestCase):
         self.assertTrue(scheme.is_checkpoint_mxfp4_serialized)
 
     def test_moe_scheme_is_mxfp4(self):
-        scheme = self.cfg.get_moe_scheme(
-            _FakeModule(), "model.layers.1.mlp.experts"
-        )
+        scheme = self.cfg.get_moe_scheme(_FakeModule(), "model.layers.1.mlp.experts")
         self.assertIsInstance(scheme, QuarkW4A4MXFp4MoE)
         self.assertTrue(scheme.is_checkpoint_mxfp4_serialized)
 

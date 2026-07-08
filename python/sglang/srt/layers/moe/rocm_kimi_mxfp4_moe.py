@@ -140,9 +140,7 @@ class RocmMoeStreamState:
         self.device = device
         # torch.cuda.Stream / Event work for ROCm/HIP builds of PyTorch.
         self.shared_stream = torch.cuda.Stream(device=device)
-        self.shared_done_event = torch.cuda.Event(
-            blocking=False, enable_timing=False
-        )
+        self.shared_done_event = torch.cuda.Event(blocking=False, enable_timing=False)
         # Optional reusable scratch keyed by (name, shape, dtype). Kept small:
         # the MXFP4 GEMM / activation-quant kernels allocate their own outputs
         # from the stream-aware caching allocator, so we only reuse the final
@@ -228,7 +226,7 @@ def _multistream_flag_enabled() -> bool:
     )
 
 
-def _experts_are_mxfp4(experts: "nn.Module") -> bool:
+def _experts_are_mxfp4(experts: nn.Module) -> bool:
     scheme = getattr(experts, "scheme", None)
     if scheme is None:
         return False
@@ -239,7 +237,7 @@ def _experts_are_mxfp4(experts: "nn.Module") -> bool:
     return isinstance(scheme, QuarkW4A4MXFp4MoE)
 
 
-def _shared_expert_is_mxfp4(shared_experts: "nn.Module") -> bool:
+def _shared_expert_is_mxfp4(shared_experts: nn.Module) -> bool:
     gate_up = getattr(shared_experts, "gate_up_proj", None)
     down = getattr(shared_experts, "down_proj", None)
     if gate_up is None or down is None:
@@ -253,7 +251,7 @@ def _shared_expert_is_mxfp4(shared_experts: "nn.Module") -> bool:
     )
 
 
-def rocm_kimi_mxfp4_multistream_enabled(moe_module: "nn.Module") -> bool:
+def rocm_kimi_mxfp4_multistream_enabled(moe_module: nn.Module) -> bool:
     """Return whether the ROCm MXFP4 multi-stream overlap should run for this
     MoE layer. The result is invariant after construction, so it is cached on
     the module as ``_rocm_kimi_mxfp4_ms``.
@@ -279,7 +277,7 @@ def rocm_kimi_mxfp4_multistream_enabled(moe_module: "nn.Module") -> bool:
     return enabled
 
 
-def _compute_gate(moe_module: "nn.Module") -> bool:
+def _compute_gate(moe_module: nn.Module) -> bool:
     if not (_is_hip and _use_aiter):
         return False
     if not _multistream_flag_enabled():
@@ -325,7 +323,7 @@ def _compute_gate(moe_module: "nn.Module") -> bool:
     return True
 
 
-def _log_feature_summary(moe_module: "nn.Module") -> None:
+def _log_feature_summary(moe_module: nn.Module) -> None:
     native = native_mxfp4_supported()
     p1 = (
         envs.SGLANG_ENABLE_MOE_DEFERRED_FINALIZE.get()
@@ -458,12 +456,16 @@ def rocm_mxfp4_moe_finalize_fuse_shared(
     out_dtype = (
         out.dtype
         if out is not None
-        else (shared_output.dtype if shared_output is not None else routed_partial.dtype)
+        else (
+            shared_output.dtype if shared_output is not None else routed_partial.dtype
+        )
     )
 
     if out is None and _has_hip_combine_ops() and routed_partial.is_cuda:
         try:
-            out = torch.empty((num_tokens, hidden), dtype=out_dtype, device=routed_partial.device)
+            out = torch.empty(
+                (num_tokens, hidden), dtype=out_dtype, device=routed_partial.device
+            )
             torch.ops.sgl_kernel.rocm_mxfp4_moe_finalize_fuse_shared(
                 routed_partial.contiguous(),
                 row_map.to(torch.int64).contiguous(),
@@ -522,7 +524,9 @@ def _finalize_fuse_shared_torch(
     out_dtype = (
         out.dtype
         if out is not None
-        else (shared_output.dtype if shared_output is not None else routed_partial.dtype)
+        else (
+            shared_output.dtype if shared_output is not None else routed_partial.dtype
+        )
     )
 
     flat_rows = row_map.reshape(-1).to(torch.long)
@@ -552,7 +556,6 @@ def _finalize_fuse_shared_triton(
 ) -> Optional[torch.Tensor]:
     try:
         import triton
-        import triton.language as tl
     except Exception:
         return None
 
@@ -561,7 +564,9 @@ def _finalize_fuse_shared_triton(
     out_dtype = (
         out.dtype
         if out is not None
-        else (shared_output.dtype if shared_output is not None else routed_partial.dtype)
+        else (
+            shared_output.dtype if shared_output is not None else routed_partial.dtype
+        )
     )
     if out is None:
         out = torch.empty(
@@ -649,9 +654,9 @@ def build_trivial_row_map(
 ) -> torch.Tensor:
     """Row map for AITER ``no_combine`` output of shape ``(num_tokens, top_k,
     hidden)`` flattened to ``(num_tokens * top_k, hidden)``: row(t, k) = t*top_k + k."""
-    return (
-        torch.arange(num_tokens * top_k, device=device, dtype=torch.int64)
-    ).reshape(num_tokens, top_k)
+    return (torch.arange(num_tokens * top_k, device=device, dtype=torch.int64)).reshape(
+        num_tokens, top_k
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -702,9 +707,7 @@ def rocm_kimi_mxfp4_p1_enabled() -> bool:
     )
 
 
-def p1_self_check_matches(
-    p1_routed: torch.Tensor, ref_routed: torch.Tensor
-) -> bool:
+def p1_self_check_matches(p1_routed: torch.Tensor, ref_routed: torch.Tensor) -> bool:
     """One-time correctness guard for P1: the deferred finalize of the AITER
     ``no_combine`` partials (with ``routed_scaling_factor`` folded into the
     top-k weights) must reproduce the standard combined routed output. If the

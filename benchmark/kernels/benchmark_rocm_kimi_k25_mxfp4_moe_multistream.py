@@ -76,7 +76,9 @@ def _bench(fn, warmup=20, iters=100):
 
 
 def bench_combine_kernels(device, dtype):
-    print("\n=== Fused combine kernels (Kimi hidden=%d, top_k=%d) ===" % (HIDDEN, TOP_K))
+    print(
+        "\n=== Fused combine kernels (Kimi hidden=%d, top_k=%d) ===" % (HIDDEN, TOP_K)
+    )
     print(f"{'tokens':>7} | {'P0 add-shared us':>18} | {'P1 finalize us':>16}")
     print("-" * 50)
     for T in TOKEN_COUNTS:
@@ -132,7 +134,9 @@ class _MoEProxy:
 
 def bench_schedule(device, dtype):
     print("\n=== MoE block schedule wall time (single-stream vs multi-stream) ===")
-    print(f"{'tokens':>7} | {'single us':>10} | {'multi us':>10} | {'speedup':>8} | {'max_err':>9}")
+    print(
+        f"{'tokens':>7} | {'single us':>10} | {'multi us':>10} | {'speedup':>8} | {'max_err':>9}"
+    )
     print("-" * 60)
     proxy = _MoEProxy(device, dtype)
     state = get_rocm_moe_stream_state(device) if torch.cuda.is_available() else None
@@ -167,8 +171,10 @@ def bench_schedule(device, dtype):
                 f"{multi_stats['avg']:>10.2f} | {speedup:>7.2f}x | {max_err:>9.4f}"
             )
         else:
-            print(f"{T:>7} | {single_stats['avg']:>10.2f} | {'n/a (cpu)':>10} | "
-                  f"{'n/a':>8} | {'n/a':>9}")
+            print(
+                f"{T:>7} | {single_stats['avg']:>10.2f} | {'n/a (cpu)':>10} | "
+                f"{'n/a':>8} | {'n/a':>9}"
+            )
 
 
 def main():

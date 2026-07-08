@@ -35,10 +35,7 @@ namespace {
 // out[i] = routed_final[i] + shared_output[i]  (element-wise, FP32 accumulate)
 template <typename T>
 __global__ void rocm_mxfp4_moe_add_shared_kernel(
-    T* __restrict__ out,
-    const T* __restrict__ routed_final,
-    const T* __restrict__ shared_output,
-    int64_t n) {
+    T* __restrict__ out, const T* __restrict__ routed_final, const T* __restrict__ shared_output, int64_t n) {
   int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
   int64_t stride = static_cast<int64_t>(gridDim.x) * blockDim.x;
   for (; idx < n; idx += stride) {
@@ -86,8 +83,7 @@ __global__ void rocm_mxfp4_moe_finalize_fuse_shared_kernel(
 
 }  // namespace
 
-void rocm_mxfp4_moe_add_shared(
-    const at::Tensor& routed_final, const at::Tensor& shared_output, at::Tensor& out) {
+void rocm_mxfp4_moe_add_shared(const at::Tensor& routed_final, const at::Tensor& shared_output, at::Tensor& out) {
   TORCH_CHECK(routed_final.is_cuda(), "routed_final must be a CUDA/HIP tensor");
   TORCH_CHECK(shared_output.is_cuda(), "shared_output must be a CUDA/HIP tensor");
   TORCH_CHECK(out.is_cuda(), "out must be a CUDA/HIP tensor");
@@ -98,8 +94,7 @@ void rocm_mxfp4_moe_add_shared(
       routed_final.sizes() == shared_output.sizes() && routed_final.sizes() == out.sizes(),
       "rocm_mxfp4_moe_add_shared: routed_final, shared_output and out must share the same shape");
   TORCH_CHECK(
-      routed_final.scalar_type() == shared_output.scalar_type() &&
-          routed_final.scalar_type() == out.scalar_type(),
+      routed_final.scalar_type() == shared_output.scalar_type() && routed_final.scalar_type() == out.scalar_type(),
       "rocm_mxfp4_moe_add_shared: dtype mismatch");
 
   const int64_t n = out.numel();
@@ -145,17 +140,14 @@ void rocm_mxfp4_moe_finalize_fuse_shared(
   TORCH_CHECK(row_map.scalar_type() == at::ScalarType::Long, "row_map must be int64");
   TORCH_CHECK(topk_weights.scalar_type() == at::ScalarType::Float, "topk_weights must be float32");
   // routed_partial must be contiguous in the hidden dimension for coalesced loads.
-  TORCH_CHECK(
-      routed_partial.stride(1) == 1,
-      "routed_partial must be contiguous along the hidden dimension");
+  TORCH_CHECK(routed_partial.stride(1) == 1, "routed_partial must be contiguous along the hidden dimension");
 
   const int64_t num_tokens = out.size(0);
   const int64_t hidden = out.size(1);
   TORCH_CHECK(routed_partial.size(1) == hidden, "routed_partial hidden dim must match out");
   TORCH_CHECK(row_map.size(0) == num_tokens && row_map.size(1) == top_k, "row_map must be (num_tokens, top_k)");
   TORCH_CHECK(
-      topk_weights.size(0) == num_tokens && topk_weights.size(1) == top_k,
-      "topk_weights must be (num_tokens, top_k)");
+      topk_weights.size(0) == num_tokens && topk_weights.size(1) == top_k, "topk_weights must be (num_tokens, top_k)");
 
   const bool has_shared = shared_output.has_value();
   if (has_shared) {
@@ -179,8 +171,7 @@ void rocm_mxfp4_moe_finalize_fuse_shared(
   const at::cuda::OptionalCUDAGuard device_guard(device_of(out));
 
   DISPATCH_PYTORCH_DTYPE_TO_CTYPE_FLOAT_FP16(out.scalar_type(), c_type, [&] {
-    const c_type* shared_ptr =
-        has_shared ? static_cast<const c_type*>(shared_output.value().data_ptr()) : nullptr;
+    const c_type* shared_ptr = has_shared ? static_cast<const c_type*>(shared_output.value().data_ptr()) : nullptr;
     if (has_shared) {
       rocm_mxfp4_moe_finalize_fuse_shared_kernel<c_type, true><<<blocks, threads, 0, stream>>>(
           static_cast<c_type*>(out.data_ptr()),
@@ -209,6 +200,5 @@ void rocm_mxfp4_moe_finalize_fuse_shared(
     return true;
   });
   cudaError_t status = cudaGetLastError();
-  TORCH_CHECK(
-      status == cudaSuccess, "rocm_mxfp4_moe_finalize_fuse_shared launch failed: ", cudaGetErrorString(status));
+  TORCH_CHECK(status == cudaSuccess, "rocm_mxfp4_moe_finalize_fuse_shared launch failed: ", cudaGetErrorString(status));
 }
