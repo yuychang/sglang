@@ -95,6 +95,8 @@ else:
         moe_sum,
         moe_sum_reduce,
         prepare_moe_input,
+        rocm_mxfp4_moe_add_shared,
+        rocm_mxfp4_moe_finalize_fuse_shared,
         topk_sigmoid,
         topk_softmax,
     )
@@ -194,6 +196,8 @@ else:
         "sgl_per_token_group_quant_fp8",
         "sgl_per_token_group_quant_int8",
         "sgl_per_token_quant_fp8",
+        "rocm_mxfp4_moe_add_shared",
+        "rocm_mxfp4_moe_finalize_fuse_shared",
         "shuffle_rows",
         "silu_and_mul",
         "top_k_renorm_prob",

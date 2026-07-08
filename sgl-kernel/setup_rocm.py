@@ -53,6 +53,7 @@ sources = [
     "csrc/moe/moe_align_kernel.cu",
     "csrc/moe/moe_topk_softmax_kernels.cu",
     "csrc/moe/moe_topk_sigmoid_kernels.cu",
+    "csrc/moe/rocm_mxfp4_moe_combine.cu",
     "csrc/speculative/eagle_utils.cu",
     "csrc/kvcacheio/transfer.cu",
     "csrc/memory/weak_ref_tensor.cpp",

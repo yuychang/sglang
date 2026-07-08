@@ -296,6 +296,20 @@ void moe_sum_reduce(at::Tensor& input, at::Tensor& output, double routed_scaling
 
 void moe_sum(torch::Tensor& input, torch::Tensor& output);
 
+// ROCm/HIP MXFP4 MoE multi-stream combine (Kimi-K2.5 / DeepSeek-style).
+// Registered only in the ROCm extension (common_extension_rocm.cc).
+void rocm_mxfp4_moe_add_shared(
+    const at::Tensor& routed_final, const at::Tensor& shared_output, at::Tensor& out);
+
+void rocm_mxfp4_moe_finalize_fuse_shared(
+    const at::Tensor& routed_partial,
+    const at::Tensor& row_map,
+    const at::Tensor& topk_weights,
+    const c10::optional<at::Tensor>& shared_output,
+    double routed_scaling_factor,
+    int64_t top_k,
+    at::Tensor& out);
+
 std::vector<at::Tensor> moe_fused_gate(
     at::Tensor& input,
     at::Tensor& bias,

@@ -544,6 +544,25 @@ class Envs:
     SGLANG_ROCM_USE_MULTI_STREAM = EnvBool(False)
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("tilelang")
 
+    # ---- ROCm Kimi-K2.5 / DeepSeek-style MXFP4 MoE multi-stream overlap ----
+    # Opt-in switch for the ROCm-native multi-stream MoE decode optimization that
+    # overlaps the MXFP4 shared expert (secondary HIP stream) with the MXFP4
+    # routed experts (main HIP stream) and fuses the shared-add / finalize.
+    # Defaults OFF; the feature also activates when the generic
+    # SGLANG_ROCM_USE_MULTI_STREAM=1 is set (see rocm_kimi_mxfp4_moe.py gating).
+    SGLANG_ROCM_KIMI_MXFP4_MOE_MULTI_STREAM = EnvBool(False)
+    # Insert a debug hipStreamSynchronize after the shared-expert stream and log
+    # extra diagnostics. For tests / profiling ONLY -- must stay 0 in the decode
+    # hot path (it introduces a host sync).
+    SGLANG_ROCM_KIMI_MXFP4_MOE_DEBUG_SYNC = EnvBool(False)
+    # Allow a slow dequant-to-BF16 simulation fallback on hardware that lacks
+    # native MXFP4 support (non-CDNA4). OFF -> fail with a clear error instead of
+    # silently dequantizing the whole checkpoint.
+    SGLANG_ROCM_KIMI_MXFP4_ALLOW_SIMULATION_FALLBACK = EnvBool(False)
+    # Compare the multi-stream MXFP4 output against a dequantized single-stream
+    # reference and log the max error (debug / accuracy validation only).
+    SGLANG_ROCM_KIMI_MXFP4_COMPARE_DEQUANT_REF = EnvBool(False)
+
     # MPS (Apple Silicon)
     SGLANG_USE_MLX = EnvBool(False)
     SGLANG_MLX_USE_CUSTOM_ROPE = EnvBool(False)

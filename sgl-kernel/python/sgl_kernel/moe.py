@@ -287,3 +287,42 @@ def fused_qk_norm_rope(
         attention_factor,
         rotary_dim if rotary_dim is not None else head_dim,
     )
+
+
+def rocm_mxfp4_moe_add_shared(
+    routed_final: torch.Tensor,
+    shared_output: torch.Tensor,
+    out: torch.Tensor,
+) -> None:
+    """ROCm-only P0 combine: ``out = routed_final + shared_output`` (FP32 accum).
+
+    Available only in ROCm/HIP builds of ``sgl_kernel``.
+    """
+    torch.ops.sgl_kernel.rocm_mxfp4_moe_add_shared(routed_final, shared_output, out)
+
+
+def rocm_mxfp4_moe_finalize_fuse_shared(
+    routed_partial: torch.Tensor,
+    row_map: torch.Tensor,
+    topk_weights: torch.Tensor,
+    shared_output: Optional[torch.Tensor],
+    routed_scaling_factor: float,
+    top_k: int,
+    out: torch.Tensor,
+) -> None:
+    """ROCm-only P1 combine (deferred routed finalize + shared add).
+
+    ``out[t, h] = shared_output[t, h] + routed_scaling_factor
+      * sum_k topk_weights[t, k] * routed_partial[row_map[t, k], h]``.
+
+    Available only in ROCm/HIP builds of ``sgl_kernel``.
+    """
+    torch.ops.sgl_kernel.rocm_mxfp4_moe_finalize_fuse_shared(
+        routed_partial,
+        row_map,
+        topk_weights,
+        shared_output,
+        routed_scaling_factor,
+        top_k,
+        out,
+    )

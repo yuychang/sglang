@@ -148,6 +148,15 @@ TORCH_LIBRARY_EXPAND(sgl_kernel, m) {
       "correction_bias) -> ()");
   m.impl("topk_sigmoid", torch::kCUDA, &topk_sigmoid);
 
+  // ROCm MXFP4 MoE multi-stream fused combine (Kimi-K2.5 / DeepSeek-style).
+  m.def("rocm_mxfp4_moe_add_shared(Tensor routed_final, Tensor shared_output, Tensor! out) -> ()");
+  m.impl("rocm_mxfp4_moe_add_shared", torch::kCUDA, &rocm_mxfp4_moe_add_shared);
+
+  m.def(
+      "rocm_mxfp4_moe_finalize_fuse_shared(Tensor routed_partial, Tensor row_map, Tensor topk_weights, "
+      "Tensor? shared_output, float routed_scaling_factor, int top_k, Tensor! out) -> ()");
+  m.impl("rocm_mxfp4_moe_finalize_fuse_shared", torch::kCUDA, &rocm_mxfp4_moe_finalize_fuse_shared);
+
   /*
    * From csrc/speculative
    */
