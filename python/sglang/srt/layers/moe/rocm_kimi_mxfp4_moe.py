@@ -164,6 +164,15 @@ class RocmMoeStreamState:
 _stream_states: Dict[int, RocmMoeStreamState] = {}
 
 
+def _resolve_device_index(device) -> int:
+    if isinstance(device, int):
+        return device
+    idx = getattr(device, "index", None)
+    if idx is not None:
+        return idx
+    return torch.cuda.current_device()
+
+
 def get_rocm_moe_stream_state(device: torch.device) -> RocmMoeStreamState:
     """Return the (lazily-created) :class:`RocmMoeStreamState` for ``device``.
 
@@ -172,9 +181,7 @@ def get_rocm_moe_stream_state(device: torch.device) -> RocmMoeStreamState:
     illegal there). Callers gate this via ``get_is_capture_mode()`` +
     warmup-time initialization.
     """
-    if isinstance(device, int):
-        device = torch.device(f"cuda:{device}")
-    idx = device.index if device.index is not None else torch.cuda.current_device()
+    idx = _resolve_device_index(device)
     state = _stream_states.get(idx)
     if state is None:
         state = RocmMoeStreamState(torch.device(f"cuda:{idx}"))
@@ -198,6 +205,15 @@ def maybe_init_rocm_moe_stream_state(device: torch.device) -> None:
         logger.warning(
             "[ROCm Kimi MXFP4 MoE] failed to pre-initialize stream state: %s", e
         )
+
+
+def rocm_moe_stream_state_exists(device: torch.device) -> bool:
+    """Whether the per-device stream state is already initialized. Used to keep
+    stream/event creation out of the CUDA/HIP graph capture region."""
+    try:
+        return _resolve_device_index(device) in _stream_states
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +297,10 @@ def _compute_gate(moe_module: "nn.Module") -> bool:
         return False
     # Not SBO shared-expert fusion.
     if getattr(moe_module, "_fuse_shared_experts_inside_sbo", False):
+        return False
+    # TP1-replicated shared experts are added after all-reduce; keep the
+    # existing path so we don't sum the shared output once per rank.
+    if getattr(moe_module, "_shared_expert_tp1", False):
         return False
     # Not hash routing.
     if getattr(moe_module, "is_hash", False):
@@ -632,3 +652,80 @@ def build_trivial_row_map(
     return (
         torch.arange(num_tokens * top_k, device=device, dtype=torch.int64)
     ).reshape(num_tokens, top_k)
+
+
+# ---------------------------------------------------------------------------
+# P1: expose pre-finalize routed partials from the AITER MoE (no_combine)
+# ---------------------------------------------------------------------------
+
+
+def rocm_aiter_routed_no_combine(experts, hidden_states, topk_output):
+    """Run the routed AITER MXFP4 MoE with ``no_combine=True`` and return the
+    per-(token, expert) partials of shape ``(num_tokens, top_k, hidden)``.
+
+    The partials are the raw per-expert down-projection outputs *before* the
+    top-k weighted reduction (finalize). The reduction is deferred to the fused
+    :func:`rocm_mxfp4_moe_finalize_fuse_shared` kernel.
+
+    Returns ``None`` if the installed AITER build cannot produce no-combine
+    output (caller falls back to P0).
+    """
+    scheme = getattr(experts, "scheme", None)
+    runner = getattr(scheme, "runner", None) if scheme is not None else None
+    if runner is None or not aiter_moe_supports_no_combine():
+        return None
+
+    cfg = runner.config
+    orig_no_combine = cfg.no_combine
+    cfg.no_combine = True
+    try:
+        dispatch_output = experts.dispatcher.dispatch(
+            hidden_states=hidden_states, topk_output=topk_output
+        )
+        combine_input = scheme.apply_weights(experts, dispatch_output)
+    finally:
+        cfg.no_combine = orig_no_combine
+
+    partial = combine_input.hidden_states
+    if partial.dim() != 3:
+        return None
+    return partial
+
+
+def rocm_kimi_mxfp4_p1_enabled() -> bool:
+    """Whether the deferred-finalize (P1) phase may be attempted. The final
+    decision is made per-layer via a one-time self-check against the P0 combine
+    (see the model integration), so this only reflects the opt-in flags."""
+    return (
+        envs.SGLANG_ENABLE_MOE_DEFERRED_FINALIZE.get()
+        and aiter_moe_supports_no_combine()
+    )
+
+
+def p1_self_check_matches(
+    p1_routed: torch.Tensor, ref_routed: torch.Tensor
+) -> bool:
+    """One-time correctness guard for P1: the deferred finalize of the AITER
+    ``no_combine`` partials (with ``routed_scaling_factor`` folded into the
+    top-k weights) must reproduce the standard combined routed output. If the
+    installed AITER build already applies the top-k weight inside ``no_combine``
+    (which would double-apply here), this returns False and the caller disables
+    P1 and uses the always-correct P0 path.
+    """
+    if p1_routed.shape != ref_routed.shape:
+        return False
+    a = p1_routed.to(torch.float32)
+    b = ref_routed.to(torch.float32)
+    denom = b.abs().max().clamp_min(1e-3)
+    max_abs = (a - b).abs().max()
+    ok = bool((max_abs / denom).item() < 2e-2)
+    if not ok:
+        _log_once(
+            "p1_self_check_fail",
+            "[ROCm Kimi MXFP4 MoE] P1 deferred-finalize self-check failed "
+            f"(max_abs_err={max_abs.item():.4f}, ref_scale={denom.item():.4f}); "
+            "the AITER no_combine partials do not match the P0 combine. "
+            "Disabling P1 and using the P0 add-shared path.",
+            level=logging.WARNING,
+        )
+    return ok

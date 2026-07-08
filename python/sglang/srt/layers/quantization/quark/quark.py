@@ -514,6 +514,13 @@ class QuarkConfig(QuantizationConfig):
         input_config = layer_quant_config.get("input_tensors")
 
         if self._is_mx_fp4(weight_config, input_config):
+            if self.is_prequantized:
+                logger.info_once(
+                    "Detected offline Quark/OCP MXFP4 checkpoint: loading packed "
+                    "FP4 MoE weights + E8M0 block scales (group_size=32) for "
+                    "routed and shared experts without re-quantizing. Do not pass "
+                    "--quantization quark_mxfp4 for such checkpoints."
+                )
             return QuarkW4A4MXFp4MoE(
                 weight_config,
                 input_config,

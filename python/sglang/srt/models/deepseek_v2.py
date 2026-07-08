@@ -873,6 +873,31 @@ class DeepseekV2MoE(nn.Module):
 
         if not self._enable_a2a_moe:
             server_args = get_global_server_args()
+            from sglang.srt.layers.moe.rocm_kimi_mxfp4_moe import (
+                rocm_kimi_mxfp4_multistream_enabled,
+                rocm_moe_stream_state_exists,
+            )
+
+            if (
+                hidden_states.shape[0] > 0
+                and not skip_shared_experts
+                and rocm_kimi_mxfp4_multistream_enabled(self)
+                # Keep stream/event creation out of graph capture: only take the
+                # multi-stream path in capture mode if the per-device state was
+                # already created during eager warmup.
+                and (
+                    not get_is_capture_mode()
+                    or rocm_moe_stream_state_exists(hidden_states.device)
+                )
+            ):
+                return self.forward_rocm_kimi_mxfp4_multistream(
+                    hidden_states,
+                    should_allreduce_fusion,
+                    use_reduce_scatter,
+                    gemm_output_zero_allocator,
+                    input_ids,
+                    input_ids_global=input_ids_global,
+                )
             if self._can_dual_stream_graph(hidden_states, server_args):
                 return dsv2_flashinfer_moe_dual_stream_graph(
                     hidden_states,
@@ -1015,6 +1040,172 @@ class DeepseekV2MoE(nn.Module):
         if self._shared_expert_tp1:
             final_hidden_states += shared_output
         return final_hidden_states
+
+    def forward_rocm_kimi_mxfp4_multistream(
+        self,
+        hidden_states: torch.Tensor,
+        should_allreduce_fusion: bool = False,
+        use_reduce_scatter: bool = False,
+        gemm_output_zero_allocator: BumpAllocator = None,
+        input_ids: Optional[torch.Tensor] = None,
+        input_ids_global: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """ROCm-native multi-stream MXFP4 MoE overlap (Kimi-K2.5 / DeepSeek).
+
+        The MXFP4 shared expert runs on a secondary HIP stream while the MXFP4
+        routed experts run on the main stream; the two are combined with a fused
+        add-shared (P0) or deferred-finalize (P1) kernel. Gated by
+        ``rocm_kimi_mxfp4_multistream_enabled``. See
+        ``sglang.srt.layers.moe.rocm_kimi_mxfp4_moe``.
+
+        Note: on the AITER path ``routed_scaling_factor`` is folded into the
+        top-k weights and the post-MoE multiply is skipped, so the combine adds
+        the (already-scaled) routed output and the shared output exactly once.
+        """
+        from sglang.srt.layers.moe.rocm_kimi_mxfp4_moe import (
+            get_rocm_moe_stream_state,
+        )
+
+        state = get_rocm_moe_stream_state(hidden_states.device)
+        main_stream = torch.cuda.current_stream()
+        # record_stream is a no-op / unsupported under graph capture; the graph
+        # captures cross-stream lifetime via wait_stream/wait_event instead.
+        is_capture = get_is_capture_mode()
+
+        # --- secondary HIP stream: MXFP4 shared expert MLP ---
+        state.shared_stream.wait_stream(main_stream)
+        if not is_capture:
+            hidden_states.record_stream(state.shared_stream)
+        with torch.cuda.stream(state.shared_stream):
+            shared_output = self._forward_shared_experts(
+                hidden_states, gemm_output_zero_allocator
+            )
+            if shared_output is not None and not is_capture:
+                shared_output.record_stream(state.shared_stream)
+            state.shared_done_event.record(state.shared_stream)
+
+        # --- main HIP stream: route + MXFP4 routed experts + fused combine ---
+        dispatch_info = (
+            ExpertLocationDispatchInfo.init_new(layer_id=self.layer_id)
+            if get_global_server_args().enable_eplb
+            else None
+        )
+        router_logits = self.gate(hidden_states, gemm_output_zero_allocator)
+        topk_output = self.topk(
+            hidden_states,
+            router_logits,
+            expert_location_dispatch_info=dispatch_info,
+        )
+
+        final_hidden_states = self._rocm_kimi_mxfp4_routed_and_combine(
+            hidden_states, topk_output, shared_output, main_stream, state, is_capture
+        )
+
+        # Keep the shared output alive on the main stream until combine is done.
+        if shared_output is not None and not is_capture:
+            shared_output.record_stream(main_stream)
+
+        if self.tp_size > 1 and not should_skip_post_experts_all_reduce(
+            is_tp_path=True,
+            use_reduce_scatter=use_reduce_scatter,
+            should_allreduce_fusion=should_allreduce_fusion,
+        ):
+            final_hidden_states = tensor_model_parallel_all_reduce(final_hidden_states)
+        return final_hidden_states
+
+    def _rocm_kimi_mxfp4_routed_and_combine(
+        self,
+        hidden_states: torch.Tensor,
+        topk_output,
+        shared_output: Optional[torch.Tensor],
+        main_stream: "torch.cuda.Stream",
+        state,
+        is_capture: bool = False,
+    ) -> torch.Tensor:
+        from sglang.srt.layers.moe.rocm_kimi_mxfp4_moe import (
+            build_trivial_row_map,
+            p1_self_check_matches,
+            rocm_aiter_routed_no_combine,
+            rocm_kimi_mxfp4_p1_enabled,
+            rocm_mxfp4_moe_add_shared,
+            rocm_mxfp4_moe_finalize_fuse_shared,
+        )
+
+        debug_sync = envs.SGLANG_ROCM_KIMI_MXFP4_MOE_DEBUG_SYNC.get()
+        top_k = topk_output.topk_ids.shape[-1]
+        p1_state = getattr(self, "_rocm_kimi_mxfp4_p1_state", "unknown")
+
+        # The one-time P1 self-check runs the routed experts twice; never do that
+        # inside graph capture. If the state is still unknown at capture time,
+        # use P0 for this call (warmup resolves the state in eager mode first).
+        if p1_state == "unknown" and is_capture:
+            p1_state = "p0_this_call"
+
+        # ---- P1: deferred routed finalize + fused shared combine ----
+        if (
+            rocm_kimi_mxfp4_p1_enabled()
+            and p1_state not in ("disabled", "p0_this_call")
+        ):
+            partial = None
+            try:
+                partial = rocm_aiter_routed_no_combine(
+                    self.experts, hidden_states, topk_output
+                )
+            except Exception as e:  # pragma: no cover - defensive
+                self._rocm_kimi_mxfp4_p1_state = "disabled"
+                logger.warning(
+                    "[ROCm Kimi MXFP4 MoE] P1 no_combine failed (%s); using P0.",
+                    e,
+                )
+            if partial is not None:
+                num_tokens = partial.shape[0]
+                partial_2d = partial.reshape(num_tokens * top_k, partial.shape[-1])
+                row_map = build_trivial_row_map(num_tokens, top_k, partial.device)
+                topk_weights = topk_output.topk_weights
+                if p1_state == "unknown":
+                    # One-time self-check vs the P0 combine (see helper docstring).
+                    routed_ref = self.experts(hidden_states, topk_output)
+                    p1_routed = rocm_mxfp4_moe_finalize_fuse_shared(
+                        partial_2d, row_map, topk_weights, None, 1.0, top_k
+                    )
+                    if p1_self_check_matches(p1_routed, routed_ref):
+                        self._rocm_kimi_mxfp4_p1_state = "enabled"
+                    else:
+                        self._rocm_kimi_mxfp4_p1_state = "disabled"
+                        main_stream.wait_event(state.shared_done_event)
+                        if debug_sync:
+                            torch.cuda.synchronize()
+                        return self._rocm_kimi_mxfp4_add_shared(
+                            routed_ref, shared_output
+                        )
+                # P1 enabled: fused deferred finalize + shared add.
+                main_stream.wait_event(state.shared_done_event)
+                if debug_sync:
+                    torch.cuda.synchronize()
+                return rocm_mxfp4_moe_finalize_fuse_shared(
+                    partial_2d,
+                    row_map,
+                    topk_weights,
+                    shared_output,
+                    1.0,  # rsf already folded into topk_weights on the AITER path
+                    top_k,
+                )
+
+        # ---- P0: routed combined output + fused add-shared ----
+        routed_final = self.experts(hidden_states, topk_output)
+        main_stream.wait_event(state.shared_done_event)
+        if debug_sync:
+            torch.cuda.synchronize()
+        return self._rocm_kimi_mxfp4_add_shared(routed_final, shared_output)
+
+    def _rocm_kimi_mxfp4_add_shared(
+        self, routed_final: torch.Tensor, shared_output: Optional[torch.Tensor]
+    ) -> torch.Tensor:
+        from sglang.srt.layers.moe.rocm_kimi_mxfp4_moe import rocm_mxfp4_moe_add_shared
+
+        if shared_output is None:
+            return routed_final
+        return rocm_mxfp4_moe_add_shared(routed_final, shared_output)
 
     def forward_normal(
         self,
