@@ -643,7 +643,11 @@ def _get_finalize_triton_kernel():
                 tl.float32
             )
             acc += s
-        tl.store(out_ptr + token * hidden + cols, acc, mask=mask)
+        tl.store(
+            out_ptr + token * hidden + cols,
+            acc.to(out_ptr.dtype.element_ty),
+            mask=mask,
+        )
 
     _finalize_triton_kernel = _finalize_kernel
     return _finalize_triton_kernel
