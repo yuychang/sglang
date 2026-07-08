@@ -889,6 +889,92 @@ sglang serve --model-path Qwen/Qwen3-30B-A3B \
     --quantization quark_mxfp4
 ```
 
+### Offline Quark/OCP MXFP4 checkpoints (`amd/Kimi-K2.5-MXFP4`)
+
+Checkpoints already quantized offline with AMD Quark to the OCP MXFP4 format
+(FP4-packed weights + E8M0 block scales, `group_size=32`, dynamic MXFP4
+activations) are loaded directly. SGLang auto-detects the Hugging Face
+`quantization_config`, recognizes the Quark/OCP MXFP4 scheme, and loads the
+packed weights and scales without re-quantizing.
+
+Do not pass `--quantization quark_mxfp4` for these checkpoints — that flag is
+only for load-time quantization of a BF16 checkpoint. Use it only to A/B against
+the unquantized model, for example `--model-path moonshotai/Kimi-K2.5
+--quantization quark_mxfp4`.
+
+For `amd/Kimi-K2.5-MXFP4` (DeepSeekV3-style text config), the routed experts,
+the shared expert, and the first dense MLP (`layers.0.mlp`) run through the
+MXFP4 path; the MoE router (`mlp.gate`), attention projections, `lm_head`, and
+vision/multimodal modules stay in the checkpoint's BF16 precision.
+
+Required hardware: AMD Instinct with FP4 support (CDNA4, e.g. MI350/MI355) for
+native MXFP4. On CDNA3 (MI300/MI325) the AITER Triton MXFP4 path runs instead.
+
+```bash
+export SGLANG_USE_AITER=1
+python -m sglang.launch_server \
+    --model-path amd/Kimi-K2.5-MXFP4 \
+    --tp 4 \
+    --attention-backend aiter \
+    --trust-remote-code
+```
+
+#### ROCm multi-stream MXFP4 MoE overlap
+
+On the AITER MXFP4 path, SGLang can overlap the MXFP4 shared expert (on a
+secondary HIP stream) with the MXFP4 routed experts (on the main stream) during
+decode and fuse the shared-add / routed finalize. It is opt-in and defaults off.
+
+Enable it with the existing ROCm multi-stream flag. Set `GPU_MAX_HW_QUEUES=5` so
+HIP does not serialize the two streams onto a single hardware queue:
+
+```bash
+export SGLANG_USE_AITER=1
+export SGLANG_ROCM_USE_MULTI_STREAM=1
+export SGLANG_ENABLE_MOE_DEFERRED_FINALIZE=1   # enables the P1 deferred finalize
+export GPU_MAX_HW_QUEUES=5
+python -m sglang.launch_server \
+    --model-path amd/Kimi-K2.5-MXFP4 \
+    --tp 4 \
+    --attention-backend aiter \
+    --trust-remote-code
+```
+
+Two phases are available:
+
+- **P0** overlaps the shared and routed experts and combines them with a fused
+  `output = routed + shared` kernel. `routed_scaling_factor` is folded into the
+  top-k weights on the AITER path, so it is applied exactly once (no double
+  scaling).
+- **P1** (requires `SGLANG_ENABLE_MOE_DEFERRED_FINALIZE=1`) additionally defers
+  the routed top-k reduction into a fused finalize + shared-add kernel using the
+  AITER `no_combine` partials. It runs a one-time self-check against P0 and
+  falls back to P0 automatically if the installed AITER build's `no_combine`
+  semantics differ.
+
+Feature flags:
+
+| Env var | Default | Purpose |
+|---------|---------|---------|
+| `SGLANG_ROCM_USE_MULTI_STREAM` | `0` | Enable the dual-stream MoE overlap (shared by other ROCm models). |
+| `SGLANG_ROCM_KIMI_MXFP4_MOE_MULTI_STREAM` | `0` | Dedicated opt-in for the Kimi/DeepSeek MXFP4 overlap (alternative to the flag above). |
+| `SGLANG_ENABLE_MOE_DEFERRED_FINALIZE` | `0` | Enable the P1 deferred routed finalize. |
+| `SGLANG_ROCM_KIMI_MXFP4_MOE_DEBUG_SYNC` | `0` | Insert a debug `hipStreamSynchronize` after the shared stream (tests/profiling only; adds a host sync). |
+| `SGLANG_ROCM_KIMI_MXFP4_ALLOW_SIMULATION_FALLBACK` | `0` | Allow a slow dequant simulation on hardware without native MXFP4 instead of erroring. |
+| `SGLANG_ROCM_KIMI_MXFP4_COMPARE_DEQUANT_REF` | `0` | Log the max error against a dequantized reference (accuracy debugging). |
+
+Fallback behavior: if multi-stream is unsupported, the model runs the
+single-stream MXFP4 baseline; if P1 is unsupported, it falls back to P0; if the
+MXFP4 checkpoint cannot be loaded, loading fails with a clear error rather than
+silently dequantizing to BF16.
+
+Profiling: confirm the overlap with `rocprof --hip-trace`. The shared-expert
+MXFP4 kernels should appear on the secondary stream, overlapping the routed
+MXFP4 kernels on the main stream, with the fused finalize/add-shared launching
+only after both complete. If you see no overlap, check `GPU_MAX_HW_QUEUES`, CU
+occupancy, and that the debug sync flag is off. A microbenchmark is available at
+`benchmark/kernels/benchmark_rocm_kimi_k25_mxfp4_moe_multistream.py`.
+
 ### Intel® Neural Compressor online quantization method
 
 SGLang supports quantization methods based on the advanced algorithm [auto-round](https://github.com/intel/auto-round) in [Intel® Neural Compressor](https://github.com/intel/neural-compressor). You can simply specify `--quantization auto-round-int8` to use this feature. It will quantize the model on the fly to target format. More online quantization methods are on the way.
