@@ -117,11 +117,7 @@ SGLang supports various environment variables that can be used to configure its 
 | Environment Variable | Description | Default Value |
 | --- | --- | --- |
 | `SGLANG_USE_AITER` | Use AITER optimize implementation | `false` |
-| `SGLANG_ROCM_USE_MULTI_STREAM` | Allocate alt CUDA/HIP stream on ROCm/AITER to overlap shared and routed experts in DeepseekV2 MoE. Requires the HIP env `GPU_MAX_HW_QUEUES>=5` (default `4`, the cap on HSA/ROCr HW queues HIP creates) so the alt stream gets its own queue instead of serializing with the main stream. Best paired with `--deepep-mode low_latency` so Mori's AsyncLL kernel offloads dispatch/combine to copy engines and frees CUs. Also enables the offline Quark/OCP MXFP4 shared/routed multi-stream overlap for Kimi-K2.5 (`amd/Kimi-K2.5-MXFP4`). | `false` |
-| `SGLANG_ROCM_KIMI_MXFP4_MOE_MULTI_STREAM` | Dedicated opt-in for the ROCm-native MXFP4 shared/routed MoE multi-stream overlap on Kimi-K2.5 / DeepSeek-style checkpoints (alternative to `SGLANG_ROCM_USE_MULTI_STREAM`). Runs the MXFP4 shared expert on a secondary HIP stream and fuses the add-shared (P0) / deferred-finalize (P1) combine. | `false` |
-| `SGLANG_ROCM_KIMI_MXFP4_MOE_DEBUG_SYNC` | Insert a debug `hipStreamSynchronize` after the shared-expert stream and log diagnostics. Tests/profiling only — adds a host sync. | `false` |
-| `SGLANG_ROCM_KIMI_MXFP4_ALLOW_SIMULATION_FALLBACK` | Allow a slow dequant-to-BF16 simulation on hardware without native MXFP4 instead of failing with a clear unsupported-hardware error. | `false` |
-| `SGLANG_ROCM_KIMI_MXFP4_COMPARE_DEQUANT_REF` | Compare the multi-stream MXFP4 output against a dequantized single-stream reference and log the max error (accuracy debugging only). | `false` |
+| `SGLANG_ROCM_USE_MULTI_STREAM` | Allocate alt CUDA/HIP stream on ROCm/AITER to overlap shared and routed experts in DeepseekV2 MoE. Requires the HIP env `GPU_MAX_HW_QUEUES>=5` (default `4`, the cap on HSA/ROCr HW queues HIP creates) so the alt stream gets its own queue instead of serializing with the main stream. Best paired with `--deepep-mode low_latency` so Mori's AsyncLL kernel offloads dispatch/combine to copy engines and frees CUs. | `false` |
 | `SGLANG_MOE_PADDING` | Enable MoE padding (sets padding size to 128 if value is `1`, often set to `1` in Docker builds) | `false` |
 | `SGLANG_CUTLASS_MOE` (deprecated) | Use Cutlass FP8 MoE kernel on Blackwell GPUs (deprecated, use --moe-runner-backend=cutlass) | `false` |
 
