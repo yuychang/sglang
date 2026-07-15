@@ -102,6 +102,24 @@ def moe_sum(
     )
 
 
+def rocm_mxfp4_moe_add_shared(
+    routed_final: torch.Tensor,
+    shared_output: torch.Tensor,
+    output: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    if output is None:
+        output = torch.empty_like(routed_final)
+    try:
+        torch.ops.sgl_kernel.rocm_mxfp4_moe_add_shared.default(
+            output,
+            routed_final,
+            shared_output,
+        )
+    except AttributeError:
+        torch.add(routed_final, shared_output, out=output)
+    return output
+
+
 # moe_fused_gate / kimi_k2_moe_fused_gate (AOT gate kernels) retired — the gate/topk
 # path is consolidated onto the unified Triton router in
 # python/sglang/jit_kernel/moe_fused_gate.py (sglang issue #26771).

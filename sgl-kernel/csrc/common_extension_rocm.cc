@@ -148,6 +148,9 @@ TORCH_LIBRARY_EXPAND(sgl_kernel, m) {
       "correction_bias) -> ()");
   m.impl("topk_sigmoid", torch::kCUDA, &topk_sigmoid);
 
+  m.def("rocm_mxfp4_moe_add_shared(Tensor! output, Tensor routed_final, Tensor shared_output) -> ()");
+  m.impl("rocm_mxfp4_moe_add_shared", torch::kCUDA, &rocm_mxfp4_moe_add_shared);
+
   /*
    * From csrc/speculative
    */

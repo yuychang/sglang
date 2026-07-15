@@ -540,6 +540,10 @@ class Envs:
     # Enable dual-stream MoE (shared experts vs routed experts) on the
     # ROCm/AITER path. Requires GPU_MAX_HW_QUEUES>=5 to avoid HW-queue serialization.
     SGLANG_ROCM_USE_MULTI_STREAM = EnvBool(False)
+    # During Kimi-K2.5 MXFP4 HIP-graph decode, keep routed/shared TP-local
+    # outputs separate and consume both in AITER fused AR+residual+RMSNorm.
+    # Unsupported shapes/configurations retain the existing local add path.
+    SGLANG_ROCM_FUSE_SHARED_PARTIAL_AR_RMSNORM = EnvBool(True)
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("tilelang")
 
     # MPS (Apple Silicon)

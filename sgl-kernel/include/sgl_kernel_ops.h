@@ -311,6 +311,11 @@ void topk_sigmoid(
     bool renormalize,
     const c10::optional<torch::Tensor>& correction_bias);
 
+void rocm_mxfp4_moe_add_shared(
+    torch::Tensor& output,
+    const torch::Tensor& routed_final,
+    const torch::Tensor& shared_output);
+
 void moe_sum_reduce(at::Tensor& input, at::Tensor& output, double routed_scaling_factor);
 
 void moe_sum(torch::Tensor& input, torch::Tensor& output);
