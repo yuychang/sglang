@@ -766,6 +766,52 @@ class GroupCoordinator:
         )
         return fused_outputs
 
+    def fused_allreduce_rmsnorm_two_input(
+        self,
+        routed_input_: torch.Tensor,
+        shared_input_: torch.Tensor,
+        residual_inp_: torch.Tensor,
+        weight_: torch.Tensor,
+        eps: float,
+    ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
+        """Attempt the Kimi MXFP4 graph-only two-input AITER fusion."""
+        supported = (
+            self.world_size == 4
+            and routed_input_.dtype == torch.bfloat16
+            and shared_input_.dtype == torch.bfloat16
+            and residual_inp_.dtype == torch.bfloat16
+            and weight_.dtype == torch.bfloat16
+            and routed_input_.dim() == 2
+            and routed_input_.shape == shared_input_.shape == residual_inp_.shape
+            and routed_input_.shape[0] in (1, 2, 4, 8, 16, 32)
+            and routed_input_.shape[1] == weight_.numel() == 7168
+            and routed_input_.is_contiguous()
+            and shared_input_.is_contiguous()
+            and residual_inp_.is_contiguous()
+        )
+        if not supported:
+            return None
+
+        ca_comm = self.ca_comm
+        if (
+            ca_comm is None
+            or getattr(ca_comm, "disabled", True)
+            or not hasattr(ca_comm, "custom_fused_ar_rms_two_input")
+        ):
+            return None
+
+        # The two-input one-stage kernel wins through M=8. M=16/32 use the
+        # partitioned two-stage path to avoid replicated routed+shared reads.
+        use_1stage_ar = routed_input_.shape[0] <= 8
+        return ca_comm.custom_fused_ar_rms_two_input(
+            routed_input_,
+            shared_input_,
+            residual_inp_,
+            weight_,
+            eps,
+            use_1stage_ar,
+        )
+
     def _all_reduce_out_place(
         self, input_: torch.Tensor, outplace_all_reduce_method: str
     ) -> torch.Tensor:
