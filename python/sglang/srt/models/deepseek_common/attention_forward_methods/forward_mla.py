@@ -86,6 +86,16 @@ class MlaBmmFusionPlan:
     attn_output_buf: torch.Tensor
 
 
+def _get_bf16_mla_bmm_weight(
+    weight: torch.Tensor, weight_scale: torch.Tensor | float
+) -> torch.Tensor:
+    """Convert MLA BMM weights to BF16, skipping a redundant scalar scale."""
+    weight = weight.to(torch.bfloat16)
+    if isinstance(weight_scale, (int, float)) and weight_scale == 1.0:
+        return weight
+    return weight * weight_scale
+
+
 if _is_cuda:
     from sgl_kernel import bmm_fp8 as _raw_bmm_fp8
 
@@ -505,7 +515,7 @@ class DeepseekMLAForwardMixin:
                     else:
                         q_nope_out = torch.bmm(
                             q_nope.to(torch.bfloat16).transpose(0, 1),
-                            self.w_kc.to(torch.bfloat16) * self.w_scale,
+                            _get_bf16_mla_bmm_weight(self.w_kc, self.w_scale),
                         )
 
             elif self.w_kc.dtype == torch.float8_e4m3fn:
@@ -883,7 +893,7 @@ class DeepseekMLAForwardMixin:
                 else:
                     attn_bmm_output = torch.bmm(
                         attn_output.to(torch.bfloat16).transpose(0, 1),
-                        self.w_vc.to(torch.bfloat16) * self.w_scale,
+                        _get_bf16_mla_bmm_weight(self.w_vc, self.w_scale),
                     )
 
             if _bmm_buf is not None:
