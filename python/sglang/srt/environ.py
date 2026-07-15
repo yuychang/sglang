@@ -547,6 +547,8 @@ class Envs:
     # Fuse shared/dense MLP SiLU*up with dynamic MXFP4 activation quantization
     # before the down projection on the ROCm Kimi multi-stream path.
     SGLANG_ROCM_KIMI_MXFP4_FUSE_MLP_ACT_QUANT = EnvBool(True)
+    # Rank-0 one-time diagnostics for the selected ROCm Kimi MoE path.
+    SGLANG_ROCM_MOE_VERBOSE = EnvBool(False)
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("tilelang")
 
     # MPS (Apple Silicon)

@@ -104,6 +104,11 @@ from sglang.srt.layers.moe.token_dispatcher.base import (
     CombineInput,
     DispatchOutput,
 )
+from sglang.srt.layers.moe.rocm_kimi_shared import (
+    attach_shared_partial,
+    can_defer_shared_partial_to_graph_ar,
+    rocm_mxfp4_moe_add_shared,
+)
 from sglang.srt.layers.moe.topk import BypassedTopKOutput, TopK, TopKOutputFormat
 from sglang.srt.layers.moe.utils import (
     RoutingMethodType,
@@ -200,6 +205,7 @@ from sglang.srt.utils import (
     use_intel_amx_backend,
 )
 from sglang.srt.utils.custom_op import register_custom_op
+from sglang.srt.utils.nvtx_utils import profile_method, profile_range
 
 if _use_aiter:
     from sglang.srt.layers.rocm_linear_utils import aiter_dsv3_router_gemm
@@ -648,6 +654,7 @@ class DeepseekV2MoE(nn.Module):
             top_k_for_moe = config.num_experts_per_tok + self.num_fused_shared_experts
 
         self.config = config
+        self.quant_config = quant_config
         self.layer_id = layer_id
         self.alt_stream = alt_stream
         self.is_nextn = is_nextn
@@ -888,6 +895,17 @@ class DeepseekV2MoE(nn.Module):
         )
         self._fuse_shared_experts_inside_sbo = SboFlags.fuse_shared_experts_inside_sbo()
 
+    def _is_rocm_quark_mxfp4_moe(self) -> bool:
+        return bool(
+            _rocm_multi_stream_enabled()
+            and self.quant_config is not None
+            and self.quant_config.get_name() == "quark"
+            and getattr(self.quant_config, "is_mxfp4_checkpoint", False)
+            and self.config.hidden_size == 7168
+            and self.config.n_routed_experts == 384
+            and self.config.n_shared_experts == 1
+        )
+
     def get_moe_weights(self):
         # EPLB only rebalances physical routed experts. Fused shared expert
         # slots live after each rank's routed slots and must stay stable.
@@ -988,6 +1006,14 @@ class DeepseekV2MoE(nn.Module):
         input_ids: Optional[torch.Tensor] = None,
         input_ids_global: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        if self._is_rocm_quark_mxfp4_moe():
+            return self.forward_normal_dual_stream_rocm_mxfp4(
+                hidden_states,
+                gemm_output_zero_allocator,
+                input_ids,
+                input_ids_global=input_ids_global,
+            )
+
         # Note(kpham-sgl): issue order satisfies 3 constraints:
         # - no stream explosion: main (routed) issued before alt block -> capture reuses 1 alt stream;
         # - PDL overlap: routed is the last main-stream kernel (fuses w/ residual add);
@@ -1078,6 +1104,100 @@ class DeepseekV2MoE(nn.Module):
             final_hidden_states = tensor_model_parallel_all_reduce(final_hidden_states)
         # TP1 shared experts are replicated, so add them after all-reduce to
         # avoid summing the same shared output once per TP rank.
+        if self._shared_expert_tp1:
+            final_hidden_states += shared_output
+        return final_hidden_states
+
+    def forward_normal_dual_stream_rocm_mxfp4(
+        self,
+        hidden_states: torch.Tensor,
+        gemm_output_zero_allocator: BumpAllocator = None,
+        input_ids: Optional[torch.Tensor] = None,
+        input_ids_global: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        current_stream = torch.cuda.current_stream()
+        self.alt_stream.wait_stream(current_stream)
+        server_args = get_server_args()
+        dispatch_info = (
+            ExpertLocationDispatchInfo.init_new(layer_id=self.layer_id)
+            if server_args.enable_eplb and not self.is_nextn
+            else None
+        )
+
+        with profile_range("moe_gate"):
+            router_logits = self.gate(hidden_states, gemm_output_zero_allocator)
+        topk_kwargs = (
+            {"input_ids": input_ids_global} if getattr(self, "is_hash", False) else {}
+        )
+        topk_output = self.topk(
+            hidden_states,
+            router_logits,
+            expert_location_dispatch_info=dispatch_info,
+            **topk_kwargs,
+        )
+
+        if envs.SGLANG_ROCM_MOE_VERBOSE.get() and not getattr(
+            self, "_rocm_moe_verbose_logged", False
+        ):
+            rank = 0
+            if torch.distributed.is_available() and torch.distributed.is_initialized():
+                rank = torch.distributed.get_rank()
+            if rank == 0:
+                tc = self.topk.topk_config
+                logger.info(
+                    "[rocm-kimi-moe] layer=%s hidden=%s router=%s top_k=%s "
+                    "routed_experts=%s shared_experts=%s fused_shared=%s "
+                    "scoring=%s correction_bias=%s routed_scale=%s "
+                    "multi_stream=%s",
+                    self.layer_id,
+                    tuple(hidden_states.shape),
+                    tuple(router_logits.shape),
+                    tc.top_k,
+                    router_logits.shape[-1],
+                    getattr(self, "n_shared_experts", None),
+                    self.num_fused_shared_experts,
+                    tc.scoring_func,
+                    tc.correction_bias is not None,
+                    tc.routed_scaling_factor,
+                    self.alt_stream is not None,
+                )
+            self._rocm_moe_verbose_logged = True
+
+        routed_output = self.experts(hidden_states, topk_output)
+        with torch.cuda.stream(self.alt_stream):
+            shared_output = self._forward_shared_experts(
+                hidden_states, gemm_output_zero_allocator
+            )
+        current_stream.wait_stream(self.alt_stream)
+        shared_output.record_stream(current_stream)
+
+        if self._shared_expert_tp1:
+            final_hidden_states = routed_output
+        elif can_defer_shared_partial_to_graph_ar(
+            routed_output,
+            shared_output,
+            should_allreduce_fusion=get_forward().fuse_mlp_allreduce,
+            shared_expert_tp1=self._shared_expert_tp1,
+            tp_world_size=self.tp_size,
+            is_graph_capture_mode=get_is_capture_mode(),
+            is_gfx950=_is_gfx95_supported,
+        ):
+            final_hidden_states = attach_shared_partial(
+                routed_output,
+                shared_output,
+            )
+        else:
+            with profile_range("moe_finalize"):
+                final_hidden_states = rocm_mxfp4_moe_add_shared(
+                    routed_output,
+                    shared_output,
+                    output=shared_output,
+                )
+
+        if self.tp_size > 1 and not should_skip_post_experts_all_reduce(
+            is_tp_path=True,
+        ):
+            final_hidden_states = tensor_model_parallel_all_reduce(final_hidden_states)
         if self._shared_expert_tp1:
             final_hidden_states += shared_output
         return final_hidden_states
@@ -1491,9 +1611,10 @@ class DeepseekV2MoE(nn.Module):
         self, hidden_states, gemm_output_zero_allocator: BumpAllocator = None
     ):
         if (hidden_states.shape[0] > 0) and (self.num_fused_shared_experts == 0):
-            return self.shared_experts(
-                hidden_states, gemm_output_zero_allocator=gemm_output_zero_allocator
-            )
+            with profile_range("moe_shared_experts"):
+                return self.shared_experts(
+                    hidden_states, gemm_output_zero_allocator=gemm_output_zero_allocator
+                )
         else:
             return None
 
@@ -2122,6 +2243,7 @@ class DeepseekV2DecoderLayer(nn.Module):
         is_nextn: bool = False,
         prefix: str = "",
         alt_stream: Optional[torch.cuda.Stream] = None,
+        moe_alt_stream: Optional[torch.cuda.Stream] = None,
         dsa_enable_prefill_cp: bool = False,
         mla_enable_prefill_cp: bool = False,
     ) -> None:
@@ -2190,7 +2312,7 @@ class DeepseekV2DecoderLayer(nn.Module):
                 quant_config=moe_quant_config_override or quant_config,
                 prefix=add_prefix("mlp", prefix),
                 layer_id=self.layer_id,
-                alt_stream=alt_stream,
+                alt_stream=moe_alt_stream if moe_alt_stream is not None else alt_stream,
                 is_nextn=is_nextn,
                 dsa_enable_prefill_cp=dsa_enable_prefill_cp,
                 mla_enable_prefill_cp=mla_enable_prefill_cp,
@@ -2265,6 +2387,7 @@ class DeepseekV2DecoderLayer(nn.Module):
             and layer_id % self.config.moe_layer_freq == 0
         )
 
+    @profile_method("kimi_layer_forward")
     def forward(
         self,
         positions: torch.Tensor,
@@ -2289,15 +2412,16 @@ class DeepseekV2DecoderLayer(nn.Module):
             )
         )
 
-        hidden_states = self.self_attn(
-            positions=positions,
-            hidden_states=hidden_states,
-            forward_batch=forward_batch,
-            zero_allocator=zero_allocator,
-            llama_4_scaling=llama_4_scaling,
-            layer_scatter_modes=self.layer_scatter_modes,
-            prev_topk_indices=prev_topk_indices,
-        )
+        with profile_range("attention_decode"):
+            hidden_states = self.self_attn(
+                positions=positions,
+                hidden_states=hidden_states,
+                forward_batch=forward_batch,
+                zero_allocator=zero_allocator,
+                llama_4_scaling=llama_4_scaling,
+                layer_scatter_modes=self.layer_scatter_modes,
+                prev_topk_indices=prev_topk_indices,
+            )
         if isinstance(hidden_states, tuple):
             hidden_states, topk_indices = hidden_states
         else:
@@ -2341,7 +2465,7 @@ class DeepseekV2DecoderLayer(nn.Module):
             fuse_mlp_allreduce=fuse_mlp_allreduce,
             mlp_reduce_scatter=mlp_reduce_scatter,
         ):
-            with _mlp_ctx:
+            with profile_range("moe_layer_total"), _mlp_ctx:
                 hidden_states = self.mlp(
                     hidden_states,
                     forward_batch,
@@ -2461,9 +2585,13 @@ class DeepseekV2Model(nn.Module):
                 _is_cuda
                 or _is_musa
                 or envs.SGLANG_NPU_USE_MULTI_STREAM.get()
-                or envs.SGLANG_ROCM_USE_MULTI_STREAM.get()
             )
             else None
+        )
+        # ROCm MoE overlap must not reuse the MLA alternate stream: doing so
+        # forces MLA graph capture away from the faster gfx950 fused norm path.
+        self.moe_alt_stream = (
+            torch.cuda.Stream() if _rocm_multi_stream_enabled() else self.alt_stream
         )
 
         self.layers, self.start_layer, self.end_layer = make_layers(
@@ -2474,6 +2602,7 @@ class DeepseekV2Model(nn.Module):
                 quant_config=quant_config,
                 prefix=prefix,
                 alt_stream=self.alt_stream,
+                moe_alt_stream=self.moe_alt_stream,
                 dsa_enable_prefill_cp=self.dsa_enable_prefill_cp,
                 mla_enable_prefill_cp=self.mla_enable_prefill_cp,
             ),
@@ -2839,6 +2968,30 @@ class DeepseekV2ForCausalLM(nn.Module, DeepseekV2WeightLoaderMixin):
         disable_reason = None
         if server_args.enforce_shared_experts_fusion:
             pass
+        elif (
+            _rocm_multi_stream_enabled()
+            and self.quant_config is not None
+            and self.quant_config.get_name() == "quark"
+            and getattr(self.quant_config, "is_mxfp4_checkpoint", False)
+            and self.config.hidden_size == 7168
+            and self.config.n_routed_experts == 384
+            and self.config.n_shared_experts == 1
+        ):
+            disable_reason = (
+                "ROCm Kimi MXFP4 multi-stream requested; keeping shared experts "
+                "separate for dedicated-stream overlap."
+            )
+        elif (
+            (can_fuse_shared_expert := getattr(
+                self.quant_config, "can_fuse_shared_expert", None
+            ))
+            is not None
+            and not can_fuse_shared_expert()
+        ):
+            disable_reason = (
+                "Routed and shared experts use incompatible quantization "
+                "specifications."
+            )
         elif is_sbo_enabled() or is_tbo_enabled():
             disable_reason = "SBO/TBO enabled: incompatible with fusing shared expert into MoE kernel."
         elif is_deepep_class_backend():
