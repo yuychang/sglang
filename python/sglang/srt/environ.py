@@ -544,6 +544,9 @@ class Envs:
     # outputs separate and consume both in AITER fused AR+residual+RMSNorm.
     # Unsupported shapes/configurations retain the existing local add path.
     SGLANG_ROCM_FUSE_SHARED_PARTIAL_AR_RMSNORM = EnvBool(True)
+    # Fuse shared/dense MLP SiLU*up with dynamic MXFP4 activation quantization
+    # before the down projection on the ROCm Kimi multi-stream path.
+    SGLANG_ROCM_KIMI_MXFP4_FUSE_MLP_ACT_QUANT = EnvBool(True)
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("tilelang")
 
     # MPS (Apple Silicon)

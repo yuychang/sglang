@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import nullcontext
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
@@ -195,6 +196,7 @@ from sglang.srt.utils import (
     is_non_idle_and_non_empty,
     log_info_on_rank0,
     make_layers,
+    print_info_once,
     use_intel_amx_backend,
 )
 from sglang.srt.utils.custom_op import register_custom_op
@@ -234,6 +236,32 @@ logger = logging.getLogger(__name__)
 _enable_pcg_dsv2_dual_stream = (
     _is_cuda and envs.SGLANG_ENABLE_PCG_DSV2_DUAL_STREAM.get()
 )
+
+
+def _is_quark_mxfp4_linear(linear: nn.Module) -> bool:
+    quant_method = getattr(linear, "quant_method", None)
+    quant_config = getattr(quant_method, "quantization_config", None)
+    return bool(getattr(quant_config, "is_mxfp4_checkpoint", False))
+
+
+def _rocm_multi_stream_enabled() -> bool:
+    if not (
+        _is_hip
+        and _use_aiter
+        and envs.SGLANG_ROCM_USE_MULTI_STREAM.get()
+    ):
+        return False
+    try:
+        max_hw_queues = int(os.environ.get("GPU_MAX_HW_QUEUES", "0"))
+    except ValueError:
+        max_hw_queues = 0
+    if max_hw_queues < 5:
+        logger.warning_once(
+            "SGLANG_ROCM_USE_MULTI_STREAM requires GPU_MAX_HW_QUEUES>=5; "
+            "falling back to the standard MoE path."
+        )
+        return False
+    return True
 
 
 class DeepseekV2MLP(nn.Module):
@@ -291,6 +319,19 @@ class DeepseekV2MLP(nn.Module):
         )
         self._fused_clamp_fp8_checked = False
         self._fused_clamp_use_fp8 = False
+        self._enable_rocm_mxfp4_act_quant = (
+            _is_hip
+            and _use_aiter
+            and _rocm_multi_stream_enabled()
+            and envs.SGLANG_ROCM_KIMI_MXFP4_FUSE_MLP_ACT_QUANT.get()
+            and swiglu_limit is None
+            and _is_quark_mxfp4_linear(self.gate_up_proj)
+            and _is_quark_mxfp4_linear(self.down_proj)
+        )
+        if self._enable_rocm_mxfp4_act_quant:
+            print_info_once(
+                "ROCm Kimi-K2.5 MXFP4 MLP fused SiLU+dynamic-quant path enabled."
+            )
 
     def forward(
         self,
@@ -337,6 +378,40 @@ class DeepseekV2MLP(nn.Module):
             x = (x, None, y)
 
         gate_up, _ = self.gate_up_proj(x)
+        if self._enable_rocm_mxfp4_act_quant:
+            from aiter import dtypes
+            from aiter.ops.activation import silu_and_mul_quant
+
+            M, N = gate_up.shape
+            down_input_size = N // 2
+            if down_input_size % 32 != 0:
+                raise RuntimeError(
+                    "ROCm MXFP4 fused SiLU+quant requires the MLP intermediate "
+                    f"dimension to be divisible by 32, got {down_input_size}."
+                )
+            down_input_fp4 = torch.empty(
+                (M, down_input_size // 2),
+                device=gate_up.device,
+                dtype=dtypes.fp4x2,
+            )
+            down_input_scale = torch.empty(
+                (M, down_input_size // 32),
+                device=gate_up.device,
+                dtype=torch.uint8,
+            )
+            silu_and_mul_quant(
+                down_input_fp4,
+                gate_up,
+                down_input_scale,
+                32,
+                0.0,
+                False,
+            )
+            x, _ = self.down_proj(
+                (down_input_fp4.view(torch.uint8), down_input_scale)
+            )
+            return x
+
         # Fast path: fused silu+clamp+fp8_quant+deepgemm when conditions met.
         # Only valid when down_proj does NOT need an all-reduce and its weights
         # are fp8 (uint8 storage with weight_scale_inv).
