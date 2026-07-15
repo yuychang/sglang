@@ -73,12 +73,39 @@ _is_musa = is_musa()
 
 TensorMetadata = namedtuple("TensorMetadata", ["device", "dtype", "size"])
 
+_FUSED_AR_RMS_1STAGE_MAX_TOKENS = 80
+_FUSED_AR_RMS_1STAGE_TUNED_MAX_BYTES = {
+    # Kimi-K2.5/DeepSeek-style hidden size at TP=4: measured crossover keeps
+    # decode and small batched-decode shapes on 1-stage through M=32.
+    (4, 7168): 512 * 1024,
+}
+
 # use int value instead of ReduceOp.SUM to support torch compile
 REDUCE_OP_SUM = int(torch.distributed.ReduceOp.SUM)
 
 # Reuse the user-provided distributed timeout for model-parallel subgroup
 # creation so runtime collectives do not silently fall back to backend defaults.
 _MODEL_PARALLEL_GROUP_TIMEOUT: Optional[timedelta] = None
+
+
+def _select_fused_ar_rms_1stage(
+    input_: torch.Tensor,
+    world_size: Optional[int] = None,
+) -> bool:
+    hidden_dim = int(input_.shape[-1])
+    token_num = input_.numel() // hidden_dim if hidden_dim > 0 else 0
+    if token_num > _FUSED_AR_RMS_1STAGE_MAX_TOKENS:
+        return False
+    if envs.SGLANG_USE_1STAGE_ALLREDUCE.is_set():
+        return envs.SGLANG_USE_1STAGE_ALLREDUCE.get()
+    if envs.SGLANG_FUSED_AR_RMS_1STAGE_MAX_BYTES.is_set():
+        max_bytes = envs.SGLANG_FUSED_AR_RMS_1STAGE_MAX_BYTES.get()
+    else:
+        max_bytes = _FUSED_AR_RMS_1STAGE_TUNED_MAX_BYTES.get(
+            (world_size, hidden_dim), envs.SGLANG_FUSED_AR_RMS_1STAGE_MAX_BYTES.get()
+        )
+    total_bytes = input_.numel() * input_.element_size()
+    return total_bytes <= max_bytes
 
 
 def get_torch_distributed_pg_options(group_name=None):
@@ -713,11 +740,7 @@ class GroupCoordinator:
         # prefill batches fall through to the 2-stage kernel instead of
         # hitting a runtime error.  AITER's C++ dispatch already gates
         # which hidden_dims have valid 1-stage support.
-        if envs.SGLANG_USE_1STAGE_ALLREDUCE.is_set():
-            use_1stage_ar = envs.SGLANG_USE_1STAGE_ALLREDUCE.get()
-        else:
-            total_bytes = input_.numel() * input_.element_size()
-            use_1stage_ar = total_bytes <= 128 * 1024
+        use_1stage_ar = _select_fused_ar_rms_1stage(input_, self.world_size)
 
         if (
             getattr(ca_comm, "_IS_CAPTURING", False)
