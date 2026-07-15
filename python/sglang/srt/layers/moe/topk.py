@@ -132,6 +132,9 @@ _is_xpu = is_xpu()
 _is_npu = is_npu()
 _is_xpu = is_xpu()
 _use_aiter = get_bool_env_var("SGLANG_USE_AITER") and _is_hip
+_aiter_fused_shared_expert_topk = get_bool_env_var(
+    "SGLANG_AITER_FUSED_SHARED_EXPERT_TOPK", "true"
+)
 _is_musa = is_musa()
 
 # Experimental: skip the HIP padded-token routing-weight masking entirely.
@@ -1419,6 +1422,7 @@ def biased_grouped_topk_gpu(
     num_fused_shared_experts: int = 0,
     routed_scaling_factor: Optional[float] = None,
     apply_routed_scaling_factor_on_output: Optional[bool] = False,
+    fused_shared_experts_scaling_factor: Optional[float] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     num_tokens = gating_output.shape[0]
     num_experts = gating_output.shape[1]
@@ -1540,17 +1544,38 @@ def biased_grouped_topk_gpu(
         assert (
             hidden_states.shape[0] == gating_output.shape[0]
         ), f"Number of tokens mismatch: hidden_states.shape[0] = {hidden_states.shape[0]}, gating_output.shape[0] = {gating_output.shape[0]}"
-        topk_weights = torch.empty((token, topk), dtype=torch.float32, device=device)
-        topk_ids = torch.empty((token, topk), dtype=torch.int32, device=device)
+        fuse_shared_append = (
+            _aiter_fused_shared_expert_topk and num_fused_shared_experts > 0
+        )
+        total_topk = topk + num_fused_shared_experts if fuse_shared_append else topk
+        topk_weights = torch.empty(
+            (token, total_topk), dtype=torch.float32, device=device
+        )
+        topk_ids = torch.empty((token, total_topk), dtype=torch.int32, device=device)
+        scale_factor = (
+            1.0
+            if fused_shared_experts_scaling_factor is None
+            else fused_shared_experts_scaling_factor
+        )
+        # Avoid a redundant device-side dtype cast when correction_bias already
+        # matches gating_output, which is common in the AITER decode path.
+        correction_bias_aiter = (
+            correction_bias
+            if correction_bias.dtype == gating_output.dtype
+            else correction_bias.to(dtype=gating_output.dtype)
+        )
         aiter_biased_grouped_topk(
             gating_output,
-            correction_bias.to(dtype=gating_output.dtype),
+            correction_bias_aiter,
             topk_weights,
             topk_ids,
             num_expert_group,
             topk_group,
             renormalize,
             routed_scaling_factor if routed_scaling_factor is not None else 1.0,
+            num_fused_shared_experts if fuse_shared_append else 0,
+            scale_factor,
+            num_experts,
         )
         return topk_weights, topk_ids
     elif _is_musa and (
@@ -1825,8 +1850,8 @@ def _post_process_topk_ids(
     fused_shared_experts_scaling_factor = (
         topk_config.fused_shared_experts_scaling_factor
     )
-    capture_routed_experts_if_allowed(topk_config, layer_id, topk_ids)
     recorder_topk_ids = None
+    has_aiter_fused_shared_cols = False
     if _is_cuda:
         # LP path: solve LP outside torch.compile (the solver contains an
         # EP all-reduce that can't run inside compiled regions).
@@ -1866,6 +1891,11 @@ def _post_process_topk_ids(
                 topk_ids, expert_location_dispatch_info, num_token_non_padded
             )
     elif _is_hip:
+        has_aiter_fused_shared_cols = (
+            num_fused_shared_experts > 0
+            and _use_aiter
+            and topk_ids.shape[1] == topk_config.top_k
+        )
         # On AMD HIP the aiter MoE kernels do not handle topk_ids=-1 safely
         # (negative indices cause illegal memory access). Always fill the padded
         # region with 0 so every kernel sees a valid in-range expert id.
@@ -1873,23 +1903,48 @@ def _post_process_topk_ids(
         # contribution to the hidden state is still zero regardless of the id.
         # Regression: skipping this mask when EPLB is disabled caused garbage
         # MoE routing for models like DeepSeek-R1-MXFP4 (accuracy ~0.09 vs 0.94+).
-        _mask_topk_ids_padded_region(topk_ids, num_token_non_padded, fill_value=0)
+        if has_aiter_fused_shared_cols:
+            routed_cols = topk_ids[:, :-num_fused_shared_experts]
+            shared_cols = topk_ids[:, -num_fused_shared_experts:]
+            _mask_topk_ids_padded_region(
+                routed_cols, num_token_non_padded, fill_value=0
+            )
+        else:
+            routed_cols = topk_ids
+            shared_cols = None
+            _mask_topk_ids_padded_region(topk_ids, num_token_non_padded, fill_value=0)
         # The logical->physical remap is only meaningful when a real
         # expert-location mapping exists. With a trivial placement and EPLB off
         # the map is identity so the remap can be skipped safely.
         if _eplb_remap_enabled():
-            topk_ids = topk_ids_logical_to_physical(
-                topk_ids, expert_location_dispatch_info
+            routed_cols = topk_ids_logical_to_physical(
+                routed_cols, expert_location_dispatch_info
             )
+            if shared_cols is not None:
+                topk_ids = torch.cat([routed_cols, shared_cols], dim=-1)
+                recorder_topk_ids = routed_cols
+            else:
+                topk_ids = routed_cols
+        elif shared_cols is not None:
+            recorder_topk_ids = routed_cols
         # NOTE (HIP): padded-token routing-weight zeroing is deferred to the
         # single pass at the end of this function (gated by SGLANG_MORI_NO_PAD_MASK).
         # That final pass re-zeros after any shared-expert append/remap, so a
         # second zeroing here would be redundant (zeroing is idempotent).
 
+    capture_routed_experts_if_allowed(
+        topk_config,
+        layer_id,
+        recorder_topk_ids if has_aiter_fused_shared_cols else topk_ids,
+    )
     if recorder_topk_ids is None:
         recorder_topk_ids = topk_ids
 
-    _aiter_append = num_fused_shared_experts > 0 and _use_aiter
+    _aiter_append = (
+        num_fused_shared_experts > 0
+        and _use_aiter
+        and not has_aiter_fused_shared_cols
+    )
 
     if _aiter_append and use_per_rank_shared_slots:
         # Fused path: append shared experts AND apply the per-rank shared-slot
@@ -1994,6 +2049,9 @@ def select_experts(
     correction_bias = topk_config.correction_bias
     torch_native = topk_config.torch_native
     routed_scaling_factor = topk_config.routed_scaling_factor
+    fused_shared_experts_scaling_factor = (
+        topk_config.fused_shared_experts_scaling_factor
+    )
     apply_routed_scaling_factor_on_output = (
         topk_config.apply_routed_scaling_factor_on_output
     )
@@ -2042,6 +2100,7 @@ def select_experts(
                 topk_group=topk_group,
                 num_fused_shared_experts=num_fused_shared_experts,
                 routed_scaling_factor=routed_scaling_factor,
+                fused_shared_experts_scaling_factor=fused_shared_experts_scaling_factor,
                 apply_routed_scaling_factor_on_output=apply_routed_scaling_factor_on_output,
             )
     elif torch_native and custom_routing_function is None:
