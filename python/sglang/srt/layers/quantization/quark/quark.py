@@ -41,6 +41,9 @@ logger = logging.getLogger(__name__)
 _MOE_SHARED_EXPERT_QUANT_LAYER0_BASES: tuple[str, ...] = (
     "model.layers.0",
     "model.language_model.layers.0",
+    # Kimi-K2.5's SGLang wrapper owns the text model under
+    # ``language_model.model``.
+    "language_model.model.layers.0",
 )
 
 _SHARED_EXPERT_BODY_PROJ_SUFFIXES: tuple[str, ...] = (
@@ -48,6 +51,11 @@ _SHARED_EXPERT_BODY_PROJ_SUFFIXES: tuple[str, ...] = (
     "up_proj",
     "gate_up_proj",
     "down_proj",
+)
+
+_SHARED_EXPERT_MODULE_NAMES: tuple[str, ...] = (
+    "shared_expert",
+    "shared_experts",
 )
 
 
@@ -88,6 +96,28 @@ class QuarkConfig(QuantizationConfig):
 
         self.packed_modules_mapping = self.quant_config["packed_modules_mapping"]
         self._quantized_layers = set()
+
+    @property
+    def is_mxfp4_checkpoint(self) -> bool:
+        if not self.is_prequantized:
+            return False
+
+        configs = [self.quant_config.get("global_quant_config") or {}]
+        configs.extend((self.quant_config.get("layer_quant_config") or {}).values())
+        configs.extend(
+            (self.quant_config.get("layer_type_quant_config") or {}).values()
+        )
+        for config in configs:
+            weight = config.get("weight") or {}
+            if (
+                weight.get("dtype") == "fp4"
+                and weight.get("qscheme") == "per_group"
+                and weight.get("group_size") == 32
+                and not weight.get("is_dynamic")
+                and weight.get("scale_format") == "e8m0"
+            ):
+                return True
+        return False
 
     @property
     def quantized_layers(self) -> tuple[list[str], int]:
@@ -554,11 +584,14 @@ class QuarkConfig(QuantizationConfig):
             for base in _MOE_SHARED_EXPERT_QUANT_LAYER0_BASES:
                 moe_name = f"{base}.mlp.experts"
                 moe_cfg = self._find_matched_config(moe_name, lookup_stub)
-                for suffix in _SHARED_EXPERT_BODY_PROJ_SUFFIXES:
-                    shared_name = f"{base}.mlp.shared_expert.{suffix}"
-                    shared_cfg = self._find_matched_config(shared_name, lookup_stub)
-                    if not deep_compare(moe_cfg, shared_cfg):
-                        return False
+                for shared_module in _SHARED_EXPERT_MODULE_NAMES:
+                    for suffix in _SHARED_EXPERT_BODY_PROJ_SUFFIXES:
+                        shared_name = f"{base}.mlp.{shared_module}.{suffix}"
+                        shared_cfg = self._find_matched_config(
+                            shared_name, lookup_stub
+                        )
+                        if not deep_compare(moe_cfg, shared_cfg):
+                            return False
         except ValueError:
             return False
 
