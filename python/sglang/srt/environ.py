@@ -540,6 +540,9 @@ class Envs:
     # Enable dual-stream MoE (shared experts vs routed experts) on the
     # ROCm/AITER path. Requires GPU_MAX_HW_QUEUES>=5 to avoid HW-queue serialization.
     SGLANG_ROCM_USE_MULTI_STREAM = EnvBool(False)
+    # Fuse the absorbed MLA w_kc projection with RoPE and KV-cache writes in
+    # one AITER grid during Kimi-K2.5 HIP-graph decode.
+    SGLANG_ROCM_FUSE_MLA_PROJECTION_ROPE_CACHE = EnvBool(True)
     # During Kimi-K2.5 MXFP4 HIP-graph decode, keep routed/shared TP-local
     # outputs separate and consume both in AITER fused AR+residual+RMSNorm.
     # Unsupported shapes/configurations retain the existing local add path.
