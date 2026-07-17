@@ -812,6 +812,46 @@ class GroupCoordinator:
             use_1stage_ar,
         )
 
+    def fused_allreduce_rmsnorm_mxfp4_quant(
+        self,
+        input_: torch.Tensor,
+        residual_inp_: torch.Tensor,
+        weight_: torch.Tensor,
+        eps: float,
+    ) -> Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
+        """Attempt graph-safe AITER AR+RMSNorm+MXFP4 quant with BF16 output."""
+        ca_comm = self.ca_comm
+        if ca_comm is None or getattr(ca_comm, "disabled", True):
+            return None
+        custom_fused_fn = getattr(
+            ca_comm,
+            "custom_fused_ar_rms_mxfp4_quant",
+            None,
+        )
+        if custom_fused_fn is not None:
+            return custom_fused_fn(
+                input_,
+                residual_inp_,
+                weight_,
+                eps,
+                use_1stage=False,
+                emit_bf16=True,
+            )
+        fused_fn = getattr(
+            ca_comm,
+            "fused_allreduce_rmsnorm_mxfp4_quant",
+            None,
+        )
+        if fused_fn is None:
+            return None
+        return fused_fn(
+            input_,
+            residual_inp_,
+            weight_,
+            eps,
+            emit_bf16=True,
+        )
+
     def _all_reduce_out_place(
         self, input_: torch.Tensor, outplace_all_reduce_method: str
     ) -> torch.Tensor:

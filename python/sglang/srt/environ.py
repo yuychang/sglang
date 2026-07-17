@@ -547,6 +547,10 @@ class Envs:
     # Fuse shared/dense MLP SiLU*up with dynamic MXFP4 activation quantization
     # before the down projection on the ROCm Kimi multi-stream path.
     SGLANG_ROCM_KIMI_MXFP4_FUSE_MLP_ACT_QUANT = EnvBool(True)
+    # Internal comparison mode for --enable-rocm-fused-ar-mxfp4-quant.
+    # "event" retains the existing stream-event path; "optimized" reuses the
+    # MXFP4 activation emitted by the fused AR+RMSNorm producer.
+    SGLANG_ROCM_FUSED_AR_MXFP4_QUANT_MODE = EnvStr("optimized")
     # Rank-0 one-time diagnostics for the selected ROCm Kimi MoE path.
     SGLANG_ROCM_MOE_VERBOSE = EnvBool(False)
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("tilelang")

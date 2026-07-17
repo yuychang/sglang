@@ -1636,6 +1636,15 @@ class ServerArgs:
         ),
     ] = None
     enable_aiter_allreduce_fusion: A[bool, "Enable Aiter AllReduce Fusion."] = False
+    enable_rocm_fused_ar_mxfp4_quant: A[
+        bool,
+        (
+            "Fuse MXFP4 activation quantization into the gfx950 Kimi K2.5 "
+            "AR+RMSNorm producer and reuse it in the shared FC1. The initial "
+            "implementation is graph-only, TP=4/EP=1, Quark MXFP4, and M=32; "
+            "unsupported cases fall back."
+        ),
+    ] = False
 
     # -------------------------------------------------------------------------
     # Torch compile and torchao

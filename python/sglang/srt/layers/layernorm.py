@@ -190,6 +190,60 @@ def _forward_with_allreduce_fusion(
 
             # Prefer AITER fused AR+RMSNorm when enabled on AMD.
             if _use_aiter:
+                if shared_input is None:
+                    from sglang.srt.distributed import (
+                        tensor_model_parallel_fused_allreduce_rmsnorm_mxfp4_quant,
+                    )
+                    from sglang.srt.layers.moe.rocm_kimi_shared import (
+                        attach_rocm_mxfp4_activation,
+                        can_fuse_rocm_mxfp4_activation,
+                        get_rocm_fused_ar_mxfp4_quant_mode,
+                    )
+                    from sglang.srt.model_executor.runner import get_is_capture_mode
+                    from sglang.srt.utils import (
+                        get_hip_version,
+                        is_gfx95_supported,
+                    )
+
+                    parallel = get_parallel()
+                    if can_fuse_rocm_mxfp4_activation(
+                        x,
+                        residual,
+                        weight,
+                        is_target_layer=getattr(
+                            norm_module,
+                            "_rocm_fused_ar_mxfp4_quant_target",
+                            False,
+                        ),
+                        mode=get_rocm_fused_ar_mxfp4_quant_mode(),
+                        is_graph_capture_mode=get_is_capture_mode(),
+                        is_gfx950=is_gfx95_supported(),
+                        tp_world_size=world_size,
+                        ep_world_size=parallel.moe_ep_size,
+                        hip_version=get_hip_version(),
+                    ):
+                        fused_quant_result = (
+                            tensor_model_parallel_fused_allreduce_rmsnorm_mxfp4_quant(
+                                x,
+                                residual,
+                                weight,
+                                norm_module.variance_epsilon,
+                            )
+                        )
+                        if fused_quant_result is not None:
+                            packed, residual_out, scale, bf16_out = fused_quant_result
+                            attach_rocm_mxfp4_activation(
+                                bf16_out,
+                                packed,
+                                scale,
+                            )
+                            logger.info_once(
+                                "ROCm fused AR+RMSNorm+MXFP4 quant active: "
+                                "fused AR+RMSNorm+MXFP4 producer, "
+                                "shape=(32, 7168), shared FC1 N=1024."
+                            )
+                            return bf16_out, residual_out
+
                 if shared_input is not None:
                     fused_result = (
                         tensor_model_parallel_fused_allreduce_rmsnorm_two_input(

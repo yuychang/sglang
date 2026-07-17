@@ -107,7 +107,9 @@ from sglang.srt.layers.moe.token_dispatcher.base import (
 from sglang.srt.layers.moe.rocm_kimi_shared import (
     attach_shared_partial,
     can_defer_shared_partial_to_graph_ar,
+    pop_rocm_mxfp4_activation,
     rocm_mxfp4_moe_add_shared,
+    validate_rocm_mxfp4_shared_fc1,
 )
 from sglang.srt.layers.moe.topk import BypassedTopKOutput, TopK, TopKOutputFormat
 from sglang.srt.layers.moe.utils import (
@@ -345,8 +347,9 @@ class DeepseekV2MLP(nn.Module):
         forward_batch=None,
         gemm_output_zero_allocator: BumpAllocator = None,
     ):
-        if (self.tp_size == 1) and x.shape[0] == 0:
-            return x
+        x_tensor = x[0] if isinstance(x, tuple) else x
+        if (self.tp_size == 1) and x_tensor.shape[0] == 0:
+            return x_tensor
 
         if (
             getattr(self, "_enable_nvfp4_gemm_swiglu_fusion", False)
@@ -375,13 +378,16 @@ class DeepseekV2MLP(nn.Module):
 
         if (
             gemm_output_zero_allocator is not None
-            and x.shape[0] <= 256
+            and x_tensor.shape[0] <= 256
             and self.gate_up_proj.weight.dtype == torch.uint8
         ):
             y = gemm_output_zero_allocator.allocate(
-                x.shape[0] * self.gate_up_proj.output_size_per_partition
-            ).view(x.shape[0], self.gate_up_proj.output_size_per_partition)
-            x = (x, None, y)
+                x_tensor.shape[0] * self.gate_up_proj.output_size_per_partition
+            ).view(
+                x_tensor.shape[0],
+                self.gate_up_proj.output_size_per_partition,
+            )
+            x = (x[0], x[1], y) if isinstance(x, tuple) else (x, None, y)
 
         gate_up, _ = self.gate_up_proj(x)
         if self._enable_rocm_mxfp4_act_quant:
@@ -1611,9 +1617,28 @@ class DeepseekV2MoE(nn.Module):
         self, hidden_states, gemm_output_zero_allocator: BumpAllocator = None
     ):
         if (hidden_states.shape[0] > 0) and (self.num_fused_shared_experts == 0):
+            shared_input = hidden_states
+            carrier = pop_rocm_mxfp4_activation(hidden_states)
+            if carrier is not None:
+                gate_up_proj = self.shared_experts.gate_up_proj
+                if validate_rocm_mxfp4_shared_fc1(
+                    carrier,
+                    gate_up_proj.weight,
+                    gate_up_proj.weight_scale,
+                ):
+                    side_stream = torch.cuda.current_stream()
+                    carrier.packed.record_stream(side_stream)
+                    carrier.scale.record_stream(side_stream)
+                    shared_input = (carrier.packed, carrier.scale)
+                else:
+                    logger.debug(
+                        "ROCm fused AR MXFP4 carrier did not match the "
+                        "shared FC1; using the existing dynamic-quant path."
+                    )
             with profile_range("moe_shared_experts"):
                 return self.shared_experts(
-                    hidden_states, gemm_output_zero_allocator=gemm_output_zero_allocator
+                    shared_input,
+                    gemm_output_zero_allocator=gemm_output_zero_allocator,
                 )
         else:
             return None
@@ -2336,6 +2361,25 @@ class DeepseekV2DecoderLayer(nn.Module):
         self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(
             config.hidden_size, eps=config.rms_norm_eps
+        )
+        self.post_attention_layernorm._rocm_fused_ar_mxfp4_quant_target = bool(
+            getattr(
+                get_server_args(),
+                "enable_rocm_fused_ar_mxfp4_quant",
+                False,
+            )
+            and check_cuda_graph_backend(Phase.DECODE, Backend.FULL)
+            and self.is_layer_sparse
+            and isinstance(self.mlp, DeepseekV2MoE)
+            and self.mlp._is_rocm_quark_mxfp4_moe()
+            and self.mlp.moe_ep_size == 1
+            and not self.mlp._shared_expert_tp1
+            and hasattr(self.mlp, "shared_experts")
+            and self.config.moe_intermediate_size == 2048
+            and self.mlp.shared_experts.gate_up_proj.weight.shape == (1024, 3584)
+            and self.mlp.shared_experts.gate_up_proj.weight_scale.shape == (1024, 224)
+            and self.mlp.shared_experts.gate_up_proj.weight.dtype == torch.uint8
+            and self.mlp.shared_experts.gate_up_proj.weight_scale.dtype == torch.uint8
         )
 
         self._gfx95_quant_format = self._detect_gfx95_quant_format()

@@ -1,14 +1,164 @@
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Optional
+from dataclasses import dataclass
+from typing import Literal, Optional
 
 import torch
 
 from sglang.srt.environ import envs
 
 _SHARED_PARTIAL_ATTR = "_sglang_rocm_shared_partial"
+_MXFP4_ACTIVATION_ATTR = "_sglang_rocm_mxfp4_activation"
 _SUPPORTED_TOKEN_COUNTS = frozenset((1, 2, 4, 8, 16, 32))
 _KIMI_HIDDEN_SIZE = 7168
+_TARGET_TOKEN_COUNT = 32
+_TARGET_FC1_N = 1024
+_MXFP4_PACKED_K = _KIMI_HIDDEN_SIZE // 2
+_MXFP4_SCALE_K = _KIMI_HIDDEN_SIZE // 32
+_VALID_FUSED_AR_MXFP4_QUANT_MODES = frozenset(("off", "event", "optimized"))
+
+RocmFusedArMxfp4QuantMode = Literal["off", "event", "optimized"]
+
+
+@dataclass(frozen=True)
+class RocmMxfp4ActivationCarrier:
+    source_data_ptr: int
+    source_shape: tuple[int, ...]
+    source_dtype: torch.dtype
+    source_device: torch.device
+    packed: torch.Tensor
+    scale: torch.Tensor
+
+
+def get_rocm_fused_ar_mxfp4_quant_mode() -> RocmFusedArMxfp4QuantMode:
+    from sglang.srt.runtime_context import get_server_args
+
+    if not getattr(
+        get_server_args(),
+        "enable_rocm_fused_ar_mxfp4_quant",
+        False,
+    ):
+        return "off"
+    mode = envs.SGLANG_ROCM_FUSED_AR_MXFP4_QUANT_MODE.get().lower()
+    if mode not in _VALID_FUSED_AR_MXFP4_QUANT_MODES:
+        raise ValueError(
+            "SGLANG_ROCM_FUSED_AR_MXFP4_QUANT_MODE must be one of "
+            f"{sorted(_VALID_FUSED_AR_MXFP4_QUANT_MODES)}, got {mode!r}"
+        )
+    return mode  # type: ignore[return-value]
+
+
+def can_fuse_rocm_mxfp4_activation(
+    hidden_states: torch.Tensor,
+    residual: Optional[torch.Tensor],
+    weight: torch.Tensor,
+    *,
+    is_target_layer: bool,
+    mode: RocmFusedArMxfp4QuantMode,
+    is_graph_capture_mode: bool,
+    is_gfx950: bool,
+    tp_world_size: int,
+    ep_world_size: int,
+    hip_version: tuple[int, ...],
+) -> bool:
+    return bool(
+        is_target_layer
+        and mode == "optimized"
+        and is_graph_capture_mode
+        and is_gfx950
+        and hip_version >= (7, 2)
+        and tp_world_size == 4
+        and ep_world_size == 1
+        and residual is not None
+        and hidden_states.device.type == "cuda"
+        and residual.device == hidden_states.device
+        and weight.device == hidden_states.device
+        and hidden_states.dtype == torch.bfloat16
+        and residual.dtype == torch.bfloat16
+        and weight.dtype == torch.bfloat16
+        and hidden_states.dim() == 2
+        and hidden_states.shape == residual.shape
+        and hidden_states.shape == (_TARGET_TOKEN_COUNT, _KIMI_HIDDEN_SIZE)
+        and weight.numel() == _KIMI_HIDDEN_SIZE
+        and hidden_states.is_contiguous()
+        and residual.is_contiguous()
+        and weight.is_contiguous()
+    )
+
+
+def attach_rocm_mxfp4_activation(
+    hidden_states: torch.Tensor,
+    packed: torch.Tensor,
+    scale: torch.Tensor,
+) -> None:
+    if hasattr(hidden_states, _MXFP4_ACTIVATION_ATTR):
+        raise RuntimeError("ROCm MXFP4 activation carrier was already populated")
+    if (
+        hidden_states.shape != (_TARGET_TOKEN_COUNT, _KIMI_HIDDEN_SIZE)
+        or packed.shape != (_TARGET_TOKEN_COUNT, _MXFP4_PACKED_K)
+        or scale.shape != (_TARGET_TOKEN_COUNT, _MXFP4_SCALE_K)
+        or hidden_states.dtype != torch.bfloat16
+        or packed.dtype != torch.uint8
+        or scale.dtype != torch.uint8
+        or packed.device != hidden_states.device
+        or scale.device != hidden_states.device
+        or not packed.is_contiguous()
+        or not scale.is_contiguous()
+    ):
+        raise RuntimeError(
+            "invalid ROCm fused AR MXFP4 activation carrier: "
+            f"hidden={tuple(hidden_states.shape)}/{hidden_states.dtype}, "
+            f"packed={tuple(packed.shape)}/{packed.dtype}, "
+            f"scale={tuple(scale.shape)}/{scale.dtype}"
+        )
+    setattr(
+        hidden_states,
+        _MXFP4_ACTIVATION_ATTR,
+        RocmMxfp4ActivationCarrier(
+            source_data_ptr=hidden_states.data_ptr(),
+            source_shape=tuple(hidden_states.shape),
+            source_dtype=hidden_states.dtype,
+            source_device=hidden_states.device,
+            packed=packed,
+            scale=scale,
+        ),
+    )
+
+
+def pop_rocm_mxfp4_activation(
+    hidden_states: torch.Tensor,
+) -> Optional[RocmMxfp4ActivationCarrier]:
+    carrier = getattr(hidden_states, _MXFP4_ACTIVATION_ATTR, None)
+    if hasattr(hidden_states, _MXFP4_ACTIVATION_ATTR):
+        delattr(hidden_states, _MXFP4_ACTIVATION_ATTR)
+    if carrier is None:
+        return None
+    if (
+        carrier.source_data_ptr != hidden_states.data_ptr()
+        or carrier.source_shape != tuple(hidden_states.shape)
+        or carrier.source_dtype != hidden_states.dtype
+        or carrier.source_device != hidden_states.device
+    ):
+        raise RuntimeError("stale or mismatched ROCm MXFP4 activation carrier")
+    return carrier
+
+
+def validate_rocm_mxfp4_shared_fc1(
+    carrier: RocmMxfp4ActivationCarrier,
+    weight: torch.Tensor,
+    weight_scale: torch.Tensor,
+) -> bool:
+    return bool(
+        carrier.packed.shape == (_TARGET_TOKEN_COUNT, _MXFP4_PACKED_K)
+        and carrier.scale.shape == (_TARGET_TOKEN_COUNT, _MXFP4_SCALE_K)
+        and weight.shape == (_TARGET_FC1_N, _MXFP4_PACKED_K)
+        and weight_scale.shape == (_TARGET_FC1_N, _MXFP4_SCALE_K)
+        and carrier.packed.dtype == torch.uint8
+        and carrier.scale.dtype == torch.uint8
+        and weight.dtype == torch.uint8
+        and weight_scale.dtype == torch.uint8
+        and carrier.packed.device == weight.device == weight_scale.device
+    )
 
 
 def rocm_mxfp4_moe_add_shared(

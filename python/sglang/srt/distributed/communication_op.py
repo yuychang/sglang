@@ -57,6 +57,25 @@ def tensor_model_parallel_fused_allreduce_rmsnorm_two_input(
     )
 
 
+def tensor_model_parallel_fused_allreduce_rmsnorm_mxfp4_quant(
+    input_: torch.Tensor,
+    residual_inp_: torch.Tensor,
+    weight_: torch.Tensor,
+    eps: float,
+) -> Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
+    """Fused TP all-reduce + residual + RMSNorm + MXFP4 quantization.
+
+    The returned tuple is ``(packed, residual_out, scale, bf16_out)``. Backends
+    that do not provide the graph-safe fused operation return ``None``.
+    """
+    return get_tp_group().fused_allreduce_rmsnorm_mxfp4_quant(
+        input_,
+        residual_inp_,
+        weight_,
+        eps,
+    )
+
+
 def tensor_model_parallel_all_gather(
     input_: torch.Tensor, dim: int = -1
 ) -> torch.Tensor:
