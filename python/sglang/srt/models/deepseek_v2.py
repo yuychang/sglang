@@ -2454,7 +2454,10 @@ class DeepseekV2Model(nn.Module):
         self.gemm_output_zero_allocator_size = 0
         if (
             _use_aiter_gfx95
-            and config.n_routed_experts == 256
+            # 256 -> DeepSeek-V3/R1, 384 -> Kimi-K2.5. Both share the gfx95 AITER
+            # MXFP4 decode shape (hidden 7168, single shared expert), so the
+            # pre-zeroed shared-expert gate_up output buffer applies to either.
+            and config.n_routed_experts in (256, 384)
             and self.embed_tokens.embedding_dim == 7168
         ):
             num_moe_layers = sum(
