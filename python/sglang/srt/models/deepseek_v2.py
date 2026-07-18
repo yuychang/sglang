@@ -935,6 +935,23 @@ class DeepseekV2MoE(nn.Module):
         has_shared_output = (
             hidden_states.shape[0] > 0 and self.num_fused_shared_experts == 0
         )
+        # Early-issue overlap (ROCm/AITER standard path only): the shared expert
+        # depends only on hidden_states, so issuing it on the alt stream before
+        # the gate lets it overlap the whole routed branch (gate + top-k +
+        # routed experts) instead of only the routed experts. Mirrors the CUDA
+        # deferred-finalize path's full-branch overlap. Not applied on the
+        # flashinfer bypass/deferred path, which keeps its PDL-tuned ordering.
+        early_issue_shared = (
+            has_shared_output
+            and not use_flashinfer_trtllm_bypass
+            and envs.SGLANG_OPT_ROCM_SHARED_EXPERT_EARLY_ISSUE.get()
+        )
+        shared_output = None
+        if early_issue_shared:
+            with torch.cuda.stream(self.alt_stream):
+                shared_output = self._forward_shared_experts(
+                    hidden_states, gemm_output_zero_allocator
+                )
         server_args = get_server_args()
         dispatch_info = (
             ExpertLocationDispatchInfo.init_new(layer_id=self.layer_id)
@@ -984,10 +1001,12 @@ class DeepseekV2MoE(nn.Module):
             final_hidden_states *= self.routed_scaling_factor
 
         # Shared expert on alt stream, issued AFTER the main (routed) branch. See note above.
-        with torch.cuda.stream(self.alt_stream):
-            shared_output = self._forward_shared_experts(
-                hidden_states, gemm_output_zero_allocator
-            )
+        # When early_issue_shared already dispatched it (above), don't re-issue.
+        if not early_issue_shared:
+            with torch.cuda.stream(self.alt_stream):
+                shared_output = self._forward_shared_experts(
+                    hidden_states, gemm_output_zero_allocator
+                )
 
         current_stream.wait_stream(self.alt_stream)
 

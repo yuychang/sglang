@@ -554,6 +554,12 @@ class Envs:
     # Enable dual-stream MoE (shared experts vs routed experts) on the
     # ROCm/AITER path. Requires GPU_MAX_HW_QUEUES>=5 to avoid HW-queue serialization.
     SGLANG_ROCM_USE_MULTI_STREAM = EnvBool(False)
+    # In the ROCm dual-stream MoE path, issue the shared-expert MLP on the alt
+    # stream BEFORE the router gate + top-k, so it overlaps the whole routed
+    # pipeline (gate + top-k + routed experts) instead of only the routed
+    # experts. Mirrors the CUDA deferred-finalize path, which lets the shared
+    # branch run concurrently with the full routed branch. Opt-in A/B knob.
+    SGLANG_OPT_ROCM_SHARED_EXPERT_EARLY_ISSUE = EnvBool(False)
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("tilelang")
 
     # MPS (Apple Silicon)
