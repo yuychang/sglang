@@ -560,6 +560,13 @@ class Envs:
     # experts. Mirrors the CUDA deferred-finalize path, which lets the shared
     # branch run concurrently with the full routed branch. Opt-in A/B knob.
     SGLANG_OPT_ROCM_SHARED_EXPERT_EARLY_ISSUE = EnvBool(False)
+    # ROCm analog of the CUDA flashinfer deferred finalize. In the dual-stream
+    # MoE path, run the routed AITER MoE with `no_combine` (returns un-combined
+    # per-slot output), overlap the shared expert, then do the routed combine +
+    # shared add in one `moe_finalize_shared` kernel. Requires an aiter build
+    # whose fused_moe accepts `no_combine`; falls back to the normal combine when
+    # unsupported. Opt-in A/B knob (multi-stream / separate-shared path only).
+    SGLANG_OPT_ROCM_DEFERRED_FINALIZE = EnvBool(False)
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("tilelang")
 
     # MPS (Apple Silicon)

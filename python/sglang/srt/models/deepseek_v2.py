@@ -984,8 +984,25 @@ class DeepseekV2MoE(nn.Module):
             and topk_output.format == TopKOutputFormat.BYPASSED
             and self.experts.supports_deferred_finalize
         )
+        # ROCm/AITER deferred finalize: routed MoE returns un-combined per-slot
+        # output (no_combine); the routed combine + shared add happen together in
+        # `moe_finalize_shared` after the shared expert overlaps. Standard (not
+        # bypassed) top-k path only.
+        rocm_deferred = (
+            _use_aiter
+            and has_shared_output
+            and not self._shared_expert_tp1
+            and not use_flashinfer_trtllm_bypass
+            and envs.SGLANG_OPT_ROCM_DEFERRED_FINALIZE.get()
+            and self.experts.supports_aiter_deferred_finalize
+        )
         if deferred_finalize:
             final_hidden_states = self.experts.forward_deferred_finalize(
+                hidden_states, topk_output
+            )
+        elif rocm_deferred:
+            # [num_tokens, top_k, hidden]; finalized after the alt-stream join.
+            final_hidden_states = self.experts.forward_aiter_no_combine(
                 hidden_states, topk_output
             )
         elif use_flashinfer_trtllm_bypass:
@@ -1017,6 +1034,16 @@ class DeepseekV2MoE(nn.Module):
 
             final_hidden_states = finalize_flashinfer_trtllm_deferred_output(
                 final_hidden_states,
+                shared_output,
+            )
+        elif rocm_deferred:
+            from sglang.srt.layers.moe.moe_runner.aiter import (
+                finalize_aiter_deferred_output,
+            )
+
+            final_hidden_states = finalize_aiter_deferred_output(
+                final_hidden_states,
+                topk_output.topk_weights,
                 shared_output,
             )
         else:

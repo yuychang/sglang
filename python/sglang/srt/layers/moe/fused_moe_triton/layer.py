@@ -1285,6 +1285,35 @@ class FusedMoE(torch.nn.Module):
 
         return self.dispatcher.combine(combine_input=combine_input)
 
+    @property
+    def supports_aiter_deferred_finalize(self) -> bool:
+        """AITER analog of `supports_deferred_finalize`.
+
+        True when the routed MoE can return its un-combined per-slot output
+        ([num_tokens, top_k, hidden]) via aiter `no_combine`, so the shared
+        expert can overlap and `moe_finalize_shared` does the combine. TP-only
+        (no EP dispatcher, which owns its own combine).
+        """
+        from sglang.srt.layers.moe.moe_runner.aiter import aiter_supports_no_combine
+
+        return (
+            get_moe_runner_backend().is_aiter()
+            and self.moe_ep_size == 1
+            and aiter_supports_no_combine()
+        )
+
+    def forward_aiter_no_combine(
+        self, hidden_states: torch.Tensor, topk_output: TopKOutput
+    ) -> torch.Tensor:
+        """Run the routed AITER MoE with `no_combine`, returning per-slot output
+        [num_tokens, top_k, hidden] (see `finalize_aiter_deferred_output`)."""
+        from sglang.srt.layers.moe.moe_runner.aiter import (
+            aiter_deferred_finalize_context,
+        )
+
+        with aiter_deferred_finalize_context():
+            return self.forward_impl(hidden_states, topk_output)
+
     def run_moe_core(self, dispatch_output: DispatchOutput) -> CombineInput:
         # TODO: consider using symmetric memory
         return self.quant_method.apply(

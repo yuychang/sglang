@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import contextvars
 import functools
 import inspect
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Generator, Optional, Union
 
 import torch
 
@@ -119,6 +121,69 @@ def _aiter_fused_moe_supports_no_combine() -> bool:
     return "no_combine" in inspect.signature(fused_moe).parameters
 
 
+def aiter_supports_no_combine() -> bool:
+    """Public probe for the AITER deferred-finalize (no_combine) capability."""
+    return _aiter_fused_moe_supports_no_combine()
+
+
+# Deferred-finalize context (ROCm analog of the flashinfer_trtllm one). When
+# active, `AiterRunnerCore.run` requests `no_combine` so the routed MoE returns
+# the un-combined per-slot output [num_tokens, top_k, hidden] instead of the
+# reduced hidden state, letting the shared expert overlap and a single
+# `moe_finalize_shared` kernel do the routed combine + shared add afterwards.
+_aiter_deferred_finalize_enabled: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "aiter_deferred_finalize_enabled", default=False
+)
+
+
+@contextmanager
+def aiter_deferred_finalize_context(
+    enabled: bool = True,
+) -> Generator[None, None, None]:
+    token = _aiter_deferred_finalize_enabled.set(enabled)
+    try:
+        yield
+    finally:
+        _aiter_deferred_finalize_enabled.reset(token)
+
+
+def finalize_aiter_deferred_output(
+    routed_slots: torch.Tensor,  # [num_tokens, top_k, hidden] (no_combine output)
+    topk_weights: torch.Tensor,  # [num_tokens, top_k]
+    shared_output: Optional[torch.Tensor],  # [num_tokens, hidden]
+) -> torch.Tensor:
+    """ROCm analog of `finalize_flashinfer_trtllm_deferred_output`.
+
+    Combine the AITER `no_combine` routed slots with the shared-expert output in
+    one fused kernel:
+
+        out[m] = sum_k topk_weights[m, k] * routed_slots[m, k] + shared_output[m]
+
+    On the AITER path the routing weights already fold in `routed_scaling_factor`
+    (fused into top-k), so the routed scaling is applied via `topk_weights` and
+    the finalize uses ``routed_scaling_factor=1.0``; the shared output is added
+    un-scaled, matching `maybe_fuse_routed_scale_and_shared_add`'s AITER branch.
+
+    NOTE: assumes `no_combine` returns *unweighted* per-slot outputs aligned with
+    `topk_weights` (slot k ↔ topk_weights[:, k]). Validate against the installed
+    aiter build; if it pre-weights the slots, pass topk_weights=None upstream.
+    """
+    from aiter.ops.triton.moe.finalize_shared import moe_finalize_shared
+
+    m, k, n = routed_slots.shape
+    routed_permuted = routed_slots.reshape(m * k, n)
+    scatter_index = torch.arange(
+        m * k, device=routed_slots.device, dtype=torch.int32
+    ).reshape(m, k)
+    return moe_finalize_shared(
+        routed_permuted,
+        scatter_index,
+        shared_output,
+        routed_scaling_factor=1.0,
+        topk_weights=topk_weights,
+    )
+
+
 class AiterRunnerCore(MoeRunnerCore):
     def run(
         self,
@@ -127,7 +192,8 @@ class AiterRunnerCore(MoeRunnerCore):
         running_state: dict,
         hooks: Optional[Any] = None,
     ) -> AiterRunnerOutput:
-        if self.config.no_combine and not _aiter_fused_moe_supports_no_combine():
+        no_combine = self.config.no_combine or _aiter_deferred_finalize_enabled.get()
+        if no_combine and not _aiter_fused_moe_supports_no_combine():
             raise NotImplementedError(
                 "no_combine=True requested but the installed aiter.fused_moe does "
                 "not accept a `no_combine` kwarg. Install an aiter build that "
@@ -135,7 +201,7 @@ class AiterRunnerCore(MoeRunnerCore):
             )
 
         if runner_input.hidden_states.shape[0] == 0:
-            if self.config.no_combine:
+            if no_combine:
                 topk = runner_input.topk_ids.shape[-1]
                 hidden_size = runner_input.hidden_states.shape[-1]
                 return AiterRunnerOutput(
@@ -180,7 +246,7 @@ class AiterRunnerCore(MoeRunnerCore):
                 else GateMode.SEPARATED.value
             )
             extra["swiglu_limit"] = quant_info.swiglu_limit
-        if self.config.no_combine:
+        if no_combine:
             extra["no_combine"] = True
 
         output = fused_moe(
