@@ -11,6 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
+import functools
 import logging
 import math
 from typing import Optional
@@ -55,7 +56,74 @@ _is_cublas_ge_129 = is_nvidia_cublas_version_ge_12_9()
 
 logger = logging.getLogger(__name__)
 
-NVFP4_CKPT_FP8_ATTN_QUANT_MODULES = ["q_b_proj"]
+# Attention-projection stems that may be quantized to fp8 for nvfp4 checkpoints
+# when SGLANG_NVFP4_CKPT_FP8_GEMM_IN_ATTN is set. Only standalone dense decode
+# projections with a clean 1:1 checkpoint tensor belong here.
+_DEFAULT_FP8_ATTN_QUANT_MODULES = ("q_b_proj",)
+_ALLOWED_FP8_ATTN_QUANT_MODULES = ("q_b_proj", "o_proj")
+# Stems that must never be fp8-quantized on this path:
+# - kv_b_proj: under MLA weight absorption it becomes the w_kc/w_vc batched GEMM;
+#   its weights are already fp4 on gfx950, so fp8 would double the bytes on a
+#   memory-bound op and regress decode.
+# - fused_qkv_a_proj_with_mqa: fused at load from separate q_a_proj +
+#   kv_a_proj_with_mqa checkpoint tensors, so it has no 1:1 checkpoint weight for
+#   the load-time quant step.
+_FORBIDDEN_FP8_ATTN_QUANT_MODULES = ("kv_b_proj", "fused_qkv_a_proj_with_mqa")
+
+# Back-compat alias for external importers.
+NVFP4_CKPT_FP8_ATTN_QUANT_MODULES = list(_DEFAULT_FP8_ATTN_QUANT_MODULES)
+
+
+@functools.lru_cache(maxsize=None)
+def _resolve_fp8_attn_quant_modules(requested: tuple) -> tuple:
+    """Pure resolver, cached on ``requested`` so warnings fire once per value.
+
+    Keyed on the requested tuple (not on nothing), so a test that overrides
+    ``SGLANG_NVFP4_CKPT_FP8_ATTN_MODULES`` still re-resolves under the new value
+    while the 60 per-layer construction calls that share one value are deduped.
+    """
+    if not requested:
+        return _DEFAULT_FP8_ATTN_QUANT_MODULES
+
+    resolved = []
+    for stem in requested:
+        if stem in _FORBIDDEN_FP8_ATTN_QUANT_MODULES:
+            logger.warning(
+                "SGLANG_NVFP4_CKPT_FP8_ATTN_MODULES: refusing to fp8-quantize "
+                "'%s' (absorbed or load-time-fused projection); skipping.",
+                stem,
+            )
+        elif stem not in _ALLOWED_FP8_ATTN_QUANT_MODULES:
+            logger.warning(
+                "SGLANG_NVFP4_CKPT_FP8_ATTN_MODULES: unknown attention "
+                "projection '%s'; allowed stems are %s. Skipping.",
+                stem,
+                ", ".join(_ALLOWED_FP8_ATTN_QUANT_MODULES),
+            )
+        elif stem not in resolved:
+            resolved.append(stem)
+
+    if not resolved:
+        logger.warning(
+            "SGLANG_NVFP4_CKPT_FP8_ATTN_MODULES had no usable stems; "
+            "falling back to default %s.",
+            _DEFAULT_FP8_ATTN_QUANT_MODULES,
+        )
+        return _DEFAULT_FP8_ATTN_QUANT_MODULES
+    return tuple(resolved)
+
+
+def resolve_fp8_attn_quant_modules() -> list[str]:
+    """Resolve which attention projections to fp8-quantize for nvfp4 checkpoints.
+
+    Reads the ``SGLANG_NVFP4_CKPT_FP8_ATTN_MODULES`` override (comma-separated
+    stems); an empty override falls back to the default ``("q_b_proj",)`` so the
+    behavior is unchanged unless the operator opts in. Requested stems that are
+    forbidden (absorbed / load-time-fused) or unknown are dropped with a warning
+    so a bad override degrades to the safe default instead of a silent regression
+    or a load-time crash.
+    """
+    return list(_resolve_fp8_attn_quant_modules(envs.SGLANG_NVFP4_CKPT_FP8_ATTN_MODULES.get()))
 
 FORWARD_ABSORB_CORE_ATTENTION_BACKENDS = [
     "fa3",

@@ -591,6 +591,12 @@ class Envs:
     SGLANG_FORCE_FP8_MARLIN = EnvBool(False)
     SGLANG_MOE_NVFP4_DISPATCH = EnvBool(False)
     SGLANG_NVFP4_CKPT_FP8_GEMM_IN_ATTN = EnvBool(False)
+    # Comma-separated attention-projection stems to quantize to fp8 when
+    # SGLANG_NVFP4_CKPT_FP8_GEMM_IN_ATTN is set. Empty falls back to the default
+    # ("q_b_proj",). Use e.g. "q_b_proj,o_proj" to ablate projections
+    # independently. Absorbed-weight modules (kv_b_proj) and the load-time-fused
+    # fused_qkv_a_proj_with_mqa are rejected — see resolve_fp8_attn_quant_modules.
+    SGLANG_NVFP4_CKPT_FP8_ATTN_MODULES = EnvTuple(())
     SGLANG_NVFP4_CKPT_FP8_NEXTN_MOE = EnvBool(False)
     SGLANG_QUANT_ALLOW_DOWNCASTING = EnvBool(False)
     SGLANG_FP8_IGNORED_LAYERS = EnvStr("")

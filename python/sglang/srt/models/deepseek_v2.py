@@ -180,6 +180,7 @@ from sglang.srt.models.deepseek_common.utils import (
     _use_aiter,
     _use_aiter_bpreshuffle_gfx95,
     _use_aiter_gfx95,
+    resolve_fp8_attn_quant_modules,
 )
 from sglang.srt.runtime_context import (
     get_flags,
@@ -1608,6 +1609,15 @@ class DeepseekV2AttentionMLA(
         if rope_scaling:
             rope_scaling["rope_type"] = "deepseek_yarn"
 
+        # Resolve which attention projections get fp8-quantized for nvfp4
+        # checkpoints once here, so each projection's construction below just
+        # checks membership. Empty unless SGLANG_NVFP4_CKPT_FP8_GEMM_IN_ATTN is set.
+        fp8_attn_modules = (
+            resolve_fp8_attn_quant_modules()
+            if envs.SGLANG_NVFP4_CKPT_FP8_GEMM_IN_ATTN.get()
+            else []
+        )
+
         # For tensor parallel attention
         if self.q_lora_rank is not None:
             self.fused_qkv_a_proj_with_mqa = ReplicatedLinear(
@@ -1622,7 +1632,9 @@ class DeepseekV2AttentionMLA(
                 q_lora_rank,
                 self.num_heads * self.qk_head_dim,
                 bias=False,
-                quant_config=self._get_q_b_proj_quant_config(quant_config),
+                quant_config=self._attn_proj_quant_config(
+                    quant_config, "q_b_proj" in fp8_attn_modules
+                ),
                 prefix=add_prefix("q_b_proj", prefix),
                 tp_rank=attn_tp_rank,
                 tp_size=attn_tp_size,
@@ -1697,7 +1709,9 @@ class DeepseekV2AttentionMLA(
             self.num_heads * self.v_head_dim,
             self.hidden_size,
             bias=False,
-            quant_config=quant_config,
+            quant_config=self._attn_proj_quant_config(
+                quant_config, "o_proj" in fp8_attn_modules
+            ),
             reduce_results=reduce_results,
             prefix=add_prefix("o_proj", prefix),
             tp_rank=attn_tp_rank,
@@ -2036,8 +2050,10 @@ class DeepseekV2AttentionMLA(
         return k_nope, k_pe
 
     @staticmethod
-    def _get_q_b_proj_quant_config(quant_config):
-        if envs.SGLANG_NVFP4_CKPT_FP8_GEMM_IN_ATTN.get():
+    def _attn_proj_quant_config(quant_config, use_fp8: bool):
+        """fp8 quant config for an attention projection when it's enabled for
+        this stem (see resolve_fp8_attn_quant_modules); else the original."""
+        if use_fp8:
             # refer to real DeepSeek V3 quant config
             return Fp8Config(
                 is_checkpoint_fp8_serialized=True,

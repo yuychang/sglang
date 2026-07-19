@@ -58,6 +58,7 @@ from sglang.srt.models.deepseek_common.utils import (
     _use_aiter_gfx95,
     awq_dequantize_func,
     enable_nextn_moe_bf16_cast_to_fp8,
+    resolve_fp8_attn_quant_modules,
 )
 from sglang.srt.utils import bind_or_assign, get_bool_env_var, log_info_on_rank0
 
@@ -65,9 +66,6 @@ if _use_aiter_gfx95:
     from sglang.srt.layers.quantization.quark.utils import quark_post_load_weights
 
 logger = logging.getLogger(__name__)
-
-# Optional quantization for DeepSeek nvfp4 checkpoint
-NVFP4_CKPT_FP8_ATTN_QUANT_MODULES = ["q_b_proj"]
 
 
 def _clone_if_runai_streamed_tensor(tensor: torch.Tensor) -> torch.Tensor:
@@ -162,7 +160,7 @@ class DeepseekV2WeightLoaderMixin:
         nextn_conf = self._initialize_nextn_conf(is_nextn)
 
         weights = self._maybe_quant_weights_to_fp8_ue8m0(
-            weights, NVFP4_CKPT_FP8_ATTN_QUANT_MODULES, nextn_conf
+            weights, resolve_fp8_attn_quant_modules(), nextn_conf
         )
 
         stacked_params_mapping = [
