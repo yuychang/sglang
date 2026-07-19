@@ -2486,10 +2486,28 @@ class DeepseekV2Model(nn.Module):
             self.norm = PPMissingLayer(return_tuple=True)
 
         self.gemm_output_zero_allocator_size = 0
+        # The pre-zeroed buffer is consumed only by the separate shared-expert
+        # MXFP4 MLP (DeepseekV2MLP.forward). With shared-experts fusion the shared
+        # expert runs inside the routed grouped GEMM (its output is zeroed for free
+        # by AITER moe_sorting), so there is no consumer — sizing it there would
+        # allocate + memset a per-forward buffer nothing reads. Gate on a real
+        # separate shared expert. 256 = DeepSeek-V3, 384 = Kimi K2.5.
+        first_moe_mlp = next(
+            (
+                layer.mlp
+                for layer in self.layers
+                if isinstance(layer.mlp, DeepseekV2MoE)
+            ),
+            None,
+        )
+        has_separate_shared_expert = (
+            first_moe_mlp is not None and first_moe_mlp.num_fused_shared_experts == 0
+        )
         if (
             _use_aiter_gfx95
-            and config.n_routed_experts == 256
+            and config.n_routed_experts in (256, 384)
             and self.embed_tokens.embedding_dim == 7168
+            and has_separate_shared_expert
         ):
             num_moe_layers = sum(
                 [
