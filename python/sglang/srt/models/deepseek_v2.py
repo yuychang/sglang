@@ -2074,12 +2074,17 @@ class DeepseekV2DecoderLayer(nn.Module):
         is_nextn: bool = False,
         prefix: str = "",
         alt_stream: Optional[torch.cuda.Stream] = None,
+        moe_alt_stream: Optional[torch.cuda.Stream] = None,
         dsa_enable_prefill_cp: bool = False,
         mla_enable_prefill_cp: bool = False,
     ) -> None:
         super().__init__()
         self.hidden_size = config.hidden_size
         self.config = config
+        # MoE gets its own overlap stream (may differ from attention's on ROCm);
+        # default to the attention stream when not provided.
+        if moe_alt_stream is None:
+            moe_alt_stream = alt_stream
         if hasattr(config, "rope_parameters"):
             rope_theta = config.rope_parameters["rope_theta"]
             assert rope_theta is not None, f"rope_theta not found in config: {config}"
@@ -2142,7 +2147,7 @@ class DeepseekV2DecoderLayer(nn.Module):
                 quant_config=moe_quant_config_override or quant_config,
                 prefix=add_prefix("mlp", prefix),
                 layer_id=self.layer_id,
-                alt_stream=alt_stream,
+                alt_stream=moe_alt_stream,
                 is_nextn=is_nextn,
                 dsa_enable_prefill_cp=dsa_enable_prefill_cp,
                 mla_enable_prefill_cp=mla_enable_prefill_cp,
@@ -2407,15 +2412,27 @@ class DeepseekV2Model(nn.Module):
         else:
             self.embed_tokens = PPMissingLayer()
 
+        # Attention alt stream. NOTE: ROCm is intentionally excluded here — on
+        # gfx95 the MLA qk-norm has a fused kernel that beats the two-stream
+        # overlap, and handing attention an alt_stream forces it onto the slower
+        # two-stream path. MoE gets its own stream below instead.
         self.alt_stream = (
             torch.cuda.Stream()
             if (
                 _is_cuda
                 or _is_musa
                 or envs.SGLANG_NPU_USE_MULTI_STREAM.get()
-                or envs.SGLANG_ROCM_USE_MULTI_STREAM.get()
             )
             else None
+        )
+        # MoE overlap stream. On CUDA/MUSA the MoE reuses the attention stream
+        # (sequential ops, so sharing is safe). On ROCm, SGLANG_ROCM_USE_MULTI_STREAM
+        # gives MoE a dedicated stream so shared/routed overlap is available
+        # without regressing MLA (mirrors DeepseekV4's moe_alt_stream split).
+        self.moe_alt_stream = (
+            torch.cuda.Stream()
+            if envs.SGLANG_ROCM_USE_MULTI_STREAM.get()
+            else self.alt_stream
         )
 
         self.layers, self.start_layer, self.end_layer = make_layers(
@@ -2426,6 +2443,7 @@ class DeepseekV2Model(nn.Module):
                 quant_config=quant_config,
                 prefix=prefix,
                 alt_stream=self.alt_stream,
+                moe_alt_stream=self.moe_alt_stream,
                 dsa_enable_prefill_cp=self.dsa_enable_prefill_cp,
                 mla_enable_prefill_cp=self.mla_enable_prefill_cp,
             ),
