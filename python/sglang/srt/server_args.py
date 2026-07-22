@@ -1640,9 +1640,9 @@ class ServerArgs:
         bool,
         (
             "Fuse MXFP4 activation quantization into the gfx950 Kimi K2.5 "
-            "AR+RMSNorm producer and reuse it in the shared FC1. The initial "
-            "implementation is graph-only, TP=4/EP=1, Quark MXFP4, and M=32; "
-            "unsupported cases fall back."
+            "AR+RMSNorm producer and reuse it in the shared FC1. The "
+            "implementation is graph-only, TP=4/EP=1, Quark MXFP4, and "
+            "supports M=4,8,16,32,64,128; unsupported cases fall back."
         ),
     ] = False
 

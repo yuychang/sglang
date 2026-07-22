@@ -4,8 +4,13 @@ from unittest import mock
 
 import torch
 
+from sglang.srt.distributed import parallel_state
 from sglang.srt.layers import layernorm
 from sglang.srt.layers.moe import rocm_kimi_shared
+from sglang.test.ci.ci_register import register_cpu_ci
+from sglang.test.test_utils import CustomTestCase
+
+register_cpu_ci(est_time=5, suite="base-a-test-cpu")
 
 
 def _fake_cuda_tensor(shape=(4, 7168), dtype=torch.bfloat16):
@@ -41,7 +46,7 @@ class _CarrierTensor:
         return True
 
 
-class TestRocmKimiSharedArFusion(unittest.TestCase):
+class TestRocmKimiSharedArFusion(CustomTestCase):
     def test_supported_graph_shape_selects_carrier(self):
         routed = _fake_cuda_tensor()
         shared = _fake_cuda_tensor()
@@ -125,10 +130,7 @@ class TestRocmKimiSharedArFusion(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "must be one of"):
                 rocm_kimi_shared.get_rocm_fused_ar_mxfp4_quant_mode()
 
-    def test_fused_ar_mxfp4_quant_eligibility_is_m32_only(self):
-        hidden = _CarrierTensor((32, 7168), torch.bfloat16, 1)
-        residual = _CarrierTensor((32, 7168), torch.bfloat16, 2, device=hidden.device)
-        weight = _CarrierTensor((7168,), torch.bfloat16, 3, device=hidden.device)
+    def test_fused_ar_mxfp4_quant_eligibility_concurrency_matrix(self):
         kwargs = dict(
             is_target_layer=True,
             mode="optimized",
@@ -138,33 +140,90 @@ class TestRocmKimiSharedArFusion(unittest.TestCase):
             ep_world_size=1,
             hip_version=(7, 2),
         )
-        self.assertTrue(
-            rocm_kimi_shared.can_fuse_rocm_mxfp4_activation(
-                hidden,
-                residual,
-                weight,
-                **kwargs,
-            )
-        )
-        hidden.shape = residual.shape = (16, 7168)
-        self.assertFalse(
-            rocm_kimi_shared.can_fuse_rocm_mxfp4_activation(
-                hidden,
-                residual,
-                weight,
-                **kwargs,
-            )
-        )
+        for token_count in (4, 8, 16, 32, 64, 128):
+            with self.subTest(token_count=token_count):
+                hidden = _CarrierTensor(
+                    (token_count, 7168), torch.bfloat16, token_count
+                )
+                residual = _CarrierTensor(
+                    (token_count, 7168),
+                    torch.bfloat16,
+                    token_count + 1,
+                    device=hidden.device,
+                )
+                weight = _CarrierTensor(
+                    (7168,), torch.bfloat16, token_count + 2, device=hidden.device
+                )
+                self.assertTrue(
+                    rocm_kimi_shared.can_fuse_rocm_mxfp4_activation(
+                        hidden,
+                        residual,
+                        weight,
+                        **kwargs,
+                    )
+                )
 
-    def test_mxfp4_activation_carrier_is_scoped_and_consumed_once(self):
-        hidden = _CarrierTensor((32, 7168), torch.bfloat16, 11)
-        packed = _CarrierTensor((32, 3584), torch.uint8, 12, device=hidden.device)
-        scale = _CarrierTensor((32, 224), torch.uint8, 13, device=hidden.device)
-        rocm_kimi_shared.attach_rocm_mxfp4_activation(hidden, packed, scale)
-        carrier = rocm_kimi_shared.pop_rocm_mxfp4_activation(hidden)
-        self.assertIs(carrier.packed, packed)
-        self.assertIs(carrier.scale, scale)
-        self.assertIsNone(rocm_kimi_shared.pop_rocm_mxfp4_activation(hidden))
+        for token_count in (1, 2, 3, 5, 256):
+            with self.subTest(unsupported_token_count=token_count):
+                hidden = _CarrierTensor(
+                    (token_count, 7168), torch.bfloat16, token_count
+                )
+                residual = _CarrierTensor(
+                    (token_count, 7168),
+                    torch.bfloat16,
+                    token_count + 1,
+                    device=hidden.device,
+                )
+                weight = _CarrierTensor(
+                    (7168,), torch.bfloat16, token_count + 2, device=hidden.device
+                )
+                self.assertFalse(
+                    rocm_kimi_shared.can_fuse_rocm_mxfp4_activation(
+                        hidden,
+                        residual,
+                        weight,
+                        **kwargs,
+                    )
+                )
+
+    def test_mxfp4_activation_carrier_concurrency_matrix(self):
+        for token_count in (4, 8, 16, 32, 64, 128):
+            with self.subTest(token_count=token_count):
+                hidden = _CarrierTensor(
+                    (token_count, 7168), torch.bfloat16, token_count * 10 + 1
+                )
+                packed = _CarrierTensor(
+                    (token_count, 3584),
+                    torch.uint8,
+                    token_count * 10 + 2,
+                    device=hidden.device,
+                )
+                scale = _CarrierTensor(
+                    (token_count, 224),
+                    torch.uint8,
+                    token_count * 10 + 3,
+                    device=hidden.device,
+                )
+                rocm_kimi_shared.attach_rocm_mxfp4_activation(
+                    hidden, packed, scale
+                )
+                carrier = rocm_kimi_shared.pop_rocm_mxfp4_activation(hidden)
+                self.assertIs(carrier.packed, packed)
+                self.assertIs(carrier.scale, scale)
+                self.assertIsNone(
+                    rocm_kimi_shared.pop_rocm_mxfp4_activation(hidden)
+                )
+
+    def test_mxfp4_activation_carrier_rejects_unsupported_concurrency(self):
+        hidden = _CarrierTensor((2, 7168), torch.bfloat16, 1)
+        packed = _CarrierTensor((2, 3584), torch.uint8, 2, device=hidden.device)
+        scale = _CarrierTensor((2, 224), torch.uint8, 3, device=hidden.device)
+        with self.assertRaisesRegex(RuntimeError, "invalid ROCm fused AR"):
+            rocm_kimi_shared.attach_rocm_mxfp4_activation(
+                hidden,
+                packed,
+                scale,
+            )
 
     def test_mxfp4_activation_carrier_rejects_stale_source(self):
         hidden = _CarrierTensor((32, 7168), torch.bfloat16, 21)
@@ -176,31 +235,56 @@ class TestRocmKimiSharedArFusion(unittest.TestCase):
             rocm_kimi_shared.pop_rocm_mxfp4_activation(hidden)
         self.assertIsNone(rocm_kimi_shared.pop_rocm_mxfp4_activation(hidden))
 
-    def test_mxfp4_carrier_matches_exact_shared_fc1(self):
-        hidden = _CarrierTensor((32, 7168), torch.bfloat16, 31)
-        packed = _CarrierTensor((32, 3584), torch.uint8, 32, device=hidden.device)
-        scale = _CarrierTensor((32, 224), torch.uint8, 33, device=hidden.device)
-        rocm_kimi_shared.attach_rocm_mxfp4_activation(hidden, packed, scale)
-        carrier = rocm_kimi_shared.pop_rocm_mxfp4_activation(hidden)
-        weight = _CarrierTensor((1024, 3584), torch.uint8, 34, device=hidden.device)
-        weight_scale = _CarrierTensor(
-            (1024, 224), torch.uint8, 35, device=hidden.device
-        )
-        self.assertTrue(
-            rocm_kimi_shared.validate_rocm_mxfp4_shared_fc1(
-                carrier,
-                weight,
-                weight_scale,
-            )
-        )
-        weight.shape = (2048, 3584)
-        self.assertFalse(
-            rocm_kimi_shared.validate_rocm_mxfp4_shared_fc1(
-                carrier,
-                weight,
-                weight_scale,
-            )
-        )
+    def test_mxfp4_carrier_matches_exact_shared_fc1_concurrency_matrix(self):
+        for token_count in (4, 8, 16, 32, 64, 128):
+            with self.subTest(token_count=token_count):
+                hidden = _CarrierTensor(
+                    (token_count, 7168), torch.bfloat16, token_count * 10 + 1
+                )
+                packed = _CarrierTensor(
+                    (token_count, 3584),
+                    torch.uint8,
+                    token_count * 10 + 2,
+                    device=hidden.device,
+                )
+                scale = _CarrierTensor(
+                    (token_count, 224),
+                    torch.uint8,
+                    token_count * 10 + 3,
+                    device=hidden.device,
+                )
+                rocm_kimi_shared.attach_rocm_mxfp4_activation(
+                    hidden, packed, scale
+                )
+                carrier = rocm_kimi_shared.pop_rocm_mxfp4_activation(hidden)
+                weight = _CarrierTensor(
+                    (1024, 3584),
+                    torch.uint8,
+                    token_count * 10 + 4,
+                    device=hidden.device,
+                )
+                weight_scale = _CarrierTensor(
+                    (1024, 224),
+                    torch.uint8,
+                    token_count * 10 + 5,
+                    device=hidden.device,
+                )
+                self.assertTrue(
+                    rocm_kimi_shared.validate_rocm_mxfp4_shared_fc1(
+                        carrier,
+                        weight,
+                        weight_scale,
+                    )
+                )
+
+                weight.shape = (2048, 3584)
+                self.assertFalse(
+                    rocm_kimi_shared.validate_rocm_mxfp4_shared_fc1(
+                        carrier,
+                        weight,
+                        weight_scale,
+                    )
+                )
 
     def test_layernorm_selects_mxfp4_producer_fusion(self):
         x = torch.randn(32, 8, dtype=torch.bfloat16)
@@ -269,34 +353,97 @@ class TestRocmKimiSharedArFusion(unittest.TestCase):
         fused_quant.assert_called_once_with(x, residual, weight, 1e-6)
         attach.assert_called_once_with(bf16_out, packed, scale)
 
-    def test_group_coordinator_uses_graph_safe_mxfp4_api(self):
+    def test_group_coordinator_uses_direct_mxfp4_api_through_m32(self):
         from sglang.srt.distributed.parallel_state import GroupCoordinator
 
-        coordinator = object.__new__(GroupCoordinator)
-        coordinator.ca_comm = types.SimpleNamespace(
-            disabled=False,
-            custom_fused_ar_rms_mxfp4_quant=mock.Mock(return_value="result"),
-        )
-        x = torch.empty(32, 8)
-        residual = torch.empty_like(x)
-        weight = torch.empty(8)
+        for token_count in (4, 8, 16, 32):
+            with self.subTest(token_count=token_count):
+                coordinator = object.__new__(GroupCoordinator)
+                coordinator.world_size = 4
+                coordinator.ca_comm = types.SimpleNamespace(
+                    disabled=False,
+                    custom_fused_ar_rms_mxfp4_quant=mock.Mock(
+                        return_value="result"
+                    ),
+                )
+                x = _CarrierTensor((token_count, 7168), torch.bfloat16, 1)
+                residual = _CarrierTensor(
+                    (token_count, 7168), torch.bfloat16, 2, device=x.device
+                )
+                weight = _CarrierTensor(
+                    (7168,), torch.bfloat16, 3, device=x.device
+                )
 
-        result = coordinator.fused_allreduce_rmsnorm_mxfp4_quant(
-            x,
-            residual,
-            weight,
-            1e-6,
-        )
+                result = coordinator.fused_allreduce_rmsnorm_mxfp4_quant(
+                    x,
+                    residual,
+                    weight,
+                    1e-6,
+                )
 
-        self.assertEqual(result, "result")
-        coordinator.ca_comm.custom_fused_ar_rms_mxfp4_quant.assert_called_once_with(
-            x,
-            residual,
-            weight,
-            1e-6,
-            use_1stage=False,
-            emit_bf16=True,
-        )
+                self.assertEqual(result, "result")
+                coordinator.ca_comm.custom_fused_ar_rms_mxfp4_quant.assert_called_once_with(
+                    x,
+                    residual,
+                    weight,
+                    1e-6,
+                    use_1stage=token_count == 4,
+                    emit_bf16=True,
+                )
+
+    def test_group_coordinator_composes_safe_m64_m128_fallback(self):
+        from sglang.srt.distributed.parallel_state import GroupCoordinator
+
+        for token_count in (64, 128):
+            with self.subTest(token_count=token_count):
+                coordinator = object.__new__(GroupCoordinator)
+                coordinator.world_size = 4
+                direct = mock.Mock(return_value="unexpected")
+                coordinator.ca_comm = types.SimpleNamespace(
+                    disabled=False,
+                    custom_fused_ar_rms_mxfp4_quant=direct,
+                )
+                x = _CarrierTensor((token_count, 7168), torch.bfloat16, 11)
+                residual = _CarrierTensor(
+                    (token_count, 7168), torch.bfloat16, 12, device=x.device
+                )
+                weight = _CarrierTensor(
+                    (7168,), torch.bfloat16, 13, device=x.device
+                )
+                bf16_out = _CarrierTensor(
+                    (token_count, 7168), torch.bfloat16, 14, device=x.device
+                )
+                residual_out = _CarrierTensor(
+                    (token_count, 7168), torch.bfloat16, 15, device=x.device
+                )
+                packed = _CarrierTensor(
+                    (token_count, 3584), torch.uint8, 16, device=x.device
+                )
+                scale = _CarrierTensor(
+                    (token_count, 224), torch.uint8, 17, device=x.device
+                )
+                coordinator.fused_allreduce_rmsnorm = mock.Mock(
+                    return_value=(bf16_out, residual_out)
+                )
+
+                with mock.patch.object(
+                    parallel_state,
+                    "_dynamic_mxfp4_quant",
+                    return_value=(packed, scale),
+                ) as dynamic_quant:
+                    result = coordinator.fused_allreduce_rmsnorm_mxfp4_quant(
+                        x,
+                        residual,
+                        weight,
+                        1e-6,
+                    )
+
+                self.assertEqual(result, (packed, residual_out, scale, bf16_out))
+                direct.assert_not_called()
+                coordinator.fused_allreduce_rmsnorm.assert_called_once_with(
+                    x, residual, weight, 1e-6
+                )
+                dynamic_quant.assert_called_once_with(bf16_out)
 
     def test_layernorm_selects_two_input_api(self):
         x = torch.randn(2, 8, dtype=torch.bfloat16)

@@ -708,7 +708,9 @@ dedicated MoE stream: shared MLP ───────────────�
                 BF16-normalized result together with packed FP4 data and
                 scales. A one-use carrier attaches those quantized buffers to
                 the BF16 tensor so the dependent shared FC1 can reuse them
-                without another quantization pass.
+                without another quantization pass. Graph concurrency
+                4/8/16/32 uses AITER's direct quantizing epilogue; 64/128 uses
+                fused AR/RMSNorm followed by one reusable quantization pass.
               </p>
               <div class="switch">
                 <strong>
@@ -829,7 +831,7 @@ dedicated MoE stream: shared MLP ───────────────�
               <td><code>--enable-rocm-fused-ar-mxfp4-quant</code></td>
               <td>off</td>
               <td>Enables the fused AR/RMSNorm/MXFP4 producer.</td>
-              <td>Initial implementation is graph-only, TP4/EP1, and M32-specific.</td>
+              <td>Graph-only TP4/EP1 path for M=4,8,16,32,64,128.</td>
             </tr>
             <tr>
               <td><code>SGLANG_ROCM_FUSED_AR_MXFP4_QUANT_MODE</code></td>

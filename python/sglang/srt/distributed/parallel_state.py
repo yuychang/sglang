@@ -108,6 +108,14 @@ def _select_fused_ar_rms_1stage(
     return total_bytes <= max_bytes
 
 
+def _dynamic_mxfp4_quant(
+    input_: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    from aiter.ops.triton.quant import dynamic_mxfp4_quant
+
+    return dynamic_mxfp4_quant(input_)
+
+
 def get_torch_distributed_pg_options(group_name=None):
     if not _is_npu:
         return None
@@ -819,38 +827,72 @@ class GroupCoordinator:
         weight_: torch.Tensor,
         eps: float,
     ) -> Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
-        """Attempt graph-safe AITER AR+RMSNorm+MXFP4 quant with BF16 output."""
+        """Produce graph-safe AR+RMSNorm output and reusable MXFP4 activations.
+
+        Kimi decode shapes through M=32 use AITER's direct quantizing epilogue.
+        M=64/128 exceed its 512 KiB two-stage budget at hidden size 7168, so
+        they safely compose fused AR+RMSNorm with one dynamic MXFP4 quantization
+        whose output is still reused by the shared FC1.
+        """
+        supported_token_counts = (4, 8, 16, 32, 64, 128)
+        if (
+            self.world_size != 4
+            or input_.dim() != 2
+            or input_.shape != residual_inp_.shape
+            or input_.shape[0] not in supported_token_counts
+            or input_.shape[1] != weight_.numel()
+            or input_.shape[1] != 7168
+        ):
+            return None
+
         ca_comm = self.ca_comm
         if ca_comm is None or getattr(ca_comm, "disabled", True):
             return None
-        custom_fused_fn = getattr(
-            ca_comm,
-            "custom_fused_ar_rms_mxfp4_quant",
-            None,
-        )
-        if custom_fused_fn is not None:
-            return custom_fused_fn(
-                input_,
-                residual_inp_,
-                weight_,
-                eps,
-                use_1stage=False,
-                emit_bf16=True,
-            )
+
         fused_fn = getattr(
             ca_comm,
             "fused_allreduce_rmsnorm_mxfp4_quant",
             None,
         )
-        if fused_fn is None:
-            return None
-        return fused_fn(
+        if fused_fn is not None:
+            return fused_fn(
+                input_,
+                residual_inp_,
+                weight_,
+                eps,
+                emit_bf16=True,
+            )
+
+        token_count = input_.shape[0]
+        custom_fused_fn = getattr(
+            ca_comm,
+            "custom_fused_ar_rms_mxfp4_quant",
+            None,
+        )
+        if custom_fused_fn is not None and token_count <= 32:
+            result = custom_fused_fn(
+                input_,
+                residual_inp_,
+                weight_,
+                eps,
+                use_1stage=token_count <= 4,
+                emit_bf16=True,
+            )
+            if result is not None:
+                return result
+
+        fused_result = self.fused_allreduce_rmsnorm(
             input_,
             residual_inp_,
             weight_,
             eps,
-            emit_bf16=True,
         )
+        if fused_result is None:
+            return None
+        bf16_out, residual_out = fused_result
+
+        packed, scale = _dynamic_mxfp4_quant(bf16_out)
+        return packed, residual_out, scale, bf16_out
 
     def _all_reduce_out_place(
         self, input_: torch.Tensor, outplace_all_reduce_method: str

@@ -240,7 +240,7 @@ def _forward_with_allreduce_fusion(
                             logger.info_once(
                                 "ROCm fused AR+RMSNorm+MXFP4 quant active: "
                                 "fused AR+RMSNorm+MXFP4 producer, "
-                                "shape=(32, 7168), shared FC1 N=1024."
+                                f"shape={tuple(x.shape)}, shared FC1 N=1024."
                             )
                             return bf16_out, residual_out
 

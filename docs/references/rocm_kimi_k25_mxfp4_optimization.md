@@ -97,6 +97,19 @@ For TP=4 and hidden size 7168, fused AR+RMSNorm uses a measured byte/token
 crossover rather than a single global cutoff. The two-input path uses one-stage
 through M=8 and the partitioned two-stage path for M=16/32.
 
+### Fused AR, RMSNorm, and reusable MXFP4 activation
+
+The default-off `--enable-rocm-fused-ar-mxfp4-quant` path supports graph
+concurrency 4, 8, 16, 32, 64, and 128. It preserves the BF16 normalized output
+for routing and attaches a one-use packed FP4 activation plus E8M0 scales for
+the separate shared FC1.
+
+At hidden size 7168, AITER uses its direct one-stage quantizing epilogue for
+M=4 and its direct two-stage epilogue for M=8/16/32. M=64/128 exceed the direct
+kernel's 512 KiB budget, so they safely compose fused AR+RMSNorm with one
+dynamic MXFP4 quantization pass; the resulting activation is still reused by
+the shared FC1. Unsupported shapes retain the existing path.
+
 ## Rejected designs not present in the active path
 
 The following experiments were measured and removed rather than left behind as

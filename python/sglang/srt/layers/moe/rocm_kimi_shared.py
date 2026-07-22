@@ -10,8 +10,8 @@ from sglang.srt.environ import envs
 _SHARED_PARTIAL_ATTR = "_sglang_rocm_shared_partial"
 _MXFP4_ACTIVATION_ATTR = "_sglang_rocm_mxfp4_activation"
 _SUPPORTED_TOKEN_COUNTS = frozenset((1, 2, 4, 8, 16, 32))
+_FUSED_AR_MXFP4_TOKEN_COUNTS = frozenset((4, 8, 16, 32, 64, 128))
 _KIMI_HIDDEN_SIZE = 7168
-_TARGET_TOKEN_COUNT = 32
 _TARGET_FC1_N = 1024
 _MXFP4_PACKED_K = _KIMI_HIDDEN_SIZE // 2
 _MXFP4_SCALE_K = _KIMI_HIDDEN_SIZE // 32
@@ -78,7 +78,8 @@ def can_fuse_rocm_mxfp4_activation(
         and weight.dtype == torch.bfloat16
         and hidden_states.dim() == 2
         and hidden_states.shape == residual.shape
-        and hidden_states.shape == (_TARGET_TOKEN_COUNT, _KIMI_HIDDEN_SIZE)
+        and hidden_states.shape[0] in _FUSED_AR_MXFP4_TOKEN_COUNTS
+        and hidden_states.shape[1] == _KIMI_HIDDEN_SIZE
         and weight.numel() == _KIMI_HIDDEN_SIZE
         and hidden_states.is_contiguous()
         and residual.is_contiguous()
@@ -93,10 +94,12 @@ def attach_rocm_mxfp4_activation(
 ) -> None:
     if hasattr(hidden_states, _MXFP4_ACTIVATION_ATTR):
         raise RuntimeError("ROCm MXFP4 activation carrier was already populated")
+    token_count = hidden_states.shape[0] if hidden_states.dim() == 2 else -1
     if (
-        hidden_states.shape != (_TARGET_TOKEN_COUNT, _KIMI_HIDDEN_SIZE)
-        or packed.shape != (_TARGET_TOKEN_COUNT, _MXFP4_PACKED_K)
-        or scale.shape != (_TARGET_TOKEN_COUNT, _MXFP4_SCALE_K)
+        token_count not in _FUSED_AR_MXFP4_TOKEN_COUNTS
+        or hidden_states.shape != (token_count, _KIMI_HIDDEN_SIZE)
+        or packed.shape != (token_count, _MXFP4_PACKED_K)
+        or scale.shape != (token_count, _MXFP4_SCALE_K)
         or hidden_states.dtype != torch.bfloat16
         or packed.dtype != torch.uint8
         or scale.dtype != torch.uint8
@@ -148,9 +151,12 @@ def validate_rocm_mxfp4_shared_fc1(
     weight: torch.Tensor,
     weight_scale: torch.Tensor,
 ) -> bool:
+    token_count = carrier.source_shape[0] if len(carrier.source_shape) == 2 else -1
     return bool(
-        carrier.packed.shape == (_TARGET_TOKEN_COUNT, _MXFP4_PACKED_K)
-        and carrier.scale.shape == (_TARGET_TOKEN_COUNT, _MXFP4_SCALE_K)
+        token_count in _FUSED_AR_MXFP4_TOKEN_COUNTS
+        and carrier.source_shape == (token_count, _KIMI_HIDDEN_SIZE)
+        and carrier.packed.shape == (token_count, _MXFP4_PACKED_K)
+        and carrier.scale.shape == (token_count, _MXFP4_SCALE_K)
         and weight.shape == (_TARGET_FC1_N, _MXFP4_PACKED_K)
         and weight_scale.shape == (_TARGET_FC1_N, _MXFP4_SCALE_K)
         and carrier.packed.dtype == torch.uint8
