@@ -1,9 +1,5 @@
 """Unit tests for BF16 MLA-absorb weight prescaling and output layout."""
 
-from sglang.test.ci.ci_register import register_cpu_ci
-
-register_cpu_ci(est_time=5, suite="base-a-test-cpu")
-
 import unittest
 from types import SimpleNamespace
 
@@ -15,7 +11,10 @@ from sglang.srt.models.deepseek_common.attention_forward_methods.forward_mla imp
 from sglang.srt.models.deepseek_common.deepseek_weight_loader import (
     _prescale_mla_absorb_weights,
 )
+from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import CustomTestCase
+
+register_cpu_ci(est_time=5, suite="base-a-test-cpu")
 
 
 class TestMlaAbsorbBf16(CustomTestCase):
