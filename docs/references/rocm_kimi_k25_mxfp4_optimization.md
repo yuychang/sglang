@@ -58,6 +58,24 @@ MXFP4 quantization before the down projection. The down projection consumes the
 packed FP4 activation and compact E8M0 scale directly, avoiding a standalone
 activation tensor and quantization pass.
 
+### MLA value projection and output quantization fusion
+
+During AITER graph decode, the absorbed MLA value projection can emit the
+flattened per-1x32 MXFP4 activation and E8M0 scales consumed by `o_proj`
+directly from its GEMM accumulator. This removes the per-layer BF16
+`[tokens, heads, v_head_dim]` intermediate and the following flatten/quantize
+launch. The epilogue rounds through BF16 before quantization to preserve the
+split path's numerical boundary.
+
+The path is limited to non-split AITER GEMM configurations whose output tile is
+aligned to a complete MXFP4 quantization group. Unsupported configurations and
+active `kv_b_proj` LoRAs retain the split implementation. It can be disabled
+for A/B testing:
+
+```bash
+export SGLANG_ROCM_FUSE_MLA_VALUE_MXFP4_QUANT=0
+```
+
 ### Dedicated MoE stream
 
 The routed branch stays on the graph/main stream while the shared MLP runs on a

@@ -543,6 +543,9 @@ class Envs:
     # Fuse the absorbed MLA w_kc projection with RoPE and KV-cache writes in
     # one AITER grid during Kimi-K2.5 HIP-graph decode.
     SGLANG_ROCM_FUSE_MLA_PROJECTION_ROPE_CACHE = EnvBool(True)
+    # Quantize the absorbed MLA value projection directly from the AITER
+    # batched-GEMM accumulator, avoiding the intermediate BF16 tensor.
+    SGLANG_ROCM_FUSE_MLA_VALUE_MXFP4_QUANT = EnvBool(True)
     # During Kimi-K2.5 MXFP4 HIP-graph decode, keep routed/shared TP-local
     # outputs separate and consume both in AITER fused AR+residual+RMSNorm.
     # Unsupported shapes/configurations retain the existing local add path.
