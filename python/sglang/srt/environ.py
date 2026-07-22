@@ -548,6 +548,9 @@ class Envs:
     # decode without runtime permutes.
     SGLANG_AITER_KV_CACHE_LAYOUT = EnvStr("nhd")
     SGLANG_ROCM_FUSED_DECODE_MLA = EnvBool(False)
+    # Keep quark MLA-absorb weights in BF16 instead of re-quantizing them to
+    # MXFP4 on gfx95/AITER. This trades memory/bandwidth for higher accuracy.
+    SGLANG_MLA_ABSORB_BF16 = EnvBool(False)
     SGLANG_ROCM_DISABLE_LINEARQUANT = EnvBool(False)
     USE_ROCM_AITER_ROPE_BACKEND = EnvStr("0")
     SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK = EnvInt(4096)

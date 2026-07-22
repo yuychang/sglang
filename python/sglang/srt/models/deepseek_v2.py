@@ -1763,6 +1763,7 @@ class DeepseekV2AttentionMLA(
         self.w_kc = None
         self.w_vc = None
         self.w_scale = 1.0
+        self.mla_absorb_weights_prescaled = False
 
         self.w_scale_k = None
         self.w_scale_v = None

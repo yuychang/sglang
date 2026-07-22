@@ -74,6 +74,23 @@ from sglang.srt.utils.custom_op import register_custom_op
 logger = logging.getLogger(__name__)
 _SGLANG_EXPERIMENTAL_LORA_OPTI = envs.SGLANG_EXPERIMENTAL_LORA_OPTI.get()
 
+
+def _bmm_mla_absorb_bf16_to_contiguous(
+    attn_output: torch.Tensor, w_vc: torch.Tensor
+) -> torch.Tensor:
+    """Run V-absorb BMM into contiguous (tokens, heads, vdim) storage."""
+    x = attn_output.to(torch.bfloat16).transpose(0, 1)
+    output = torch.empty(
+        x.shape[1],
+        x.shape[0],
+        w_vc.shape[2],
+        device=x.device,
+        dtype=torch.bfloat16,
+    )
+    torch.bmm(x, w_vc, out=output.transpose(0, 1))
+    return output
+
+
 if TYPE_CHECKING:
     from sglang.srt.models.deepseek_v2 import DeepseekV2AttentionMLA
 
@@ -502,6 +519,11 @@ class DeepseekMLAForwardMixin:
                             dtype=torch.bfloat16,
                         )
 
+                    elif self.mla_absorb_weights_prescaled:
+                        q_nope_out = torch.bmm(
+                            q_nope.to(torch.bfloat16).transpose(0, 1),
+                            self.w_kc,
+                        )
                     else:
                         q_nope_out = torch.bmm(
                             q_nope.to(torch.bfloat16).transpose(0, 1),
@@ -879,6 +901,10 @@ class DeepseekMLAForwardMixin:
                         transpose_bm=False,
                         transpose_bm_in=True,
                         dtype=torch.bfloat16,
+                    )
+                elif self.mla_absorb_weights_prescaled:
+                    _bmm_buf = _bmm_mla_absorb_bf16_to_contiguous(
+                        attn_output, self.w_vc
                     )
                 else:
                     attn_bmm_output = torch.bmm(
