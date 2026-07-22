@@ -77,7 +77,7 @@ _FUSED_AR_RMS_1STAGE_MAX_TOKENS = 80
 _FUSED_AR_RMS_1STAGE_TUNED_MAX_BYTES = {
     # Kimi-K2.5/DeepSeek-style hidden size at TP=4: measured crossover keeps
     # decode and small batched-decode shapes on 1-stage through M=32.
-    (4, 7168): 512 * 1024,
+    (4, 7168): (512 * 1024),
 }
 
 # use int value instead of ReduceOp.SUM to support torch compile

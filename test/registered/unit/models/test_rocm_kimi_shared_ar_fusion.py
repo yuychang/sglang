@@ -104,9 +104,7 @@ class TestRocmKimiSharedArFusion(CustomTestCase):
     def test_fused_ar_mxfp4_quant_mode_is_default_off(self):
         with mock.patch(
             "sglang.srt.runtime_context.get_server_args",
-            return_value=types.SimpleNamespace(
-                enable_rocm_fused_ar_mxfp4_quant=False
-            ),
+            return_value=types.SimpleNamespace(enable_rocm_fused_ar_mxfp4_quant=False),
         ):
             self.assertEqual(
                 rocm_kimi_shared.get_rocm_fused_ar_mxfp4_quant_mode(),
@@ -204,15 +202,11 @@ class TestRocmKimiSharedArFusion(CustomTestCase):
                     token_count * 10 + 3,
                     device=hidden.device,
                 )
-                rocm_kimi_shared.attach_rocm_mxfp4_activation(
-                    hidden, packed, scale
-                )
+                rocm_kimi_shared.attach_rocm_mxfp4_activation(hidden, packed, scale)
                 carrier = rocm_kimi_shared.pop_rocm_mxfp4_activation(hidden)
                 self.assertIs(carrier.packed, packed)
                 self.assertIs(carrier.scale, scale)
-                self.assertIsNone(
-                    rocm_kimi_shared.pop_rocm_mxfp4_activation(hidden)
-                )
+                self.assertIsNone(rocm_kimi_shared.pop_rocm_mxfp4_activation(hidden))
 
     def test_mxfp4_activation_carrier_rejects_unsupported_concurrency(self):
         hidden = _CarrierTensor((2, 7168), torch.bfloat16, 1)
@@ -253,9 +247,7 @@ class TestRocmKimiSharedArFusion(CustomTestCase):
                     token_count * 10 + 3,
                     device=hidden.device,
                 )
-                rocm_kimi_shared.attach_rocm_mxfp4_activation(
-                    hidden, packed, scale
-                )
+                rocm_kimi_shared.attach_rocm_mxfp4_activation(hidden, packed, scale)
                 carrier = rocm_kimi_shared.pop_rocm_mxfp4_activation(hidden)
                 weight = _CarrierTensor(
                     (1024, 3584),
@@ -362,17 +354,13 @@ class TestRocmKimiSharedArFusion(CustomTestCase):
                 coordinator.world_size = 4
                 coordinator.ca_comm = types.SimpleNamespace(
                     disabled=False,
-                    custom_fused_ar_rms_mxfp4_quant=mock.Mock(
-                        return_value="result"
-                    ),
+                    custom_fused_ar_rms_mxfp4_quant=mock.Mock(return_value="result"),
                 )
                 x = _CarrierTensor((token_count, 7168), torch.bfloat16, 1)
                 residual = _CarrierTensor(
                     (token_count, 7168), torch.bfloat16, 2, device=x.device
                 )
-                weight = _CarrierTensor(
-                    (7168,), torch.bfloat16, 3, device=x.device
-                )
+                weight = _CarrierTensor((7168,), torch.bfloat16, 3, device=x.device)
 
                 result = coordinator.fused_allreduce_rmsnorm_mxfp4_quant(
                     x,
@@ -407,9 +395,7 @@ class TestRocmKimiSharedArFusion(CustomTestCase):
                 residual = _CarrierTensor(
                     (token_count, 7168), torch.bfloat16, 12, device=x.device
                 )
-                weight = _CarrierTensor(
-                    (7168,), torch.bfloat16, 13, device=x.device
-                )
+                weight = _CarrierTensor((7168,), torch.bfloat16, 13, device=x.device)
                 bf16_out = _CarrierTensor(
                     (token_count, 7168), torch.bfloat16, 14, device=x.device
                 )
