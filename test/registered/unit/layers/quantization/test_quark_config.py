@@ -18,6 +18,44 @@ def _bare_config() -> QuarkConfig:
     return QuarkConfig.__new__(QuarkConfig)
 
 
+def _quark_config(
+    *,
+    global_quant_config: dict | None = None,
+    layer_quant_config: dict | None = None,
+    exclude: list[str] | None = None,
+    is_prequantized: bool = True,
+) -> QuarkConfig:
+    return QuarkConfig(
+        {
+            "packed_modules_mapping": {},
+            "exclude": exclude or [],
+            "global_quant_config": global_quant_config or {},
+            "layer_quant_config": layer_quant_config or {},
+            "layer_type_quant_config": {},
+        },
+        is_prequantized=is_prequantized,
+    )
+
+
+def _mxfp4_spec() -> dict:
+    return {
+        "weight": {
+            "dtype": "fp4",
+            "qscheme": "per_group",
+            "group_size": 32,
+            "is_dynamic": False,
+            "scale_format": "e8m0",
+        },
+        "input_tensors": {
+            "dtype": "fp4",
+            "qscheme": "per_group",
+            "group_size": 32,
+            "is_dynamic": True,
+            "scale_format": "e8m0",
+        },
+    }
+
+
 class TestCheckSchemeSupportedError(CustomTestCase):
     """Regression for `RuntimeError("a", "b", "c")` being passed three args.
 
@@ -81,6 +119,47 @@ class TestCheckSchemeSupportedError(CustomTestCase):
         with patch(_GET_CAP, return_value=None):
             ok = _bare_config()._check_scheme_supported(min_capability=70)
         self.assertFalse(ok)
+
+
+class TestKimiSharedExpertQuantCompatibility(CustomTestCase):
+    def test_recognizes_prequantized_mxfp4_checkpoint(self):
+        config = _quark_config(global_quant_config=_mxfp4_spec())
+
+        self.assertTrue(config.is_mxfp4_checkpoint)
+
+    def test_non_prequantized_config_is_not_checkpoint_mxfp4(self):
+        config = _quark_config(
+            global_quant_config=_mxfp4_spec(),
+            is_prequantized=False,
+        )
+
+        self.assertFalse(config.is_mxfp4_checkpoint)
+
+    def test_kimi_plural_shared_expert_path_must_match_routed_spec(self):
+        routed = _mxfp4_spec()
+        shared = _mxfp4_spec()
+        shared["weight"] = dict(shared["weight"], dtype="bf16")
+        config = _quark_config(
+            global_quant_config=routed,
+            layer_quant_config={
+                "language_model.model.layers.0.mlp.experts": routed,
+                "language_model.model.layers.0.mlp.shared_experts.gate_proj": shared,
+            },
+        )
+
+        self.assertFalse(config.can_fuse_shared_expert())
+
+    def test_kimi_plural_shared_expert_path_allows_matching_spec(self):
+        routed = _mxfp4_spec()
+        config = _quark_config(
+            global_quant_config=routed,
+            layer_quant_config={
+                "language_model.model.layers.0.mlp.experts": routed,
+                "language_model.model.layers.0.mlp.shared_experts.gate_proj": routed,
+            },
+        )
+
+        self.assertTrue(config.can_fuse_shared_expert())
 
 
 if __name__ == "__main__":
