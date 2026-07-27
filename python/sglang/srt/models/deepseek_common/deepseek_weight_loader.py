@@ -66,9 +66,17 @@ if _use_aiter_gfx95:
     from sglang.srt.layers.quantization.quark.utils import quark_post_load_weights
 
 logger = logging.getLogger(__name__)
+_MLA_ABSORB_BF16_LOGGED = []
 
 # Optional quantization for DeepSeek nvfp4 checkpoint
 NVFP4_CKPT_FP8_ATTN_QUANT_MODULES = ["q_b_proj"]
+
+
+def _prescale_mla_absorb_weights(self_attn) -> None:
+    """Fold the constant MLA absorb scale into BF16 weights once after loading."""
+    self_attn.w_kc = self_attn.w_kc.to(torch.bfloat16) * self_attn.w_scale
+    self_attn.w_vc = self_attn.w_vc.to(torch.bfloat16) * self_attn.w_scale
+    self_attn.mla_absorb_weights_prescaled = True
 
 
 def _clone_if_runai_streamed_tensor(tensor: torch.Tensor) -> torch.Tensor:
@@ -631,6 +639,22 @@ class DeepseekV2WeightLoaderMixin:
                 0, (-1, self_attn.qk_nope_head_dim + self_attn.v_head_dim)
             ).split([self_attn.qk_nope_head_dim, self_attn.v_head_dim], dim=1)
 
+            keep_mla_absorb_bf16 = (
+                envs.SGLANG_MLA_ABSORB_BF16.get()
+                and _use_aiter_gfx95
+                and self.quant_config is not None
+                and self.quant_config.get_name() == "quark"
+                and self.config.architectures
+                and self.config.architectures[0] == "DeepseekV3ForCausalLM"
+            )
+            if keep_mla_absorb_bf16 and not _MLA_ABSORB_BF16_LOGGED:
+                _MLA_ABSORB_BF16_LOGGED.append(1)
+                log_info_on_rank0(
+                    logger,
+                    "SGLANG_MLA_ABSORB_BF16=1: keeping kv_b_proj MLA-absorb "
+                    "weights in BF16 instead of re-quantizing them to MXFP4",
+                )
+
             if (
                 _use_aiter_gfx95
                 and self.quant_config is not None
@@ -638,12 +662,14 @@ class DeepseekV2WeightLoaderMixin:
                 and self.config.architectures
                 and self.config.architectures[0]
                 == "DeepseekV3ForCausalLM"  # Avoid processing other models like GlmMoeDsaForCausalLM
+                and not keep_mla_absorb_bf16
             ):
                 w_kc, self_attn.w_scale_k, w_vc, self_attn.w_scale_v = (
                     quark_post_load_weights(self_attn, w, "mxfp4")
                 )
 
             if not use_deep_gemm_bmm:
+                self_attn.mla_absorb_weights_prescaled = False
                 self_attn.w_kc = bind_or_assign(
                     self_attn.w_kc, w_kc.transpose(1, 2).contiguous().transpose(1, 2)
                 )
@@ -668,6 +694,13 @@ class DeepseekV2WeightLoaderMixin:
                     self_attn.w_vc = (
                         self_attn.w_vc.to(torch.bfloat16) * self_attn.w_scale
                     )
+                elif (
+                    keep_mla_absorb_bf16
+                    and self_attn.w_kc.dtype == torch.bfloat16
+                    and self_attn.w_vc.dtype == torch.bfloat16
+                    and self_attn.w_scale is not None
+                ):
+                    _prescale_mla_absorb_weights(self_attn)
             else:
                 num_tiles_k = self_attn.qk_nope_head_dim // weight_block_size[1]
                 num_tiles_n = self_attn.v_head_dim // weight_block_size[0]

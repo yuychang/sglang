@@ -73,6 +73,23 @@ from sglang.srt.utils.custom_op import register_custom_op
 logger = logging.getLogger(__name__)
 _SGLANG_EXPERIMENTAL_LORA_OPTI = envs.SGLANG_EXPERIMENTAL_LORA_OPTI.get()
 
+
+def _bmm_mla_absorb_bf16_to_contiguous(
+    attn_output: torch.Tensor, w_vc: torch.Tensor
+) -> torch.Tensor:
+    """Run V-absorb BMM into contiguous (tokens, heads, vdim) storage."""
+    x = attn_output.to(torch.bfloat16).transpose(0, 1)
+    output = torch.empty(
+        x.shape[1],
+        x.shape[0],
+        w_vc.shape[2],
+        device=x.device,
+        dtype=torch.bfloat16,
+    )
+    torch.bmm(x, w_vc, out=output.transpose(0, 1))
+    return output
+
+
 if TYPE_CHECKING:
     from sglang.srt.models.deepseek_v2 import DeepseekV2AttentionMLA
 
@@ -83,6 +100,21 @@ class MlaBmmFusionPlan:
     q_nope_out_buf: torch.Tensor
     q_nope_out_view: torch.Tensor
     attn_output_buf: torch.Tensor
+
+
+@dataclass(frozen=True)
+class RocmMlaProjectionFusionPlan:
+    q_nope: torch.Tensor
+
+
+def _get_bf16_mla_bmm_weight(
+    weight: torch.Tensor, weight_scale: torch.Tensor | float
+) -> torch.Tensor:
+    """Convert MLA BMM weights to BF16, skipping a redundant scalar scale."""
+    weight = weight.to(torch.bfloat16)
+    if isinstance(weight_scale, (int, float)) and weight_scale == 1.0:
+        return weight
+    return weight * weight_scale
 
 
 if _is_cuda:
@@ -131,7 +163,14 @@ if _use_aiter_gfx95:
         fused_flatten_fp8_group_quant,
         fused_rms_fp8_group_quant,
     )
+    from aiter.ops.triton.fusions.fused_bmm_rope_kv_cache import (
+        fused_fp4_bmm_rope_cat_and_cache_mla,
+    )
 
+    from sglang.srt.layers.quantization.rocm_mla_value_mxfp4 import (
+        batched_gemm_a16wfp4_flatten_mxfp4_quant,
+        can_fuse_mla_value_bmm_mxfp4_quant,
+    )
     from sglang.srt.layers.quantization.rocm_mxfp4_utils import (
         batched_gemm_afp4wfp4_pre_quant,
         fused_flatten_mxfp4_quant,
@@ -232,6 +271,53 @@ class DeepseekMLAForwardMixin:
             attn_output_buf=attn_output_buf,
         )
 
+    def _can_fuse_rocm_mla_projection_rope_cache(
+        self: DeepseekV2AttentionMLA,
+        forward_batch: ForwardBatch,
+        *,
+        is_capture_mode: bool,
+    ) -> bool:
+        return (
+            _is_hip
+            and _use_aiter_gfx95
+            and envs.SGLANG_ROCM_FUSE_MLA_PROJECTION_ROPE_CACHE.get()
+            and is_capture_mode
+            and forward_batch.forward_mode.is_decode_or_idle()
+            and self.current_attention_backend == "aiter"
+            and not self.use_dsa
+            and not _SGLANG_EXPERIMENTAL_LORA_OPTI
+            and not is_kv_b_lora_active(self)
+            and not get_parallel().dcp_enabled
+            and self.w_kc.dtype == torch.uint8
+            and self.w_scale_k is not None
+            and self.rotary_emb is not None
+            and self.q_lora_rank == 1536
+            and self.kv_lora_rank == 512
+            and self.qk_nope_head_dim == 128
+            and self.qk_rope_head_dim == 64
+            and self.v_head_dim == 128
+        )
+
+    def _can_fuse_rocm_mla_value_mxfp4_quant(
+        self: DeepseekV2AttentionMLA,
+        forward_batch: ForwardBatch,
+    ) -> bool:
+        return (
+            _is_hip
+            and _use_aiter_gfx95
+            and envs.SGLANG_ROCM_FUSE_MLA_VALUE_MXFP4_QUANT.get()
+            and forward_batch.forward_mode.is_decode_or_idle()
+            and self.current_attention_backend == "aiter"
+            and not self.use_dsa
+            and not _SGLANG_EXPERIMENTAL_LORA_OPTI
+            and not is_kv_b_lora_active(self)
+            and self.w_vc.dtype == torch.uint8
+            and self.w_scale_v is not None
+            and self.o_proj.weight.dtype == torch.uint8
+            and self.kv_lora_rank == 512
+            and self.v_head_dim == 128
+        )
+
     def forward_absorb_prepare(
         self: DeepseekV2AttentionMLA,
         positions: torch.Tensor,
@@ -253,6 +339,7 @@ class DeepseekMLAForwardMixin:
         q_pe = None
         k_pe = None
         fusion_plan: Optional[MlaBmmFusionPlan] = None
+        rocm_projection_plan: Optional[RocmMlaProjectionFusionPlan] = None
         if self.q_lora_rank is not None:
             q, latent_cache = (
                 get_attn_tp_context()
@@ -403,11 +490,24 @@ class DeepseekMLAForwardMixin:
         if q_nope is None:
             q_nope, q_pe, k_pe = self._split_q_nope_pe(q, latent_cache)
 
+        if self._can_fuse_rocm_mla_projection_rope_cache(
+            forward_batch,
+            is_capture_mode=get_is_capture_mode(),
+        ):
+            rocm_projection_plan = RocmMlaProjectionFusionPlan(q_nope=q_nope)
+            logger.info_once(
+                "ROCm Kimi MLA absorbed projection + RoPE/cache fusion is enabled."
+            )
+
         _kvb_q = None
         if fusion_plan is not None:
             # The composite split op fills q_nope_out_buf and attention reads
             # this transposed alias directly.
             q_nope_out = fusion_plan.q_nope_out_view
+        elif rocm_projection_plan is not None:
+            # The absorbed projection is fused with the independent RoPE and
+            # KV-cache branch in forward_absorb_core.
+            q_nope_out = None
         else:
             if _SGLANG_EXPERIMENTAL_LORA_OPTI:
                 # Fork the kv_b q-correction A-step onto the LoRA side stream to overlap the bmm.
@@ -476,10 +576,15 @@ class DeepseekMLAForwardMixin:
                             dtype=torch.bfloat16,
                         )
 
+                    elif self.mla_absorb_weights_prescaled:
+                        q_nope_out = torch.bmm(
+                            q_nope.to(torch.bfloat16).transpose(0, 1),
+                            self.w_kc,
+                        )
                     else:
                         q_nope_out = torch.bmm(
                             q_nope.to(torch.bfloat16).transpose(0, 1),
-                            self.w_kc.to(torch.bfloat16) * self.w_scale,
+                            _get_bf16_mla_bmm_weight(self.w_kc, self.w_scale),
                         )
 
             elif self.w_kc.dtype == torch.float8_e4m3fn:
@@ -589,6 +694,7 @@ class DeepseekMLAForwardMixin:
             topk_indices,
             llama_4_scaling,
             fusion_plan,
+            rocm_projection_plan,
         )
 
     def forward_absorb_core(
@@ -603,10 +709,46 @@ class DeepseekMLAForwardMixin:
         topk_indices,
         llama_4_scaling,
         fusion_plan: Optional[MlaBmmFusionPlan] = None,
+        rocm_projection_plan: Optional[RocmMlaProjectionFusionPlan] = None,
     ):
         save_kv_cache = True
 
-        if self.current_attention_backend in FORWARD_ABSORB_CORE_ATTENTION_BACKENDS:
+        if rocm_projection_plan is not None:
+            cos = self.rotary_emb.cos_cache
+            sin = self.rotary_emb.sin_cache
+            kv_cache_dtype = (
+                fp8_dtype
+                if self.kv_cache_dtype == "fp8_e4m3"
+                else rocm_projection_plan.q_nope.dtype
+            )
+            q, _, _, k = fused_fp4_bmm_rope_cat_and_cache_mla(
+                rocm_projection_plan.q_nope.transpose(0, 1),
+                self.w_kc.transpose(-2, -1),
+                self.w_scale_k.transpose(-2, -1),
+                q_pe,
+                k_nope,
+                k_pe,
+                get_token_to_kv_pool().get_key_buffer(self.attn_mqa.layer_id),
+                forward_batch.out_cache_loc,
+                positions,
+                cos,
+                sin,
+                k_scale=self.attn_mqa.k_scale,
+                is_neox=self.rotary_emb.is_neox_style,
+                q_out_dtype=kv_cache_dtype,
+            )
+            save_kv_cache = False
+            if llama_4_scaling is not None:
+                q *= llama_4_scaling
+            attn_output = self.attn_mqa(
+                q,
+                k,
+                k_nope,
+                forward_batch,
+                save_kv_cache=save_kv_cache,
+                **(dict(topk_indices=topk_indices) if topk_indices is not None else {}),
+            )
+        elif self.current_attention_backend in FORWARD_ABSORB_CORE_ATTENTION_BACKENDS:
             if self._skip_rope_for_dsa_tilelang_fused() and self.rotary_emb is not None:
                 cos = self.rotary_emb.cos_cache
                 sin = self.rotary_emb.sin_cache
@@ -832,25 +974,40 @@ class DeepseekMLAForwardMixin:
             # TODO(haishaw): add bmm_fp8 to ROCm
             if _use_aiter_gfx95 and self.w_vc.dtype == torch.uint8:
                 x = attn_output.transpose(0, 1)
-                B_heads, M_batch = x.shape[0], x.shape[1]
-                N_vdim = self.w_vc.shape[2]
-                # Allocate in (batch, heads, dim) so the post-GEMM
-                # transpose+flatten is a free view instead of a copy.
-                _bmm_buf = torch.empty(
-                    M_batch,
-                    B_heads,
-                    N_vdim,
-                    device=x.device,
-                    dtype=torch.bfloat16,
-                )
-                attn_bmm_output = _bmm_buf.transpose(0, 1)
-                batched_gemm_afp4wfp4_pre_quant(
-                    x,
-                    self.w_vc.transpose(-2, -1),
-                    self.w_scale_v.transpose(-2, -1),
-                    torch.bfloat16,
-                    attn_bmm_output,
-                )
+                w_vc = self.w_vc.transpose(-2, -1)
+                w_scale_v = self.w_scale_v.transpose(-2, -1)
+                fuse_value_quant = self._can_fuse_rocm_mla_value_mxfp4_quant(
+                    forward_batch
+                ) and can_fuse_mla_value_bmm_mxfp4_quant(x, w_vc, w_scale_v)
+                if fuse_value_quant:
+                    attn_bmm_output = batched_gemm_a16wfp4_flatten_mxfp4_quant(
+                        x, w_vc, w_scale_v
+                    )
+                    _bmm_buf = None
+                    logger.info_once(
+                        "ROCm MLA value projection + MXFP4 output quantization "
+                        "fusion is enabled."
+                    )
+                else:
+                    B_heads, M_batch = x.shape[0], x.shape[1]
+                    N_vdim = self.w_vc.shape[2]
+                    # Allocate in (batch, heads, dim) so the post-GEMM
+                    # transpose+flatten is a free view instead of a copy.
+                    _bmm_buf = torch.empty(
+                        M_batch,
+                        B_heads,
+                        N_vdim,
+                        device=x.device,
+                        dtype=torch.bfloat16,
+                    )
+                    attn_bmm_output = _bmm_buf.transpose(0, 1)
+                    batched_gemm_afp4wfp4_pre_quant(
+                        x,
+                        w_vc,
+                        w_scale_v,
+                        torch.bfloat16,
+                        attn_bmm_output,
+                    )
             else:
                 _bmm_buf = None
                 if _use_aiter_gfx95 and self.w_kc.dtype == torch.float8_e4m3fn:
@@ -864,13 +1021,19 @@ class DeepseekMLAForwardMixin:
                         transpose_bm_in=True,
                         dtype=torch.bfloat16,
                     )
+                elif self.mla_absorb_weights_prescaled:
+                    _bmm_buf = _bmm_mla_absorb_bf16_to_contiguous(
+                        attn_output, self.w_vc
+                    )
                 else:
                     attn_bmm_output = torch.bmm(
                         attn_output.to(torch.bfloat16).transpose(0, 1),
-                        self.w_vc.to(torch.bfloat16) * self.w_scale,
+                        _get_bf16_mla_bmm_weight(self.w_vc, self.w_scale),
                     )
 
-            if _bmm_buf is not None:
+            if _use_aiter_gfx95 and self.w_vc.dtype == torch.uint8 and fuse_value_quant:
+                pass
+            elif _bmm_buf is not None:
                 # _bmm_buf is already (batch, heads, dim) contiguous
                 if self.o_proj.weight.dtype == torch.uint8:
                     attn_bmm_output = fused_flatten_mxfp4_quant(_bmm_buf)

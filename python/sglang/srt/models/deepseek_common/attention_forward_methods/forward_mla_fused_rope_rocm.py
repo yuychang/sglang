@@ -11,6 +11,9 @@ from sglang.srt.model_executor.forward_context import (
     get_attn_backend,
     get_token_to_kv_pool,
 )
+from sglang.srt.models.deepseek_common.attention_forward_methods.forward_mla import (
+    _bmm_mla_absorb_bf16_to_contiguous,
+)
 from sglang.srt.models.deepseek_common.utils import (
     _is_cuda,
     _is_hip,
@@ -72,10 +75,15 @@ class DeepseekMLARocmForwardMixin:
 
         if _is_hip:
             # TODO(haishaw): add bmm_fp8 to ROCm
-            q_nope_out = torch.bmm(
-                q_nope.to(torch.bfloat16).transpose(0, 1),
-                self.w_kc.to(torch.bfloat16) * self.w_scale,
-            )
+            if self.mla_absorb_weights_prescaled:
+                q_nope_out = torch.bmm(
+                    q_nope.to(torch.bfloat16).transpose(0, 1), self.w_kc
+                )
+            else:
+                q_nope_out = torch.bmm(
+                    q_nope.to(torch.bfloat16).transpose(0, 1),
+                    self.w_kc.to(torch.bfloat16) * self.w_scale,
+                )
         elif self.w_kc.dtype == torch.float8_e4m3fn:
             q_nope_val, q_nope_scale = per_tensor_quant_mla_fp8(
                 q_nope.transpose(0, 1),
@@ -202,28 +210,33 @@ class DeepseekMLARocmForwardMixin:
 
         attn_output = attn_output.view(-1, self.num_local_heads, self.kv_lora_rank)
 
-        if _is_hip:
-            # TODO(haishaw): add bmm_fp8 to ROCm
-            attn_bmm_output = torch.bmm(
-                attn_output.to(torch.bfloat16).transpose(0, 1),
-                self.w_vc.to(torch.bfloat16) * self.w_scale,
-            )
-        elif self.w_vc.dtype == torch.float8_e4m3fn:
-            attn_output_val, attn_output_scale = per_tensor_quant_mla_fp8(
-                attn_output.transpose(0, 1),
-                zero_allocator.allocate(1),
-                dtype=torch.float8_e4m3fn,
-            )
-            attn_bmm_output = bmm_fp8(
-                attn_output_val,
-                self.w_vc,
-                attn_output_scale,
-                self.w_scale,
-                torch.bfloat16,
-            )
+        if _is_hip and self.mla_absorb_weights_prescaled:
+            attn_output = _bmm_mla_absorb_bf16_to_contiguous(
+                attn_output, self.w_vc
+            ).flatten(1, 2)
         else:
-            attn_bmm_output = torch.bmm(attn_output.transpose(0, 1), self.w_vc)
-        attn_output = attn_bmm_output.transpose(0, 1).flatten(1, 2)
+            if _is_hip:
+                # TODO(haishaw): add bmm_fp8 to ROCm
+                attn_bmm_output = torch.bmm(
+                    attn_output.to(torch.bfloat16).transpose(0, 1),
+                    self.w_vc.to(torch.bfloat16) * self.w_scale,
+                )
+            elif self.w_vc.dtype == torch.float8_e4m3fn:
+                attn_output_val, attn_output_scale = per_tensor_quant_mla_fp8(
+                    attn_output.transpose(0, 1),
+                    zero_allocator.allocate(1),
+                    dtype=torch.float8_e4m3fn,
+                )
+                attn_bmm_output = bmm_fp8(
+                    attn_output_val,
+                    self.w_vc,
+                    attn_output_scale,
+                    self.w_scale,
+                    torch.bfloat16,
+                )
+            else:
+                attn_bmm_output = torch.bmm(attn_output.transpose(0, 1), self.w_vc)
+            attn_output = attn_bmm_output.transpose(0, 1).flatten(1, 2)
         output, _ = self.o_proj(attn_output)
 
         return output
