@@ -176,12 +176,14 @@ def _forward_with_allreduce_fusion(
     post_residual_addition: Optional[torch.Tensor],
     weight: torch.Tensor,
     use_attn_tp_group: bool = True,
+    shared_input: Optional[torch.Tensor] = None,
 ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
     """Shared allreduce-fused RMSNorm logic usable by any norm."""
     if residual is not None:
         from sglang.srt.distributed import (
             tensor_model_parallel_all_reduce,
             tensor_model_parallel_fused_allreduce_rmsnorm,
+            tensor_model_parallel_fused_allreduce_rmsnorm_two_input,
         )
         from sglang.srt.layers.flashinfer_comm_fusion import (
             flashinfer_allreduce_residual_rmsnorm,
@@ -201,6 +203,82 @@ def _forward_with_allreduce_fusion(
 
             # Prefer AITER fused AR+RMSNorm when enabled on AMD.
             if _use_aiter:
+                if shared_input is None:
+                    from sglang.srt.distributed import (
+                        tensor_model_parallel_fused_allreduce_rmsnorm_mxfp4_quant,
+                    )
+                    from sglang.srt.layers.moe.rocm_kimi_shared import (
+                        attach_rocm_mxfp4_activation,
+                        can_fuse_rocm_mxfp4_activation,
+                        get_rocm_fused_ar_mxfp4_quant_mode,
+                    )
+                    from sglang.srt.model_executor.runner import get_is_capture_mode
+                    from sglang.srt.utils import (
+                        get_hip_version,
+                        is_gfx95_supported,
+                    )
+
+                    parallel = get_parallel()
+                    if can_fuse_rocm_mxfp4_activation(
+                        x,
+                        residual,
+                        weight,
+                        is_target_layer=getattr(
+                            norm_module,
+                            "_rocm_fused_ar_mxfp4_quant_target",
+                            False,
+                        ),
+                        mode=get_rocm_fused_ar_mxfp4_quant_mode(),
+                        is_graph_capture_mode=get_is_capture_mode(),
+                        is_gfx950=is_gfx95_supported(),
+                        tp_world_size=world_size,
+                        ep_world_size=parallel.moe_ep_size,
+                        hip_version=get_hip_version(),
+                    ):
+                        fused_quant_result = (
+                            tensor_model_parallel_fused_allreduce_rmsnorm_mxfp4_quant(
+                                x,
+                                residual,
+                                weight,
+                                norm_module.variance_epsilon,
+                            )
+                        )
+                        if fused_quant_result is not None:
+                            packed, residual_out, scale, bf16_out = fused_quant_result
+                            attach_rocm_mxfp4_activation(
+                                bf16_out,
+                                packed,
+                                scale,
+                            )
+                            logger.info_once(
+                                "ROCm fused AR+RMSNorm+MXFP4 quant active: "
+                                "fused AR+RMSNorm+MXFP4 producer, "
+                                f"shape={tuple(x.shape)}, shared FC1 N=1024."
+                            )
+                            return bf16_out, residual_out
+
+                if shared_input is not None:
+                    fused_result = (
+                        tensor_model_parallel_fused_allreduce_rmsnorm_two_input(
+                            x,
+                            shared_input,
+                            residual,
+                            weight,
+                            norm_module.variance_epsilon,
+                        )
+                    )
+                    if fused_result is not None:
+                        return fused_result
+
+                    from sglang.srt.layers.moe.rocm_kimi_shared import (
+                        rocm_mxfp4_moe_add_shared,
+                    )
+
+                    x = rocm_mxfp4_moe_add_shared(
+                        x,
+                        shared_input,
+                        output=shared_input,
+                    )
                 fused_result = tensor_model_parallel_fused_allreduce_rmsnorm(
                     x, residual, weight, norm_module.variance_epsilon
                 )
@@ -740,10 +818,17 @@ class RMSNorm(MultiPlatformOp):
         residual: Optional[torch.Tensor] = None,
         post_residual_addition: Optional[torch.Tensor] = None,
         use_attn_tp_group: bool = True,
+        shared_input: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """Forward with allreduce fusion, prioritizing flashinfer fused operations."""
         return _forward_with_allreduce_fusion(
-            self, x, residual, post_residual_addition, self.weight, use_attn_tp_group
+            self,
+            x,
+            residual,
+            post_residual_addition,
+            self.weight,
+            use_attn_tp_group,
+            shared_input,
         )
 
     def forward_with_allreduce_fusion_quant_per_group(
@@ -1016,6 +1101,7 @@ class GemmaRMSNorm(MultiPlatformOp):
         residual: Optional[torch.Tensor] = None,
         post_residual_addition: Optional[torch.Tensor] = None,
         use_attn_tp_group: bool = True,
+        shared_input: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """Forward with allreduce fusion; uses 1 + weight for fused kernels."""
         return _forward_with_allreduce_fusion(
@@ -1025,6 +1111,7 @@ class GemmaRMSNorm(MultiPlatformOp):
             post_residual_addition,
             self.gemma_weight,
             use_attn_tp_group=True,
+            shared_input=shared_input,
         )
 
     def forward_with_allreduce_fusion_quant_per_group(

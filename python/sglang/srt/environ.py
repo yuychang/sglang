@@ -567,12 +567,34 @@ class Envs:
     # decode without runtime permutes.
     SGLANG_AITER_KV_CACHE_LAYOUT = EnvStr("nhd")
     SGLANG_ROCM_FUSED_DECODE_MLA = EnvBool(False)
+    # Keep quark MLA-absorb weights in BF16 instead of re-quantizing them to
+    # MXFP4 on gfx95/AITER. This trades memory/bandwidth for higher accuracy.
+    SGLANG_MLA_ABSORB_BF16 = EnvBool(False)
     SGLANG_ROCM_DISABLE_LINEARQUANT = EnvBool(False)
     USE_ROCM_AITER_ROPE_BACKEND = EnvStr("0")
     SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK = EnvInt(4096)
     # Enable dual-stream MoE (shared experts vs routed experts) on the
     # ROCm/AITER path. Requires GPU_MAX_HW_QUEUES>=5 to avoid HW-queue serialization.
     SGLANG_ROCM_USE_MULTI_STREAM = EnvBool(False)
+    # Fuse the absorbed MLA w_kc projection with RoPE and KV-cache writes in
+    # one AITER grid during Kimi-K2.5 HIP-graph decode.
+    SGLANG_ROCM_FUSE_MLA_PROJECTION_ROPE_CACHE = EnvBool(True)
+    # Quantize the absorbed MLA value projection directly from the AITER
+    # batched-GEMM accumulator, avoiding the intermediate BF16 tensor.
+    SGLANG_ROCM_FUSE_MLA_VALUE_MXFP4_QUANT = EnvBool(True)
+    # During Kimi-K2.5 MXFP4 HIP-graph decode, keep routed/shared TP-local
+    # outputs separate and consume both in AITER fused AR+residual+RMSNorm.
+    # Unsupported shapes/configurations retain the existing local add path.
+    SGLANG_ROCM_FUSE_SHARED_PARTIAL_AR_RMSNORM = EnvBool(True)
+    # Fuse shared/dense MLP SiLU*up with dynamic MXFP4 activation quantization
+    # before the down projection on the ROCm Kimi multi-stream path.
+    SGLANG_ROCM_KIMI_MXFP4_FUSE_MLP_ACT_QUANT = EnvBool(True)
+    # Internal comparison mode for --enable-rocm-fused-ar-mxfp4-quant.
+    # "event" retains the existing stream-event path; "optimized" reuses the
+    # MXFP4 activation emitted by the fused AR+RMSNorm producer.
+    SGLANG_ROCM_FUSED_AR_MXFP4_QUANT_MODE = EnvStr("optimized")
+    # Rank-0 one-time diagnostics for the selected ROCm Kimi MoE path.
+    SGLANG_ROCM_MOE_VERBOSE = EnvBool(False)
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("tilelang")
 
     # MPS (Apple Silicon)
@@ -745,6 +767,7 @@ class Envs:
     # Set to 1: force enable (even without --enable-deterministic-inference)
     # Set to 0: force disable (use default Aiter AR even with --enable-deterministic-inference)
     SGLANG_USE_1STAGE_ALLREDUCE = EnvBool(False)
+    SGLANG_FUSED_AR_RMS_1STAGE_MAX_BYTES = EnvInt(128 * 1024)
     SGLANG_OPT_USE_CUSTOM_ALL_REDUCE_V2 = EnvBool(True)
     # Default per-direction workspace cap for CustomAllReduceV2; explicit
     # constructor sizes take precedence over this.

@@ -93,6 +93,7 @@ else:
         moe_sum,
         moe_sum_reduce,
         prepare_moe_input,
+        rocm_mxfp4_moe_add_shared,
         topk_sigmoid,
         topk_softmax,
     )
@@ -185,6 +186,9 @@ else:
         "moe_sum",
         "moe_sum_reduce",
         "prepare_moe_input",
+        "rocm_mxfp4_moe_add_shared",
+        "qserve_w4a8_per_chn_gemm",
+        "qserve_w4a8_per_group_gemm",
         "reconstruct_indices_from_tree_mask",
         "rmsnorm",
         "rotary_embedding",

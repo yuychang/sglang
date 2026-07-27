@@ -566,6 +566,12 @@ class LayerCommunicator:
         quant_format: str = "",
         post_residual_addition: Optional[torch.Tensor] = None,
     ):
+        from sglang.srt.layers.moe.rocm_kimi_shared import (
+            pop_shared_partial,
+            rocm_mxfp4_moe_add_shared,
+        )
+
+        shared_partial = pop_shared_partial(hidden_states)
         if get_attn_tp_context().input_scattered:
             hidden_states, residual = self._tp_reduce_scatter(
                 hidden_states,
@@ -585,6 +591,8 @@ class LayerCommunicator:
                 ) and hasattr(self.input_layernorm, "forward_with_allreduce_fusion"):
                     quant_result = None
                     if (
+                        shared_partial is None
+                        and
                         self.enable_fused_ar_quant
                         and _use_aiter
                         and hasattr(
@@ -604,17 +612,34 @@ class LayerCommunicator:
                     if quant_result is not None:
                         hidden_states, residual = quant_result
                     else:
+                        fusion_kwargs = dict(use_attn_tp_group=False)
+                        if shared_partial is not None:
+                            fusion_kwargs["shared_input"] = shared_partial
                         hidden_states, residual = (
                             self.input_layernorm.forward_with_allreduce_fusion(
-                                hidden_states, residual, use_attn_tp_group=False
+                                hidden_states,
+                                residual,
+                                **fusion_kwargs,
                             )
                         )
                 else:
+                    if shared_partial is not None:
+                        hidden_states = rocm_mxfp4_moe_add_shared(
+                            hidden_states,
+                            shared_partial,
+                            output=shared_partial,
+                        )
                     hidden_states = moe_tensor_model_parallel_all_reduce(hidden_states)
                     hidden_states, residual = self.input_layernorm(
                         hidden_states, residual
                     )
             else:
+                if shared_partial is not None:
+                    hidden_states = rocm_mxfp4_moe_add_shared(
+                        hidden_states,
+                        shared_partial,
+                        output=shared_partial,
+                    )
                 if residual is None:
                     residual = hidden_states
 

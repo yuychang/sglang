@@ -78,12 +78,47 @@ _is_musa = is_musa()
 
 TensorMetadata = namedtuple("TensorMetadata", ["device", "dtype", "size"])
 
+_FUSED_AR_RMS_1STAGE_MAX_TOKENS = 80
+_FUSED_AR_RMS_1STAGE_TUNED_MAX_BYTES = {
+    # Kimi-K2.5/DeepSeek-style hidden size at TP=4: measured crossover keeps
+    # decode and small batched-decode shapes on 1-stage through M=32.
+    (4, 7168): (512 * 1024),
+}
+
 # use int value instead of ReduceOp.SUM to support torch compile
 REDUCE_OP_SUM = int(torch.distributed.ReduceOp.SUM)
 
 # Reuse the user-provided distributed timeout for model-parallel subgroup
 # creation so runtime collectives do not silently fall back to backend defaults.
 _MODEL_PARALLEL_GROUP_TIMEOUT: Optional[timedelta] = None
+
+
+def _select_fused_ar_rms_1stage(
+    input_: torch.Tensor,
+    world_size: Optional[int] = None,
+) -> bool:
+    hidden_dim = int(input_.shape[-1])
+    token_num = input_.numel() // hidden_dim if hidden_dim > 0 else 0
+    if token_num > _FUSED_AR_RMS_1STAGE_MAX_TOKENS:
+        return False
+    if envs.SGLANG_USE_1STAGE_ALLREDUCE.is_set():
+        return envs.SGLANG_USE_1STAGE_ALLREDUCE.get()
+    if envs.SGLANG_FUSED_AR_RMS_1STAGE_MAX_BYTES.is_set():
+        max_bytes = envs.SGLANG_FUSED_AR_RMS_1STAGE_MAX_BYTES.get()
+    else:
+        max_bytes = _FUSED_AR_RMS_1STAGE_TUNED_MAX_BYTES.get(
+            (world_size, hidden_dim), envs.SGLANG_FUSED_AR_RMS_1STAGE_MAX_BYTES.get()
+        )
+    total_bytes = input_.numel() * input_.element_size()
+    return total_bytes <= max_bytes
+
+
+def _dynamic_mxfp4_quant(
+    input_: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    from aiter.ops.triton.quant import dynamic_mxfp4_quant
+
+    return dynamic_mxfp4_quant(input_)
 
 
 def get_torch_distributed_pg_options(group_name=None):
@@ -755,11 +790,7 @@ class GroupCoordinator:
         # prefill batches fall through to the 2-stage kernel instead of
         # hitting a runtime error.  AITER's C++ dispatch already gates
         # which hidden_dims have valid 1-stage support.
-        if envs.SGLANG_USE_1STAGE_ALLREDUCE.is_set():
-            use_1stage_ar = envs.SGLANG_USE_1STAGE_ALLREDUCE.get()
-        else:
-            total_bytes = input_.numel() * input_.element_size()
-            use_1stage_ar = total_bytes <= 128 * 1024
+        use_1stage_ar = _select_fused_ar_rms_1stage(input_, self.world_size)
 
         if (
             getattr(ca_comm, "_IS_CAPTURING", False)
@@ -784,6 +815,126 @@ class GroupCoordinator:
             use_1stage_ar,
         )
         return fused_outputs
+
+    def fused_allreduce_rmsnorm_two_input(
+        self,
+        routed_input_: torch.Tensor,
+        shared_input_: torch.Tensor,
+        residual_inp_: torch.Tensor,
+        weight_: torch.Tensor,
+        eps: float,
+    ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
+        """Attempt the Kimi MXFP4 graph-only two-input AITER fusion."""
+        supported = (
+            self.world_size == 4
+            and routed_input_.dtype == torch.bfloat16
+            and shared_input_.dtype == torch.bfloat16
+            and residual_inp_.dtype == torch.bfloat16
+            and weight_.dtype == torch.bfloat16
+            and routed_input_.dim() == 2
+            and routed_input_.shape == shared_input_.shape == residual_inp_.shape
+            and routed_input_.shape[0] in (1, 2, 4, 8, 16, 32)
+            and routed_input_.shape[1] == weight_.numel() == 7168
+            and routed_input_.is_contiguous()
+            and shared_input_.is_contiguous()
+            and residual_inp_.is_contiguous()
+        )
+        if not supported:
+            return None
+
+        ca_comm = self.ca_comm
+        if (
+            ca_comm is None
+            or getattr(ca_comm, "disabled", True)
+            or not hasattr(ca_comm, "custom_fused_ar_rms_two_input")
+        ):
+            return None
+
+        # The two-input one-stage kernel wins through M=8. M=16/32 use the
+        # partitioned two-stage path to avoid replicated routed+shared reads.
+        use_1stage_ar = routed_input_.shape[0] <= 8
+        return ca_comm.custom_fused_ar_rms_two_input(
+            routed_input_,
+            shared_input_,
+            residual_inp_,
+            weight_,
+            eps,
+            use_1stage_ar,
+        )
+
+    def fused_allreduce_rmsnorm_mxfp4_quant(
+        self,
+        input_: torch.Tensor,
+        residual_inp_: torch.Tensor,
+        weight_: torch.Tensor,
+        eps: float,
+    ) -> Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
+        """Produce graph-safe AR+RMSNorm output and reusable MXFP4 activations.
+
+        Kimi decode shapes through M=32 use AITER's direct quantizing epilogue.
+        M=64/128 exceed its 512 KiB two-stage budget at hidden size 7168, so
+        they safely compose fused AR+RMSNorm with one dynamic MXFP4 quantization
+        whose output is still reused by the shared FC1.
+        """
+        supported_token_counts = (4, 8, 16, 32, 64, 128)
+        if (
+            self.world_size != 4
+            or input_.dim() != 2
+            or input_.shape != residual_inp_.shape
+            or input_.shape[0] not in supported_token_counts
+            or input_.shape[1] != weight_.numel()
+            or input_.shape[1] != 7168
+        ):
+            return None
+
+        ca_comm = self.ca_comm
+        if ca_comm is None or getattr(ca_comm, "disabled", True):
+            return None
+
+        fused_fn = getattr(
+            ca_comm,
+            "fused_allreduce_rmsnorm_mxfp4_quant",
+            None,
+        )
+        if fused_fn is not None:
+            return fused_fn(
+                input_,
+                residual_inp_,
+                weight_,
+                eps,
+                emit_bf16=True,
+            )
+
+        token_count = input_.shape[0]
+        custom_fused_fn = getattr(
+            ca_comm,
+            "custom_fused_ar_rms_mxfp4_quant",
+            None,
+        )
+        if custom_fused_fn is not None and token_count <= 32:
+            result = custom_fused_fn(
+                input_,
+                residual_inp_,
+                weight_,
+                eps,
+                use_1stage=token_count <= 4,
+                emit_bf16=True,
+            )
+            if result is not None:
+                return result
+
+        fused_result = self.fused_allreduce_rmsnorm(
+            input_,
+            residual_inp_,
+            weight_,
+            eps,
+        )
+        if fused_result is None:
+            return None
+        bf16_out, residual_out = fused_result
+
+        packed, scale = _dynamic_mxfp4_quant(bf16_out)
+        return packed, residual_out, scale, bf16_out
 
     def fused_allreduce_rmsnorm_quant_per_group(
         self,

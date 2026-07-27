@@ -356,6 +356,26 @@ def parse_args():
         choices=["eager", "graph", "both"],
     )
     parser.add_argument(
+        "--stage",
+        type=str,
+        default="auto",
+        choices=["auto", "1stage", "2stage"],
+        help=(
+            "Select fused AR+RMSNorm stage policy. auto uses the runtime policy; "
+            "1stage/2stage force the corresponding AITER/SGLang override before "
+            "the communicator is initialized."
+        ),
+    )
+    parser.add_argument(
+        "--one-stage-max-bytes",
+        type=int,
+        default=None,
+        help=(
+            "Override the auto-policy byte cutoff for 1-stage fused AR+RMSNorm. "
+            "Applied to both SGLang and AITER policy environment variables."
+        ),
+    )
+    parser.add_argument(
         "--csv-out",
         type=str,
         default=None,
@@ -366,6 +386,15 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.stage in ("1stage", "2stage"):
+        stage_value = "1" if args.stage == "1stage" else "0"
+        os.environ["SGLANG_USE_1STAGE_ALLREDUCE"] = stage_value
+        os.environ["AITER_AR_1STAGE"] = stage_value
+    if args.one_stage_max_bytes is not None:
+        cutoff = str(args.one_stage_max_bytes)
+        os.environ["SGLANG_FUSED_AR_RMS_1STAGE_MAX_BYTES"] = cutoff
+        os.environ["AITER_FUSED_AR_RMS_1STAGE_MAX_BYTES"] = cutoff
+
     dtype = dtype_from_name(args.dtype)
     rank = int(os.environ.get("RANK", "0"))
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
@@ -390,7 +419,8 @@ def main():
         print(
             "Config: "
             f"world_size={world_size}, dtype={dtype}, residual_mode={args.residual_mode}, "
-            f"warmup={args.warmup}, iters={args.iters}, repeats={args.repeats}"
+            f"warmup={args.warmup}, iters={args.iters}, repeats={args.repeats}, "
+            f"stage={args.stage}, one_stage_max_bytes={args.one_stage_max_bytes}"
         )
 
     run_modes: Sequence[str]
@@ -494,6 +524,12 @@ def main():
                         "dtype": str(dtype),
                         "world_size": world_size,
                         "residual_mode": args.residual_mode,
+                        "stage": args.stage,
+                        "one_stage_max_bytes": (
+                            args.one_stage_max_bytes
+                            if args.one_stage_max_bytes is not None
+                            else ""
+                        ),
                         "warmup": args.warmup,
                         "iters": args.iters,
                         "repeats": args.repeats,
@@ -517,6 +553,8 @@ def main():
             "dtype",
             "world_size",
             "residual_mode",
+            "stage",
+            "one_stage_max_bytes",
             "warmup",
             "iters",
             "repeats",

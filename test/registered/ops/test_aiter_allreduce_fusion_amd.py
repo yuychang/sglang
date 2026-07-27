@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 import torch
+import torch.nn.functional as F
 
 from sglang.srt.layers import communicator as comm
 from sglang.srt.layers.communicator import LayerCommunicator, ScatterMode
@@ -19,6 +20,91 @@ from sglang.test.test_utils import CustomTestCase
 register_amd_ci(est_time=240, suite="stage-c-test-large-8-gpu-amd")
 
 HIDDEN_DIMS = [2880, 4096, 5120, 6144, 7168, 8192]
+
+
+def _run_two_input_graph_replay_check():
+    import torch.distributed as dist
+
+    from sglang.srt.distributed.communication_op import (
+        tensor_model_parallel_fused_allreduce_rmsnorm_two_input,
+    )
+    from sglang.srt.distributed.parallel_state import (
+        destroy_distributed_environment,
+        destroy_model_parallel,
+        graph_capture,
+        init_distributed_environment,
+        initialize_model_parallel,
+        set_custom_all_reduce,
+    )
+
+    rank = int(os.environ["RANK"])
+    world_size = int(os.environ["WORLD_SIZE"])
+    local_rank = int(os.environ["LOCAL_RANK"])
+    torch.cuda.set_device(local_rank)
+    device = torch.device(f"cuda:{local_rank}")
+
+    set_custom_all_reduce(True)
+    init_distributed_environment(
+        world_size=world_size,
+        rank=rank,
+        local_rank=local_rank,
+        distributed_init_method="env://",
+        backend="nccl",
+    )
+    initialize_model_parallel(tensor_model_parallel_size=world_size)
+
+    m, n = 4, 7168
+    torch.manual_seed(731 + rank)
+    routed = torch.randn((m, n), dtype=torch.bfloat16, device=device)
+    shared = torch.randn_like(routed)
+    residual = torch.randn_like(routed)
+    torch.manual_seed(1907)
+    weight = torch.randn((n,), dtype=torch.bfloat16, device=device)
+
+    local_sum = (routed.float() + shared.float()).to(torch.bfloat16)
+    dist.all_reduce(local_sum)
+    residual_ref = (local_sum.float() + residual.float()).to(torch.bfloat16)
+    norm_ref = F.rms_norm(residual_ref, (n,), weight=weight, eps=1e-6)
+
+    graph = torch.cuda.CUDAGraph()
+    with graph_capture() as capture:
+        with torch.cuda.graph(graph, stream=capture.stream):
+            norm_out, residual_out = (
+                tensor_model_parallel_fused_allreduce_rmsnorm_two_input(
+                    routed,
+                    shared,
+                    residual,
+                    weight,
+                    1e-6,
+                )
+            )
+
+    failures = []
+    for replay in range(3):
+        dist.barrier()
+        norm_out.zero_()
+        residual_out.zero_()
+        graph.replay()
+        torch.cuda.synchronize()
+        residual_diff = (
+            residual_out.float() - residual_ref.float()
+        ).abs().max().item()
+        norm_diff = (norm_out.float() - norm_ref.float()).abs().max().item()
+        if residual_diff > 0.125 or norm_diff > 0.125:
+            failures.append(
+                f"rank={rank} replay={replay} residual_diff={residual_diff} "
+                f"norm_diff={norm_diff}"
+            )
+
+    failed = torch.tensor(int(bool(failures)), dtype=torch.int32, device=device)
+    dist.all_reduce(failed, op=dist.ReduceOp.MAX)
+    dist.barrier()
+    destroy_model_parallel()
+    destroy_distributed_environment()
+    if failed.item():
+        raise AssertionError("; ".join(failures) or "another rank failed")
+    if rank == 0:
+        print("TWO INPUT GRAPH REPLAY PASSED")
 
 
 def _run_residual_accuracy_check():
@@ -43,6 +129,7 @@ def _run_residual_accuracy_check():
         tensor_model_parallel_fused_allreduce_rmsnorm,
     )
     from sglang.srt.distributed.parallel_state import (
+        _select_fused_ar_rms_1stage,
         destroy_distributed_environment,
         destroy_model_parallel,
         init_distributed_environment,
@@ -125,8 +212,7 @@ def _run_residual_accuracy_check():
         max_diff = diff.max().item()
         frac_nonzero = (diff > 0).float().mean().item()
 
-        nbytes = m * n * dtype.itemsize
-        stage = "1-stage" if nbytes <= 128 * 1024 else "2-stage"
+        stage = "1-stage" if _select_fused_ar_rms_1stage(x) else "2-stage"
         passed = max_diff <= ATOL
 
         if not passed:
@@ -347,6 +433,37 @@ class TestAiterAllreduceFusionAmd(unittest.TestCase):
             f"Expected 'ALL PASSED' in output, got:\n{result.stdout}",
         )
 
+    def test_fused_ar_rms_two_input_graph_replay(self):
+        if self._gpu_count() < 4:
+            self.skipTest("This test requires at least 4 GPUs.")
+
+        cmd = [
+            sys.executable,
+            "-m",
+            "torch.distributed.run",
+            "--standalone",
+            "--nproc_per_node=4",
+            __file__,
+            "--two-input-graph-replay",
+        ]
+        result = subprocess.run(
+            cmd,
+            cwd=str(Path(__file__).resolve().parents[3]),
+            env=os.environ.copy(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=600,
+        )
+        if result.returncode != 0:
+            self.fail(
+                "Two-input graph replay check failed.\n"
+                f"Return code: {result.returncode}\n"
+                f"Command: {' '.join(cmd)}\n"
+                f"Output:\n{result.stdout}"
+            )
+        self.assertIn("TWO INPUT GRAPH REPLAY PASSED", result.stdout)
+
 
 def _fake_self(*, mlp_mode=ScatterMode.TP_ATTN_FULL, is_last_layer=False, tp_size=8):
     """Minimal stand-in for a LayerCommunicator with the fields the gate reads."""
@@ -474,7 +591,9 @@ class TestAiterAllreduceFusionGate(CustomTestCase):
 
 
 if __name__ == "__main__":
-    if "--residual-accuracy" in sys.argv:
+    if "--two-input-graph-replay" in sys.argv:
+        _run_two_input_graph_replay_check()
+    elif "--residual-accuracy" in sys.argv:
         _run_residual_accuracy_check()
     else:
         unittest.main()
