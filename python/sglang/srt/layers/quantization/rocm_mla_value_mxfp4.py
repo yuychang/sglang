@@ -22,6 +22,10 @@ from sglang.srt.layers.quantization.rocm_mxfp4_utils import (
 from sglang.srt.utils.common import direct_register_custom_op
 
 _MXFP4_QUANT_BLOCK_SIZE = 32
+# Triton only lets @triton.jit kernels read module-level globals that are
+# instantiated as tl.constexpr, so device code uses this alias while host code
+# keeps the plain int.
+_MXFP4_QUANT_BLOCK_SIZE_TL = tl.constexpr(_MXFP4_QUANT_BLOCK_SIZE)
 
 
 @triton.heuristics(
@@ -75,7 +79,7 @@ def _batched_gemm_a16wfp4_flatten_mxfp4_quant_kernel(
 
     # This epilogue must see the complete accumulator before quantizing it.
     tl.static_assert(NUM_KSPLIT == 1)
-    tl.static_assert(BLOCK_SIZE_N % _MXFP4_QUANT_BLOCK_SIZE == 0)
+    tl.static_assert(BLOCK_SIZE_N % _MXFP4_QUANT_BLOCK_SIZE_TL == 0)
 
     remap_xcd(pid, GRID_MN)
     pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M=GROUP_SIZE_M)
@@ -102,7 +106,7 @@ def _batched_gemm_a16wfp4_flatten_mxfp4_quant_kernel(
         + offs_bn[None, :] * stride_bn
     )
 
-    scale_group_size: tl.constexpr = _MXFP4_QUANT_BLOCK_SIZE
+    scale_group_size: tl.constexpr = _MXFP4_QUANT_BLOCK_SIZE_TL
     offs_ks = tl.arange(0, BLOCK_SIZE_K // scale_group_size)
     b_scale_ptrs = (
         b_scales_ptr
@@ -172,9 +176,9 @@ def _batched_gemm_a16wfp4_flatten_mxfp4_quant_kernel(
         mask=offs_m[:, None] < M,
     )
 
-    num_quant_blocks: tl.constexpr = BLOCK_SIZE_N // _MXFP4_QUANT_BLOCK_SIZE
+    num_quant_blocks: tl.constexpr = BLOCK_SIZE_N // _MXFP4_QUANT_BLOCK_SIZE_TL
     offs_scale_n = (
-        pid_batch * (N // _MXFP4_QUANT_BLOCK_SIZE)
+        pid_batch * (N // _MXFP4_QUANT_BLOCK_SIZE_TL)
         + pid_n * num_quant_blocks
         + tl.arange(0, num_quant_blocks)
     )
