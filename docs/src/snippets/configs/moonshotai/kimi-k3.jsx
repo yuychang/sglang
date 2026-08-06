@@ -947,6 +947,12 @@ export const config = {
     },
     {
       // MI350X and MI355X use the same single-node TP8 ROCm/AITER profile.
+      //
+      // The multi-stream pair overlaps the shared experts with the routed ones
+      // in the MoE tail; on ROCm it is opt-in because HIP round-robins streams
+      // onto GPU_MAX_HW_QUEUES queues (default 4), and a side stream sharing
+      // the main stream's queue serializes the very work it should overlap.
+      // 5 is the count ATOM's own ROCm recipes export for the same reason.
       match: { hw: "mi350x", pdMode: "unified", strategy: "balanced" },
       nnodes: 1,
       verified: false,
@@ -956,6 +962,8 @@ export const config = {
         "SGLANG_AITER_K3_OPT=1",
         "AITER_FLYDSL_FORCE=1",
         "AITER_SITUV2_A8W4=1",
+        "SGLANG_ROCM_USE_MULTI_STREAM=1",
+        "GPU_MAX_HW_QUEUES=5",
       ],
       flags: [
         "--model-path {{MODEL_NAME}}",
@@ -973,7 +981,7 @@ export const config = {
       ],
     },
     {
-      // Same ROCm/AITER profile as MI350X.
+      // Same ROCm/AITER profile as MI350X, multi-stream pair included.
       match: { hw: "mi355x", pdMode: "unified", strategy: "balanced" },
       nnodes: 1,
       verified: false,
@@ -983,6 +991,8 @@ export const config = {
         "SGLANG_AITER_K3_OPT=1",
         "AITER_FLYDSL_FORCE=1",
         "AITER_SITUV2_A8W4=1",
+        "SGLANG_ROCM_USE_MULTI_STREAM=1",
+        "GPU_MAX_HW_QUEUES=5",
       ],
       flags: [
         "--model-path {{MODEL_NAME}}",
@@ -1726,6 +1736,8 @@ export const config = {
       ],
     },
     {
+      // A decode server is where the MoE overlap pays: every step is a small
+      // batch, so one expert branch alone leaves the machine idle.
       match: { hw: "mi350x", pdMode: "decode", strategy: "balanced" },
       nnodes: 1,
       verified: false,
@@ -1735,6 +1747,8 @@ export const config = {
         "SGLANG_AITER_K3_OPT=1",
         "AITER_FLYDSL_FORCE=1",
         "AITER_SITUV2_A8W4=1",
+        "SGLANG_ROCM_USE_MULTI_STREAM=1",
+        "GPU_MAX_HW_QUEUES=5",
       ],
       flags: [
         "--model-path {{MODEL_NAME}}",
@@ -1763,6 +1777,8 @@ export const config = {
         "SGLANG_AITER_K3_OPT=1",
         "AITER_FLYDSL_FORCE=1",
         "AITER_SITUV2_A8W4=1",
+        "SGLANG_ROCM_USE_MULTI_STREAM=1",
+        "GPU_MAX_HW_QUEUES=5",
       ],
       flags: [
         "--model-path {{MODEL_NAME}}",

@@ -7,6 +7,7 @@
 #   - Full-rank KDA gate (use_full_rank_gate)
 
 import logging
+import os
 from collections.abc import Iterable
 from functools import cached_property
 from typing import TYPE_CHECKING, List, Optional, Tuple
@@ -92,6 +93,9 @@ from sglang.srt.model_executor.runner import get_is_capture_mode
 from sglang.srt.model_executor.runner_backend_utils.breakable_cuda_graph.context import (
     is_in_breakable_cuda_graph,
 )
+from sglang.srt.model_executor.runner_backend_utils.tc_piecewise_cuda_graph.context_manager import (
+    is_in_tc_piecewise_cuda_graph,
+)
 from sglang.srt.model_loader.weight_utils import (
     default_weight_loader,
     maybe_remap_kv_scale_name,
@@ -165,6 +169,45 @@ def _k3_bf16_gemm(
     if out is None:
         return torch.nn.functional.linear(x, weight)
     return torch.mm(x, weight.t(), out=out)
+
+
+# HSA queues HIP must be able to hand out before a side stream can actually
+# run beside the main one: main + K3's alt streams + the runner's forward
+# stream. Below this GPU_MAX_HW_QUEUES, HIP round-robins streams onto the
+# queues it has and the "overlap" becomes serialized work plus extra syncs.
+_HIP_MIN_HW_QUEUES = 5
+
+
+def _build_alt_streams() -> Optional[List[torch.cuda.Stream]]:
+    """Alt-stream pool for the whole backbone, or None to run single-stream.
+
+    CUDA gets one stream per slot. HIP is opt-in behind
+    SGLANG_ROCM_USE_MULTI_STREAM — the same switch DeepSeek V2/V4 use — and
+    gets two physical streams for the three slots: HIP creates a bounded
+    number of HSA queues and round-robins streams onto them, so each extra
+    stream raises the odds a side stream shares the main stream's queue.
+    Slots [0] (MoE) and [1] (MLA internals) never overlap each other — the
+    attention joins before the MoE region opens — so folding them onto one
+    stream costs no overlap, whereas slot [2] must stay separate because the
+    MLA gate fork spans the whole attention core, slot [1]'s window included.
+    """
+    if not _is_hip:
+        return [torch.cuda.Stream() for _ in range(3)]
+    if not envs.SGLANG_ROCM_USE_MULTI_STREAM.get():
+        return None
+    queues = os.environ.get("GPU_MAX_HW_QUEUES")
+    if queues is None or not queues.isdigit() or int(queues) < _HIP_MIN_HW_QUEUES:
+        logger.warning(
+            "K3 ROCm multi-stream is on but GPU_MAX_HW_QUEUES=%s (< %d): HIP "
+            "may place the side streams on the main stream's HSA queue, which "
+            "serializes the overlap it is meant to create. Export "
+            "GPU_MAX_HW_QUEUES=%d before launching.",
+            queues if queues is not None else "unset (default 4)",
+            _HIP_MIN_HW_QUEUES,
+            _HIP_MIN_HW_QUEUES,
+        )
+    moe_and_mla, gate = torch.cuda.Stream(), torch.cuda.Stream()
+    return [moe_and_mla, moe_and_mla, gate]
 
 
 # Fully fused KDA decode step (conv1d + delta rule + gated RMSNorm in one
@@ -1030,6 +1073,31 @@ class KimiK3MoE(nn.Module):
         assert self.fuse_ar_norm and norm is not None
         return norm.weight, norm.variance_epsilon
 
+    def _dual_stream_single_collective(self, num_tokens: int) -> bool:
+        """Whether the single-collective tail should fork the shared experts
+        onto the side stream instead of running them before the routed branch.
+
+        This covers the plain-TP fused front without `k3_ar_fusion` — the shape
+        the ROCm and Hopper recipes run, where the AR-fusion dual-stream branch
+        never engages and the two expert branches otherwise go back to back.
+        Both read disjoint weights and write disjoint slices of one buffer, so
+        the fork needs nothing but a join before the collective.
+
+        Gated on the token count rather than on capture mode (the choice ATOM
+        converged on for the same split on MI355X): the fork is a win wherever
+        one branch alone leaves the machine idle, which covers graphed decode
+        and small eager batches alike, and a prefill chunk is what has to be
+        excluded. Piecewise/breakable capture is excluded because per-segment
+        capture would split the fork from its join across graph segments.
+        """
+        return (
+            self.alt_stream is not None
+            and not k3_ar_fusion.enabled()
+            and 0 < num_tokens <= envs.SGLANG_K3_DUAL_STREAM_MOE_MAX_TOKENS.get()
+            and not is_in_breakable_cuda_graph()
+            and not is_in_tc_piecewise_cuda_graph()
+        )
+
     def _forward_fused(
         self, hidden_states: torch.Tensor, *, prefix_sum: Optional[torch.Tensor]
     ) -> torch.Tensor:
@@ -1135,8 +1203,23 @@ class KimiK3MoE(nn.Module):
                     prefix_sum,
                 )
         else:  # single collective over the flat [latent | shared] pair
-            self._forward_shared(gate_up, shared_output)
-            self._forward_routed(hidden_states, router_logits, routed_input, latent)
+            if self._dual_stream_single_collective(num_tokens):
+                # Routed is issued first: it is the longer branch, and
+                # alt_stream.wait_stream() only orders against what the main
+                # stream has already enqueued (the front GEMM), so issuing
+                # routed after the wait still lets the two run together. The
+                # collective below is unchanged — the pair writes the same two
+                # slices of the same buffer, just concurrently — and `buf`
+                # outlives the join, so its slices need no record_stream.
+                current_stream = torch.cuda.current_stream()
+                self.alt_stream.wait_stream(current_stream)
+                self._forward_routed(hidden_states, router_logits, routed_input, latent)
+                with torch.cuda.stream(self.alt_stream):
+                    self._forward_shared(gate_up, shared_output)
+                current_stream.wait_stream(self.alt_stream)
+            else:
+                self._forward_shared(gate_up, shared_output)
+                self._forward_routed(hidden_states, router_logits, routed_input, latent)
             if self.fuse_ar_norm and k3_ar_fusion.enabled():
                 fused_norm = True
                 k3_ar_fusion.all_reduce_norm(
@@ -2376,8 +2459,7 @@ class KimiK3LinearModel(nn.Module):
         #   [2] MLA output-gate GEMM, overlaps the attention core
         # (The attn-res bank write no longer needs a stream: it is fused
         # into the agg1 fast kernel, see AttnResidual.forward(write=True).)
-        # Disable on HIP code path.
-        self.alt_streams = None if _is_hip else [torch.cuda.Stream() for _ in range(3)]
+        self.alt_streams = _build_alt_streams()
 
         self.layers, self.start_layer, self.end_layer = make_layers(
             config.num_hidden_layers,

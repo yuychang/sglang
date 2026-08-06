@@ -868,6 +868,13 @@ class Envs:
     # front reads hidden_states once, and run the top-k plus the bf16 cast in one
     # epilogue kernel. See kernels/ops/moe/moe_front.py. Default on.
     SGLANG_K3_FUSED_FRONT = EnvBool(True)
+    # Token ceiling for the K3 plain-TP dual-stream MoE tail (shared experts on
+    # the side stream, routed experts on the main one). Above it a single batch
+    # already fills the machine from one branch, so the fork only adds syncs.
+    # 0 disables the overlap. The 1024 default is the crossover ROCm/ATOM
+    # measured for the same shared-vs-routed split on MI355X
+    # (ATOM_DUAL_STREAM_MOE_TOKEN_THRESHOLD).
+    SGLANG_K3_DUAL_STREAM_MOE_MAX_TOKENS = EnvInt(1024)
 
     # sgl-kernel
     SGLANG_SKIP_SGL_KERNEL_VERSION_CHECK = EnvBool(False)
