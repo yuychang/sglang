@@ -172,9 +172,10 @@ def _k3_bf16_gemm(
 
 
 # HSA queues HIP must be able to hand out before a side stream can actually
-# run beside the main one: main + K3's alt streams + the runner's forward
-# stream. Below this GPU_MAX_HW_QUEUES, HIP round-robins streams onto the
+# run beside the main one — below this, HIP round-robins streams onto the
 # queues it has and the "overlap" becomes serialized work plus extra syncs.
+# Same figure SGLANG_ROCM_USE_MULTI_STREAM already documents for DeepSeek and
+# ATOM's own ROCm recipes export.
 _HIP_MIN_HW_QUEUES = 5
 
 
@@ -195,7 +196,7 @@ def _build_alt_streams() -> Optional[List[torch.cuda.Stream]]:
         return [torch.cuda.Stream() for _ in range(3)]
     if not envs.SGLANG_ROCM_USE_MULTI_STREAM.get():
         return None
-    queues = os.environ.get("GPU_MAX_HW_QUEUES")
+    queues = (os.environ.get("GPU_MAX_HW_QUEUES") or "").strip() or None
     if queues is None or not queues.isdigit() or int(queues) < _HIP_MIN_HW_QUEUES:
         logger.warning(
             "K3 ROCm multi-stream is on but GPU_MAX_HW_QUEUES=%s (< %d): HIP "
