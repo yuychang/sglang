@@ -1124,10 +1124,6 @@ class KimiK3MoE(nn.Module):
         gate_up, router_logits, routed_input = torch.split(
             fused, self._front_sizes, dim=-1
         )
-        if num_tokens > 1 and _is_hip and not _aiter_k3_opt:
-            router_logits = router_logits.contiguous()
-        if num_tokens > 1 and self._moe_front_needs_contiguous:
-            routed_input = routed_input.contiguous()
         latent_numel = num_tokens * self.moe_hidden_size
         if k3_ar_fusion.enabled():
             # the shared-expert AR is pull-only, so its input must be a
@@ -1146,15 +1142,36 @@ class KimiK3MoE(nn.Module):
 
         latent = buf[:latent_numel].view(num_tokens, self.moe_hidden_size)
         shared_output = buf[latent_numel:].view(num_tokens, hidden_size)
+
+        # Fork the side stream here rather than inside the branches below. The
+        # shared branch reads gate_up and writes its slice of buf, so the front
+        # GEMM and this allocation are its only dependencies, and wait_stream
+        # orders it against the main stream's tail *at this call*. Everything
+        # enqueued after it therefore runs concurrently with the shared branch —
+        # including the routed-only repacking below, which is not free: only the
+        # trtllm-gen runner consumes the strided split view as is, so on
+        # ROCm/aiter (and marlin) every multi-token MoE layer copies
+        # routed_input out, and holding the shared branch behind a copy it never
+        # reads buys nothing.
+        ar_fusion_dual_stream = self.alt_stream is not None and k3_ar_fusion.enabled()
+        single_collective_dual_stream = self._dual_stream_single_collective(num_tokens)
+        current_stream = None
+        if ar_fusion_dual_stream or single_collective_dual_stream:
+            current_stream = torch.cuda.current_stream()
+            self.alt_stream.wait_stream(current_stream)
+
+        if num_tokens > 1 and _is_hip and not _aiter_k3_opt:
+            router_logits = router_logits.contiguous()
+        if num_tokens > 1 and self._moe_front_needs_contiguous:
+            routed_input = routed_input.contiguous()
+
         fused_norm = False
-        if self.alt_stream is not None and k3_ar_fusion.enabled():
+        if ar_fusion_dual_stream:
             defer_finalize = (
                 self._defer_moe_finalize
                 and self.fuse_ar_norm
                 and k3_ar_fusion.finalize_push_fits(num_tokens)
             )
-            current_stream = torch.cuda.current_stream()
-            self.alt_stream.wait_stream(current_stream)
             if defer_finalize:
                 deferred = self._forward_routed_deferred(
                     hidden_states, router_logits, routed_input
@@ -1204,16 +1221,14 @@ class KimiK3MoE(nn.Module):
                     prefix_sum,
                 )
         else:  # single collective over the flat [latent | shared] pair
-            if self._dual_stream_single_collective(num_tokens):
-                # Routed is issued first: it is the longer branch, and
-                # alt_stream.wait_stream() only orders against what the main
-                # stream has already enqueued (the front GEMM), so issuing
-                # routed after the wait still lets the two run together. The
-                # collective below is unchanged — the pair writes the same two
-                # slices of the same buffer, just concurrently — and `buf`
-                # outlives the join, so its slices need no record_stream.
-                current_stream = torch.cuda.current_stream()
-                self.alt_stream.wait_stream(current_stream)
+            if single_collective_dual_stream:
+                # Routed is issued first: it is the longer branch, and the fork
+                # above only orders the side stream against what the main stream
+                # had enqueued at that point, so issuing routed here still lets
+                # the two run together. The collective below is unchanged — the
+                # pair writes the same two slices of the same buffer, just
+                # concurrently — and `buf` outlives the join, so its slices need
+                # no record_stream.
                 self._forward_routed(hidden_states, router_logits, routed_input, latent)
                 with torch.cuda.stream(self.alt_stream):
                     self._forward_shared(gate_up, shared_output)

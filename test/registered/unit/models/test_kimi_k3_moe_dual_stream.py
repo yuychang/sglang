@@ -1,10 +1,11 @@
 """K3 plain-TP MoE dual-stream tail: the single-collective branch of
 _forward_fused must produce the same result whether the shared experts run on
-the side stream or ahead of the routed branch, and the fork must engage only on
-the shapes and graph modes it is safe for."""
+the side stream or ahead of the routed branch, the fork must engage only on the
+shapes and graph modes it is safe for, and it must be issued early enough that
+the routed-only repacking falls inside the overlap."""
 
 import unittest
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -63,7 +64,7 @@ class _Moe:
     _latent_norm = KimiK3MoE._latent_norm
 
 
-def _make_moe(alt_stream, device="cuda"):
+def _make_moe(alt_stream, device="cuda", needs_contiguous=False):
     gen = torch.Generator(device=device).manual_seed(0)
 
     def _randn(*shape):
@@ -98,7 +99,7 @@ def _make_moe(alt_stream, device="cuda"):
     moe._forward_routed = _forward_routed
     moe.routed_expert_up_proj = _Linear(_randn(_H, _LATENT).contiguous())
     moe.routed_expert_norm = None
-    moe._moe_front_needs_contiguous = False
+    moe._moe_front_needs_contiguous = needs_contiguous
     moe._defer_moe_finalize = False
     moe.fuse_ar_norm = False
     moe._gemm_ag_up_eligible = False
@@ -106,13 +107,13 @@ def _make_moe(alt_stream, device="cuda"):
 
 
 @contextmanager
-def _plain_tp_env():
+def _plain_tp_env(gemm=_gemm):
     """Neutralize everything _forward_fused reaches outside the branch under
     test: no AR fusion (the plain-TP shape this branch serves), no
     symmetric-memory pool, and a single-rank all-reduce."""
     with ExitStack() as stack:
         for p in (
-            patch("sglang.srt.models.kimi_k3._k3_bf16_gemm", _gemm),
+            patch("sglang.srt.models.kimi_k3._k3_bf16_gemm", gemm),
             patch("sglang.srt.models.kimi_k3.k3_ar_fusion.enabled", return_value=False),
             patch(
                 "sglang.srt.models.kimi_k3.use_symmetric_memory", _noop_symmetric_memory
@@ -232,6 +233,104 @@ class TestKimiK3AltStreamPool(CustomTestCase):
                     warn.assert_not_called()
 
 
+class _FakeStream:
+    """Stand-in for torch.cuda.Stream that records the host-side fork, so the
+    ordering tests below need no GPU."""
+
+    def __init__(self, log, name):
+        self._log = log
+        self._name = name
+
+    def wait_stream(self, other):
+        self._log.append(f"{self._name}.wait_stream")
+
+
+def _repack_logging_gemm(log):
+    """_k3_bf16_gemm stand-in whose front-GEMM result records .contiguous().
+
+    The front GEMM's output is the only tensor _forward_fused repacks, and
+    torch keeps the subclass across torch.split, so the split views report the
+    copies. contiguous() hands back a plain tensor: the repacked halves flow
+    into out= GEMMs, where a subclass buys nothing and only widens what the
+    test depends on."""
+
+    class _Logged(torch.Tensor):
+        def contiguous(self, *args, **kwargs):
+            log.append("repack")
+            return torch.Tensor.contiguous(self, *args, **kwargs).as_subclass(
+                torch.Tensor
+            )
+
+    def _wrapped(x, weight, out=None):
+        result = _gemm(x, weight, out)
+        # out= is the shared-expert down GEMM writing into the collective
+        # buffer, not the front; leave it alone.
+        return result if out is not None else result.as_subclass(_Logged)
+
+    return _wrapped
+
+
+class TestKimiK3MoeForkOrder(CustomTestCase):
+    """The fork has to be issued before the routed-only repacking.
+
+    wait_stream orders the side stream against the main stream's tail *at the
+    call*, so anything enqueued before it is work the shared experts wait on.
+    Only the trtllm-gen runner takes the strided split views as they are — on
+    ROCm/aiter and on marlin every multi-token MoE layer copies them out — so a
+    fork placed after those copies hands the side stream a needless dependency.
+    """
+
+    _TOKENS = 4  # > 1, which is what arms the repacking
+
+    def _input(self):
+        return (
+            torch.randn(self._TOKENS, _H, dtype=torch.float32)
+            .mul(0.05)
+            .to(torch.bfloat16)
+        )
+
+    def _run(self, *, alt_stream, log, x=None):
+        moe = _make_moe(alt_stream, device="cpu", needs_contiguous=True)
+        x = self._input() if x is None else x
+        main = _FakeStream(log, "main")
+        with _plain_tp_env(gemm=_repack_logging_gemm(log)), patch(
+            "torch.cuda.current_stream", return_value=main
+        ), patch("torch.cuda.stream", lambda _stream: nullcontext()), patch(
+            # The HIP shape repacks the router logits too, so both copies are
+            # covered.
+            "sglang.srt.models.kimi_k3._is_hip",
+            True,
+        ), patch(
+            "sglang.srt.models.kimi_k3._aiter_k3_opt", False
+        ):
+            return KimiK3MoE._forward_fused(moe, x, prefix_sum=None)
+
+    def test_fork_precedes_the_repacking(self):
+        log = []
+        self._run(alt_stream=_FakeStream(log, "alt"), log=log)
+        self.assertEqual(
+            log.count("repack"),
+            2,  # router logits + routed input
+            f"expected both split views to be repacked, got {log}",
+        )
+        self.assertEqual(log[0], "alt.wait_stream", f"fork is not first: {log}")
+
+    def test_no_fork_without_a_side_stream(self):
+        log = []
+        self._run(alt_stream=None, log=log)
+        self.assertEqual(log, ["repack", "repack"])
+
+    def test_reordering_leaves_the_result_alone(self):
+        x = self._input()
+        serial_log, overlap_log = [], []
+        # Both owners seed the same generator, so the weights match too.
+        serial = self._run(alt_stream=None, log=serial_log, x=x)
+        overlap = self._run(
+            alt_stream=_FakeStream(overlap_log, "alt"), log=overlap_log, x=x
+        )
+        self.assertTrue(torch.equal(overlap, serial))
+
+
 class TestKimiK3MoeDualStreamEquivalence(CustomTestCase):
     @classmethod
     def setUpClass(cls):
@@ -250,14 +349,25 @@ class TestKimiK3MoeDualStreamEquivalence(CustomTestCase):
         )
 
     def test_dual_stream_matches_serial(self):
+        # needs_contiguous is the runner-dependent repacking the fork now spans
+        # (True for every runner but trtllm-gen), so both settings are covered.
         for tokens in (1, 4, 32):
-            with self.subTest(tokens=tokens):
-                x = self._input(tokens)
-                # Both owners seed the same generator, so the weights match.
-                serial = self._run(_make_moe(alt_stream=None), x)
-                overlap = self._run(_make_moe(alt_stream=torch.cuda.Stream()), x)
-                torch.cuda.synchronize()
-                self.assertTrue(torch.equal(overlap, serial))
+            for needs_contiguous in (False, True):
+                with self.subTest(tokens=tokens, needs_contiguous=needs_contiguous):
+                    x = self._input(tokens)
+                    # Both owners seed the same generator, so weights match.
+                    serial = self._run(
+                        _make_moe(alt_stream=None, needs_contiguous=needs_contiguous), x
+                    )
+                    overlap = self._run(
+                        _make_moe(
+                            alt_stream=torch.cuda.Stream(),
+                            needs_contiguous=needs_contiguous,
+                        ),
+                        x,
+                    )
+                    torch.cuda.synchronize()
+                    self.assertTrue(torch.equal(overlap, serial))
 
     def test_dual_stream_matches_serial_under_graph_capture(self):
         x = self._input(4)
