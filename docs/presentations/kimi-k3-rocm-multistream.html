@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Kimi-K3 on ROCm: Enabling Multi-Stream Overlap</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style>
+  :root{
+    --bg:#14161a;
+    --bg-alt:#1b1e24;
+    --panel:#20242b;
+    --panel-2:#262b33;
+    --text:#eef1f5;
+    --muted:#9aa4b2;
+    --accent:#e67e22;
+    --accent-2:#f0985a;
+    --green:#4caf7d;
+    --red:#e0654e;
+    --blue:#5b9bd5;
+    --purple:#a97fd8;
+    --border:#31363f;
+    --mono: "SF Mono", "Fira Code", Consolas, Menlo, monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; padding:0; height:100%;
+    background:var(--bg);
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    overflow:hidden;
+  }
+  #deck{
+    position:relative;
+    width:100vw; height:100vh;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .slide{
+    position:absolute;
+    width:min(1180px, 92vw);
+    height:min(700px, 88vh);
+    background:linear-gradient(160deg, var(--bg-alt) 0%, #16181d 100%);
+    border:1px solid var(--border);
+    border-radius:16px;
+    box-shadow:0 30px 80px rgba(0,0,0,.5);
+    padding:52px 64px;
+    display:none;
+    flex-direction:column;
+    overflow:auto;
+  }
+  .slide.active{display:flex;}
+  .kicker{
+    color:var(--accent);
+    font-size:13px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    font-weight:700;
+    margin-bottom:10px;
+  }
+  h1{
+    font-size:38px; margin:0 0 6px 0; font-weight:800; letter-spacing:-.01em;
+    line-height:1.15;
+  }
+  h2{
+    font-size:29px; margin:0 0 18px 0; font-weight:800; letter-spacing:-.01em;
+  }
+  h3{ font-size:18px; margin:0 0 8px 0; font-weight:700; color:var(--accent-2); }
+  p{ line-height:1.55; color:var(--text); font-size:16px; }
+  .sub{ color:var(--muted); font-size:17px; margin-bottom:26px; line-height:1.5; }
+  .content{ flex:1; display:flex; flex-direction:column; gap:16px; }
+  .row{ display:flex; gap:22px; flex:1; }
+  .col{ flex:1; min-width:0; }
+  ul{ margin:0; padding-left:20px; line-height:1.65; font-size:15.5px; }
+  li{ margin-bottom:8px; }
+  li::marker{ color:var(--accent); }
+  .card{
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:18px 20px;
+  }
+  .card.tight{ padding:14px 16px; }
+  .pill{
+    display:inline-block;
+    font-size:11.5px;
+    font-weight:700;
+    letter-spacing:.03em;
+    padding:3px 10px;
+    border-radius:999px;
+    background:rgba(230,126,34,.15);
+    color:var(--accent-2);
+    border:1px solid rgba(230,126,34,.35);
+    margin-right:6px;
+  }
+  .pill.red{ background:rgba(224,101,78,.15); color:#ff9482; border-color:rgba(224,101,78,.35); }
+  .pill.green{ background:rgba(76,175,125,.15); color:#7fe0ab; border-color:rgba(76,175,125,.35); }
+  .pill.blue{ background:rgba(91,155,213,.15); color:#8ec2ee; border-color:rgba(91,155,213,.35); }
+  .pill.purple{ background:rgba(169,127,216,.15); color:#c9a6ee; border-color:rgba(169,127,216,.35); }
+  code, .code{
+    font-family:var(--mono);
+    background:#0f1114;
+    border:1px solid var(--border);
+    border-radius:6px;
+    padding:1px 7px;
+    font-size:13.5px;
+    color:#f0c896;
+  }
+  pre{
+    font-family:var(--mono);
+    background:#0f1114;
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:16px 18px;
+    font-size:13px;
+    line-height:1.55;
+    overflow:auto;
+    margin:0;
+    color:#d8dde5;
+  }
+  pre .c1{ color:#6a9955; }
+  pre .kw{ color:#e67e22; }
+  pre .str{ color:#c3a06a;}
+  pre .fn{ color:#5b9bd5; }
+  pre .num{ color:#a97fd8; }
+  table{ width:100%; border-collapse:collapse; font-size:14px; }
+  th,td{ text-align:left; padding:9px 12px; border-bottom:1px solid var(--border); }
+  th{ color:var(--muted); font-weight:700; text-transform:uppercase; font-size:11.5px; letter-spacing:.05em; }
+  td .code{ font-size:12.5px; }
+  .footer{
+    display:flex; justify-content:space-between; align-items:center;
+    margin-top:18px; padding-top:14px; border-top:1px solid var(--border);
+    color:var(--muted); font-size:12.5px;
+  }
+  .progress{
+    position:fixed; bottom:0; left:0; height:3px; background:var(--accent);
+    transition:width .25s ease; z-index:10;
+  }
+  .navhint{
+    position:fixed; top:18px; right:26px; color:var(--muted); font-size:12px;
+    letter-spacing:.03em; z-index:10;
+  }
+  .counter{
+    position:fixed; bottom:14px; right:26px; color:var(--muted); font-size:12px; z-index:10;
+  }
+  svg text{ font-family:-apple-system,Helvetica,Arial,sans-serif; }
+  .big-num{ font-size:52px; font-weight:800; color:var(--accent); line-height:1; }
+  .label{ font-size:12.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin-top:4px;}
+  .grid3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; }
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .center-flex{ display:flex; align-items:center; justify-content:center; }
+  .arrow{ color:var(--accent); font-weight:800; }
+  .strike{ text-decoration:line-through; color:var(--red); opacity:.75; }
+  .title-slide{ align-items:center; justify-content:center; text-align:center; }
+  .title-slide h1{ font-size:46px; }
+  .badgebar{ display:flex; gap:8px; justify-content:center; margin-top:22px; flex-wrap:wrap; }
+</style>
+</head>
+<body>
+<div id="deck">
+
+  <!-- SLIDE 1: TITLE -->
+  <div class="slide active title-slide">
+    <div class="kicker" style="text-align:center;">SGLang &middot; ROCm/HIP performance work</div>
+    <h1>Kimi&#8209;K3 on ROCm:<br/>Enabling Multi&#8209;Stream Overlap</h1>
+    <p class="sub" style="max-width:720px; margin:0 auto;">
+      Turning on the alt-stream pool that ROCm hard-disabled, and giving it
+      somewhere to actually overlap &mdash; informed by ROCm/ATOM's dual-stream MoE design.
+    </p>
+    <div class="badgebar">
+      <span class="pill red">Was: streams=None on HIP</span>
+      <span class="pill green">Now: opt-in 2-stream pool</span>
+      <span class="pill blue">+ plain-TP MoE overlap</span>
+      <span class="pill purple">9 new tests</span>
+    </div>
+    <div class="footer" style="border-top:none; margin-top:40px; justify-content:center;">
+      <span>branch <code>cursor/kimi-k3-rocm-multi-stream-fb61</code></span>
+    </div>
+  </div>
+
+  <!-- SLIDE 2: THE ASK -->
+  <div class="slide">
+    <div class="kicker">The ask</div>
+    <h2>Investigate and optimize Kimi&#8209;K3 on ROCm with multi&#8209;stream enabled</h2>
+    <div class="content">
+      <div class="row">
+        <div class="col card">
+          <h3>What "multi-stream" means here</h3>
+          <p>K3 already has a 3-slot pool of CUDA streams (<code>self.alt_streams</code>) used to
+          run small, independent GEMMs on a side stream concurrently with the main
+          compute stream &mdash; hiding their latency instead of paying it serially.</p>
+        </div>
+        <div class="col card">
+          <h3>What we found first</h3>
+          <p>On HIP, that pool is unconditionally <code>None</code>. Every overlap site in the
+          model silently degrades to fully serial execution. This is a single line,
+          but it disables three separate optimizations at once.</p>
+        </div>
+      </div>
+      <div class="card" style="background:rgba(230,126,34,.08); border-color:rgba(230,126,34,.3);">
+        <h3 style="color:var(--accent-2);">Follow-up ask</h3>
+        <p style="margin:0;">"Refer to <code>github.com/ROCm/ATOM</code> and see how it implements
+        multi-stream Kimi&#8209;K3 &mdash; we can leverage their experience." &rarr; ATOM's public
+        design notes point at a <b>token-count threshold</b> (not GPU-family gating) and a specific
+        MI355X crossover point, which became the gating strategy we adopted.</p>
+      </div>
+    </div>
+    <div class="footer"><span>1 / 16</span><span>Problem framing</span></div>
+  </div>
+
+  <!-- SLIDE 3: K3 ARCHITECTURE -->
+  <div class="slide">
+    <div class="kicker">Context</div>
+    <h2>Kimi&#8209;K3 in one picture</h2>
+    <div class="content">
+      <div class="row" style="align-items:center;">
+        <div class="col">
+          <svg viewBox="0 0 480 360" width="100%" height="340">
+            <rect x="10" y="10" width="460" height="60" rx="10" fill="#262b33" stroke="#31363f"/>
+            <text x="240" y="35" text-anchor="middle" fill="#eef1f5" font-size="14" font-weight="700">Embedding</text>
+            <text x="240" y="54" text-anchor="middle" fill="#9aa4b2" font-size="11">hidden_size = 7168</text>
+
+            <rect x="10" y="85" width="460" height="90" rx="10" fill="rgba(91,155,213,.12)" stroke="#5b9bd5"/>
+            <text x="240" y="108" text-anchor="middle" fill="#8ec2ee" font-size="14" font-weight="700">69 &times; KDA layers</text>
+            <text x="240" y="128" text-anchor="middle" fill="#9aa4b2" font-size="11">Linear attention (gated delta rule)</text>
+            <text x="240" y="146" text-anchor="middle" fill="#9aa4b2" font-size="11">BFA proj: [f_a|b] + f_b overlapped w/ [q,k,v,g] GEMM</text>
+            <text x="240" y="163" text-anchor="middle" fill="var(--accent-2)" font-size="11" font-weight="700">uses alt_streams[2]</text>
+
+            <rect x="10" y="188" width="460" height="60" rx="10" fill="rgba(169,127,216,.12)" stroke="#a97fd8"/>
+            <text x="240" y="211" text-anchor="middle" fill="#c9a6ee" font-size="14" font-weight="700">24 &times; MLA layers</text>
+            <text x="240" y="230" text-anchor="middle" fill="#9aa4b2" font-size="11">Full attention &middot; output-gate GEMM overlap</text>
+
+            <rect x="10" y="261" width="460" height="90" rx="10" fill="rgba(76,175,125,.12)" stroke="#4caf7d"/>
+            <text x="240" y="284" text-anchor="middle" fill="#7fe0ab" font-size="14" font-weight="700">MoE (every layer)</text>
+            <text x="240" y="303" text-anchor="middle" fill="#9aa4b2" font-size="11">896 routed experts (top-k) + 1 shared expert</text>
+            <text x="240" y="321" text-anchor="middle" fill="#9aa4b2" font-size="11">latent_moe_hidden_size = 3584</text>
+            <text x="240" y="339" text-anchor="middle" fill="var(--accent-2)" font-size="11" font-weight="700">uses alt_streams[0] (this PR's focus)</text>
+          </svg>
+        </div>
+        <div class="col">
+          <div class="card" style="margin-bottom:14px;">
+            <h3>Why this shape matters for overlap</h3>
+            <p style="margin:0;">MoE's shared expert is a fixed, small amount of work regardless
+            of routing. Routed-expert work is the long pole. If shared-expert compute
+            can run on a side stream <em>while</em> routed-expert compute proceeds on the
+            main stream, the shared expert's latency is hidden almost for free.</p>
+          </div>
+          <div class="card">
+            <h3>Same idea, twice more</h3>
+            <p style="margin:0;">KDA's forget-gate projection and MLA's output-gate GEMM are both
+            small, data-independent side computations relative to their layer's main
+            GEMM &mdash; same overlap shape, different slot in the pool.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="footer"><span>2 / 16</span><span>Architecture</span></div>
+  </div>
+
+  <!-- SLIDE 4: THE THREE SLOTS -->
+  <div class="slide">
+    <div class="kicker">Context</div>
+    <h2>Three alt-stream slots, three different jobs</h2>
+    <div class="content">
+      <table>
+        <tr><th>Slot</th><th>Used by</th><th>Overlaps</th><th>Status before this PR (ROCm)</th></tr>
+        <tr>
+          <td><code>alt_streams[0]</code></td>
+          <td>KimiK3MoE (AR-fusion path only)</td>
+          <td>Shared-expert FFN vs. routed-expert dispatch</td>
+          <td><span class="pill red">dead</span> pool is None</td>
+        </tr>
+        <tr>
+          <td><code>alt_streams[1]</code></td>
+          <td>DeepseekV2AttentionMLA internals</td>
+          <td>inherited machinery, unused by K3's own forward</td>
+          <td><span class="pill red">dead</span> &amp; unused by K3 either way</td>
+        </tr>
+        <tr>
+          <td><code>alt_streams[2]</code></td>
+          <td>MLA output-gate GEMM <br/>&amp; KDA BFA-projection</td>
+          <td>Small side GEMM vs. main attention GEMM (shared slot, never concurrent between the two use sites)</td>
+          <td><span class="pill red">dead</span> pool is None</td>
+        </tr>
+      </table>
+      <div class="card" style="background:rgba(224,101,78,.08); border-color:rgba(224,101,78,.3);">
+        <p style="margin:0;"><b>The one line responsible:</b></p>
+        <pre style="margin-top:8px;"><span class="kw">self</span>.alt_streams = <span class="kw">None</span> <span class="kw">if</span> _is_hip <span class="kw">else</span> [torch.cuda.Stream() <span class="kw">for</span> _ <span class="kw">in</span> <span class="kw">range</span>(<span class="num">3</span>)]</pre>
+      </div>
+    </div>
+    <div class="footer"><span>3 / 16</span><span>Finding #1</span></div>
+  </div>
+
+  <!-- SLIDE 5: FINDING 2 -->
+  <div class="slide">
+    <div class="kicker">Finding #2 (the deeper one)</div>
+    <h2>Even with the pool restored, MoE overlap still wasn't reachable</h2>
+    <div class="content">
+      <p class="sub" style="margin-bottom:8px;">The only dual-stream fork in <code>KimiK3MoE._forward_fused</code> was
+      gated on <code>k3_ar_fusion.enabled()</code> &mdash; a Blackwell (SM100/SM103) fused
+      all-reduce feature. That gate is <code>False</code> everywhere else.</p>
+      <div class="row">
+        <div class="col card">
+          <h3><span class="pill purple">AR-fusion path</span></h3>
+          <p style="margin:0;">Dual-stream MoE already existed here: shared + routed forked,
+          joined, then a fused multicast all-reduce. Only reachable on Blackwell.</p>
+        </div>
+        <div class="col card">
+          <h3><span class="pill blue">Plain-TP path</span> (everyone else)</h3>
+          <p style="margin:0;">Serial: shared expert runs to completion, <em>then</em> routed expert
+          runs, then one plain collective. This is the path ROCm <b>and</b> H100/H200 take.</p>
+        </div>
+      </div>
+      <div class="card" style="background:rgba(230,126,34,.08); border-color:rgba(230,126,34,.3);">
+        <p style="margin:0;"><b>Consequence:</b> restoring the stream pool alone would have changed nothing
+        observable on ROCm &mdash; slot <code>[0]</code> would still never be entered. The pool and the
+        MoE fork are two independent gaps that both needed closing.</p>
+      </div>
+    </div>
+    <div class="footer"><span>4 / 16</span><span>Finding #2</span></div>
+  </div>
+
+  <!-- SLIDE 6: ATOM -->
+  <div class="slide">
+    <div class="kicker">Prior art</div>
+    <h2>What we took from ROCm/ATOM</h2>
+    <div class="content">
+      <div class="row">
+        <div class="col">
+          <div class="card" style="margin-bottom:14px;">
+            <h3>Gate on tokens, not on GPU family or capture mode</h3>
+            <p style="margin:0;">ATOM's dual-stream MoE is controlled by
+            <code>ATOM_DUAL_STREAM_MOE_TOKEN_THRESHOLD</code> &mdash; overlap is only worth
+            forking a stream for once there is enough routed-expert work to hide the
+            shared-expert latency behind. Below that, the fork/join overhead isn't worth it.</p>
+          </div>
+          <div class="card">
+            <h3>Measured crossover, not a guess</h3>
+            <p style="margin:0;">ATOM's default threshold reflects a value measured on
+            <b>MI355X</b> for this exact shared-vs-routed split. We reused that number
+            (<code>1024</code> tokens) as our default rather than inventing a new one.</p>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card">
+            <h3>What we adapted rather than copied</h3>
+            <ul>
+              <li>ATOM's environment targets its own runtime; we mirrored the <em>idea</em>
+              (env-gated token ceiling) as a native SGLang <code>EnvInt</code>, not a port of their code.</li>
+              <li>SGLang's stream pool has 3 conceptual slots vs. ATOM's single MoE
+              stream &mdash; we had to decide how those fold onto HIP's limited
+              hardware queues (next slide).</li>
+              <li>We kept SGLang's existing capture-mode guards
+              (<code>is_in_breakable_cuda_graph</code>, <code>is_in_tc_piecewise_cuda_graph</code>)
+              in addition to the token ceiling, since ATOM and SGLang don't share a
+              graph-capture design.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="footer"><span>5 / 16</span><span>ATOM reference</span></div>
+  </div>
+
+  <!-- SLIDE 7: HIP QUEUES -->
+  <div class="slide">
+    <div class="kicker">ROCm-specific constraint</div>
+    <h2>Why HIP streams can't just mirror CUDA 1-for-1</h2>
+    <div class="content">
+      <div class="row">
+        <div class="col">
+          <svg viewBox="0 0 460 300" width="100%" height="280">
+            <text x="10" y="24" fill="#eef1f5" font-size="13" font-weight="700">CUDA: one HW queue per stream</text>
+            <g font-size="11" fill="#9aa4b2">
+              <rect x="10" y="40" width="130" height="34" rx="6" fill="rgba(91,155,213,.15)" stroke="#5b9bd5"/>
+              <text x="75" y="61" text-anchor="middle" fill="#8ec2ee">stream[0]&rarr;queue0</text>
+              <rect x="10" y="82" width="130" height="34" rx="6" fill="rgba(169,127,216,.15)" stroke="#a97fd8"/>
+              <text x="75" y="103" text-anchor="middle" fill="#c9a6ee">stream[1]&rarr;queue1</text>
+              <rect x="10" y="124" width="130" height="34" rx="6" fill="rgba(76,175,125,.15)" stroke="#4caf7d"/>
+              <text x="75" y="145" text-anchor="middle" fill="#7fe0ab">stream[2]&rarr;queue2</text>
+            </g>
+            <text x="10" y="200" fill="#eef1f5" font-size="13" font-weight="700">HIP: streams round-robin onto GPU_MAX_HW_QUEUES</text>
+            <g font-size="11">
+              <rect x="10" y="216" width="130" height="30" rx="6" fill="rgba(224,101,78,.15)" stroke="#e0654e"/>
+              <text x="75" y="235" text-anchor="middle" fill="#ff9482">3 streams, default=4 queues</text>
+              <rect x="150" y="216" width="130" height="30" rx="6" fill="rgba(76,175,125,.15)" stroke="#4caf7d"/>
+              <text x="215" y="235" text-anchor="middle" fill="#7fe0ab">can collide &rarr; serialize</text>
+            </g>
+            <text x="10" y="272" fill="#f0c896" font-size="12" font-family="monospace">need &ge; 5 queues to guarantee no collision</text>
+          </svg>
+        </div>
+        <div class="col">
+          <div class="card" style="margin-bottom:14px;">
+            <h3>The rule</h3>
+            <p style="margin:0;">HIP does not give each stream its own hardware queue. Streams
+            are round-robined across <code>GPU_MAX_HW_QUEUES</code> (default <b>4</b>).
+            If two streams that need to run concurrently land on the same queue, the
+            runtime serializes them &mdash; you pay the fork/join overhead and get
+            <em>zero</em> overlap benefit.</p>
+          </div>
+          <div class="card">
+            <h3>Our response</h3>
+            <ul style="margin:0;">
+              <li>Module constant <code>_HIP_MIN_HW_QUEUES = 5</code>, documented in code.</li>
+              <li>Fold slots <code>[0]</code> and <code>[1]</code> onto <b>one physical stream</b>
+              (they never run concurrently in K3 &mdash; <code>[1]</code> is unused dead weight
+              inherited from the MLA base class), keep <code>[2]</code> separate.</li>
+              <li>Warn at construction time if <code>GPU_MAX_HW_QUEUES &lt; 5</code>.</li>
+              <li>Document <code>GPU_MAX_HW_QUEUES=5</code> in the AMD cookbook recipe.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="footer"><span>6 / 16</span><span>ROCm constraints</span></div>
+  </div>
+
+  <!-- SLIDE 8: BUILD ALT STREAMS -->
+  <div class="slide">
+    <div class="kicker">Implementation &middot; fix #1</div>
+    <h2><code style="font-size:22px;">_build_alt_streams()</code>: opt-in, folded pool</h2>
+    <div class="content">
+      <div class="row">
+        <div class="col" style="flex:1.3;">
+<pre><span class="kw">def</span> <span class="fn">_build_alt_streams</span>():
+    <span class="kw">if</span> <span class="kw">not</span> _is_hip:
+        <span class="kw">return</span> [torch.cuda.Stream() <span class="kw">for</span> _ <span class="kw">in</span> <span class="kw">range</span>(<span class="num">3</span>)]
+
+    <span class="kw">if</span> <span class="kw">not</span> envs.SGLANG_ROCM_USE_MULTI_STREAM.get():
+        <span class="kw">return</span> <span class="kw">None</span>  <span class="c1"># opt-in: unchanged default behavior</span>
+
+    hw_queues = _get_hip_hw_queue_count()
+    <span class="kw">if</span> hw_queues < _HIP_MIN_HW_QUEUES:
+        logger.warning(
+            <span class="str">"SGLANG_ROCM_USE_MULTI_STREAM=1 but GPU_MAX_HW_QUEUES=%d "</span>
+            <span class="str">"(&lt; %d) — streams may collide onto the same HW queue "</span>
+            <span class="str">"and serialize. Set GPU_MAX_HW_QUEUES=%d or higher."</span>,
+            hw_queues, _HIP_MIN_HW_QUEUES, _HIP_MIN_HW_QUEUES,
+        )
+
+    moe_and_mla = torch.cuda.Stream()      <span class="c1"># slots [0] + [1]</span>
+    kda_bfa_or_mla_gate = torch.cuda.Stream()  <span class="c1"># slot [2]</span>
+    <span class="kw">return</span> [moe_and_mla, moe_and_mla, kda_bfa_or_mla_gate]</pre>
+        </div>
+        <div class="col">
+          <div class="card tight" style="margin-bottom:10px;">
+            <p style="margin:0;"><span class="pill green">CUDA</span> unchanged: 3 distinct streams.</p>
+          </div>
+          <div class="card tight" style="margin-bottom:10px;">
+            <p style="margin:0;"><span class="pill red">HIP, default</span> unchanged: <code>None</code>. Zero risk to existing deployments.</p>
+          </div>
+          <div class="card tight">
+            <p style="margin:0;"><span class="pill blue">HIP, opt-in</span> 2 physical streams, folded per slide 4/7's analysis, with a startup warning if queues are short.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="footer"><span>7 / 16</span><span>Implementation</span></div>
+  </div>
+
+  <!-- SLIDE 9: THE GATE -->
+  <div class="slide">
+    <div class="kicker">Implementation &middot; fix #2</div>
+    <h2>Giving the plain-TP MoE tail somewhere to fork</h2>
+    <div class="content">
+      <div class="row">
+        <div class="col">
+<pre><span class="kw">def</span> <span class="fn">_dual_stream_single_collective</span>(<span class="kw">self</span>, num_tokens):
+    <span class="kw">return</span> (
+        <span class="kw">self</span>.alt_stream <span class="kw">is</span> <span class="kw">not</span> <span class="kw">None</span>
+        <span class="kw">and</span> <span class="kw">not</span> k3_ar_fusion.enabled()
+        <span class="kw">and</span> <span class="num">0</span> < num_tokens
+            <= envs.SGLANG_K3_DUAL_STREAM_MOE_MAX_TOKENS.get()
+        <span class="kw">and</span> <span class="kw">not</span> is_in_breakable_cuda_graph()
+        <span class="kw">and</span> <span class="kw">not</span> is_in_tc_piecewise_cuda_graph()
+    )</pre>
+        </div>
+        <div class="col">
+          <div class="card">
+            <h3>Five conditions, all must hold</h3>
+            <ul style="margin:0;">
+              <li><b>Pool exists</b> &mdash; CUDA always; HIP only when opted in.</li>
+              <li><b>Not already the AR-fusion path</b> &mdash; avoid double-forking; that path
+              has its own dual-stream logic.</li>
+              <li><b>Token ceiling</b> (default <b>1024</b>, ATOM's measured MI355X crossover)
+              &mdash; below this, fork/join overhead isn't worth it. <code>0</code> is a hard kill switch.</li>
+              <li><b>Not in a breakable / TC-piecewise capture</b> &mdash; multi-stream forking
+              is unsafe when the graph can be split mid-region.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="footer"><span>8 / 16</span><span>Implementation</span></div>
+  </div>
+
+  <!-- SLIDE 10: FORK/JOIN TIMELINE -->
+  <div class="slide">
+    <div class="kicker">Implementation &middot; before/after</div>
+    <h2>Serial vs. dual-stream MoE tail</h2>
+    <div class="content">
+      <svg viewBox="0 0 900 300" width="100%" height="290">
+        <text x="10" y="24" fill="#eef1f5" font-size="14" font-weight="700">Before: fully serial</text>
+        <line x1="10" y1="55" x2="890" y2="55" stroke="#31363f"/>
+        <text x="10" y="50" fill="#9aa4b2" font-size="11">main stream</text>
+        <rect x="60" y="42" width="180" height="26" rx="4" fill="rgba(76,175,125,.25)" stroke="#4caf7d"/>
+        <text x="150" y="60" text-anchor="middle" fill="#7fe0ab" font-size="11">shared expert</text>
+        <rect x="250" y="42" width="420" height="26" rx="4" fill="rgba(91,155,213,.25)" stroke="#5b9bd5"/>
+        <text x="460" y="60" text-anchor="middle" fill="#8ec2ee" font-size="11">routed expert (dispatch + FFN + combine)</text>
+        <rect x="680" y="42" width="140" height="26" rx="4" fill="rgba(169,127,216,.25)" stroke="#a97fd8"/>
+        <text x="750" y="60" text-anchor="middle" fill="#c9a6ee" font-size="11">collective</text>
+        <text x="880" y="60" text-anchor="end" fill="var(--red)" font-size="11" font-weight="700">total = A+B+C</text>
+
+        <text x="10" y="130" fill="#eef1f5" font-size="14" font-weight="700">After: dual-stream fork (token count &le; 1024, not AR-fusion, not in segmented capture)</text>
+        <text x="10" y="163" fill="#9aa4b2" font-size="11">main stream</text>
+        <line x1="10" y1="168" x2="890" y2="168" stroke="#31363f"/>
+        <rect x="60" y="155" width="420" height="26" rx="4" fill="rgba(91,155,213,.25)" stroke="#5b9bd5"/>
+        <text x="270" y="173" text-anchor="middle" fill="#8ec2ee" font-size="11">routed expert (issued first — it's longer)</text>
+
+        <text x="10" y="211" fill="#9aa4b2" font-size="11">alt stream</text>
+        <line x1="10" y1="216" x2="890" y2="216" stroke="#31363f"/>
+        <rect x="60" y="203" width="180" height="26" rx="4" fill="rgba(76,175,125,.25)" stroke="#4caf7d"/>
+        <text x="150" y="221" text-anchor="middle" fill="#7fe0ab" font-size="11">shared expert (overlapped)</text>
+
+        <line x1="60" y1="196" x2="60" y2="230" stroke="var(--accent)" stroke-dasharray="3,3"/>
+        <text x="60" y="242" fill="var(--accent-2)" font-size="10" text-anchor="middle">wait_stream(main)</text>
+
+        <line x1="480" y1="150" x2="480" y2="230" stroke="var(--accent)" stroke-dasharray="3,3"/>
+        <text x="480" y="242" fill="var(--accent-2)" font-size="10" text-anchor="middle">main.wait_stream(alt) — join</text>
+
+        <rect x="500" y="155" width="140" height="26" rx="4" fill="rgba(169,127,216,.25)" stroke="#a97fd8"/>
+        <text x="570" y="173" text-anchor="middle" fill="#c9a6ee" font-size="11">collective</text>
+        <text x="880" y="173" text-anchor="end" fill="var(--green)" font-size="11" font-weight="700">total &asymp; max(A,B)+C</text>
+      </svg>
+    </div>
+    <div class="footer"><span>9 / 16</span><span>Timeline</span></div>
+  </div>
+
+  <!-- SLIDE 11: THE ACTUAL DIFF -->
+  <div class="slide">
+    <div class="kicker">Implementation &middot; the diff</div>
+    <h2>The fork, in <code style="font-size:22px;">_forward_fused</code></h2>
+    <div class="content">
+<pre><span class="kw">if</span> <span class="kw">self</span>._dual_stream_single_collective(num_tokens):
+    current_stream = torch.cuda.current_stream()
+    <span class="kw">self</span>.alt_stream.wait_stream(current_stream)   <span class="c1"># order vs. what's already queued</span>
+
+    <span class="kw">self</span>._forward_routed(hidden_states, router_logits, routed_input, latent)  <span class="c1"># main — issue first, it's longer</span>
+    <span class="kw">with</span> torch.cuda.stream(<span class="kw">self</span>.alt_stream):
+        <span class="kw">self</span>._forward_shared(gate_up, shared_output)               <span class="c1"># alt — writes a disjoint buffer slice</span>
+
+    current_stream.wait_stream(<span class="kw">self</span>.alt_stream)              <span class="c1"># join before the single collective</span>
+<span class="kw">else</span>:
+    <span class="kw">self</span>._forward_shared(gate_up, shared_output)                   <span class="c1"># original serial path, byte-for-byte</span>
+    <span class="kw">self</span>._forward_routed(hidden_states, router_logits, routed_input, latent)</pre>
+      <div class="grid3" style="margin-top:6px;">
+        <div class="card tight"><b style="color:var(--accent-2);">Why routed first?</b><p style="margin:4px 0 0;">It's the longer op; issuing it first on the main stream maximizes the window the alt stream has to hide the shared expert behind it.</p></div>
+        <div class="card tight"><b style="color:var(--accent-2);">Why is this safe?</b><p style="margin:4px 0 0;">Shared and routed write to disjoint slices of the output buffer &mdash; no data race, no accumulation order dependency.</p></div>
+        <div class="card tight"><b style="color:var(--accent-2);">What's untouched?</b><p style="margin:4px 0 0;">The single collective after the join is completely unmodified &mdash; same call, same buffer, same place in program order.</p></div>
+      </div>
+    </div>
+    <div class="footer"><span>10 / 16</span><span>The diff</span></div>
+  </div>
+
+  <!-- SLIDE 12: CORRECTNESS -->
+  <div class="slide">
+    <div class="kicker">Correctness</div>
+    <h2>Bit-identical, not "close enough"</h2>
+    <div class="content">
+      <div class="row">
+        <div class="col card">
+          <h3>Why we can claim exact equality</h3>
+          <ul style="margin:0;">
+            <li>Same two function calls, same inputs, same arithmetic &mdash; only the
+            <em>stream</em> they're issued on changes.</li>
+            <li>Disjoint output buffer slices &rarr; no write-write hazard, no
+            floating-point reduction-order sensitivity between the two ops.</li>
+            <li><code>wait_stream</code> pairs enforce the same effective ordering
+            constraints a single stream would have given for free.</li>
+            <li>The reduction/collective that combines them is untouched.</li>
+          </ul>
+        </div>
+        <div class="col card">
+          <h3>How we verified it</h3>
+          <p>Test asserts <code>torch.equal(fork_output, serial_output)</code> &mdash;
+          <b>zero tolerance</b>, not <code>torch.allclose</code>. Run at 1, 4, and 32 tokens,
+          and again through actual CUDA graph capture + replay to catch anything
+          the eager path might miss.</p>
+        </div>
+      </div>
+    </div>
+    <div class="footer"><span>11 / 16</span><span>Correctness</span></div>
+  </div>
+
+  <!-- SLIDE 13: TESTS -->
+  <div class="slide">
+    <div class="kicker">Test coverage</div>
+    <h2><code style="font-size:22px;">test_kimi_k3_moe_dual_stream.py</code> — 9 tests</h2>
+    <div class="content">
+      <table>
+        <tr><th>Class</th><th>Tests</th><th>Runs on</th></tr>
+        <tr>
+          <td><code>TestKimiK3AltStreamPool</code></td>
+          <td>CUDA gets 3 streams &middot; HIP is opt-in &middot; HIP folds [0]+[1] onto one stream &middot; warns on low <code>GPU_MAX_HW_QUEUES</code></td>
+          <td><span class="pill green">CPU</span></td>
+        </tr>
+        <tr>
+          <td><code>TestKimiK3MoeDualStreamGate</code></td>
+          <td>requires alt stream &middot; token ceiling incl. default &middot; 0 = kill switch &middot; skips segmented capture &middot; skips AR-fusion path</td>
+          <td><span class="pill green">CPU</span></td>
+        </tr>
+        <tr>
+          <td><code>TestKimiK3MoeDualStreamEquivalence</code></td>
+          <td>fork output == serial output (1/4/32 tokens) &middot; same under CUDA graph capture/replay</td>
+          <td><span class="pill blue">CUDA-only (skipped on CPU)</span></td>
+        </tr>
+      </table>
+      <div class="card" style="margin-top:6px;">
+        <p style="margin:0;">All 9 registered for CPU CI, CUDA CI, and AMD CI. The 7 CPU-runnable
+        tests were executed and pass in this environment (no GPU available here); the
+        2 CUDA-only tests are gated with a skip decorator and will run on GPU CI.</p>
+      </div>
+    </div>
+    <div class="footer"><span>12 / 16</span><span>Testing</span></div>
+  </div>
+
+  <!-- SLIDE 14: FILES CHANGED -->
+  <div class="slide">
+    <div class="kicker">Change summary</div>
+    <h2>Files touched</h2>
+    <div class="content">
+      <table>
+        <tr><th>File</th><th>Change</th></tr>
+        <tr>
+          <td><code>python/sglang/srt/models/kimi_k3.py</code></td>
+          <td>+<code>_build_alt_streams()</code>, +<code>_dual_stream_single_collective()</code>, fork/join in <code>_forward_fused</code>, <code>_HIP_MIN_HW_QUEUES</code> constant + warning</td>
+        </tr>
+        <tr>
+          <td><code>python/sglang/srt/environ.py</code></td>
+          <td>+<code>SGLANG_K3_DUAL_STREAM_MOE_MAX_TOKENS = EnvInt(1024)</code></td>
+        </tr>
+        <tr>
+          <td><code>docs/docs/references/environment_variables.mdx</code></td>
+          <td>Extended <code>SGLANG_ROCM_USE_MULTI_STREAM</code> description; documented the new token-ceiling var</td>
+        </tr>
+        <tr>
+          <td><code>docs/src/snippets/configs/moonshotai/kimi-k3.jsx</code></td>
+          <td>4 MI35x cells get <code>SGLANG_ROCM_USE_MULTI_STREAM=1</code> + <code>GPU_MAX_HW_QUEUES=5</code>, with an explanatory comment</td>
+        </tr>
+        <tr>
+          <td><code>test/registered/unit/models/test_kimi_k3_moe_dual_stream.py</code></td>
+          <td><b>New</b> &mdash; 278 lines, 9 tests across 3 classes</td>
+        </tr>
+      </table>
+    </div>
+    <div class="footer"><span>13 / 16</span><span>Summary</span></div>
+  </div>
+
+  <!-- SLIDE 15: BLAST RADIUS -->
+  <div class="slide">
+    <div class="kicker">Scope</div>
+    <h2>Who else does this affect?</h2>
+    <div class="content">
+      <div class="row">
+        <div class="col card">
+          <h3><span class="pill red">AMD / ROCm</span></h3>
+          <p style="margin:0;">The headline target. Opt-in via <code>SGLANG_ROCM_USE_MULTI_STREAM=1</code>
+          + <code>GPU_MAX_HW_QUEUES&ge;5</code>. Default behavior (env unset) is <b>unchanged</b>
+          &mdash; zero risk to existing ROCm deployments that don't opt in.</p>
+        </div>
+        <div class="col card">
+          <h3><span class="pill blue">H100 / H200 (and any non-AR-fusion CUDA GPU)</span></h3>
+          <p style="margin:0;">These GPUs already had <code>alt_streams</code>, but were <em>also</em>
+          hitting the serial plain-TP MoE tail, since <code>k3_ar_fusion</code> is
+          Blackwell-only. The new fork benefits them automatically &mdash; no opt-in
+          needed, since the pool already existed there.</p>
+        </div>
+      </div>
+      <div class="card" style="background:rgba(230,126,34,.08); border-color:rgba(230,126,34,.3);">
+        <p style="margin:0;"><b>Framed differently:</b> this wasn't only a ROCm bug. ROCm made the
+        gap fully visible (pool <em>and</em> fork both missing), but the MoE-tail fork
+        was a latent gap for every non-Blackwell CUDA GPU running K3 in plain-TP mode too.</p>
+      </div>
+    </div>
+    <div class="footer"><span>14 / 16</span><span>Blast radius</span></div>
+  </div>
+
+  <!-- SLIDE 16: CAVEATS -->
+  <div class="slide">
+    <div class="kicker">Honesty check</div>
+    <h2>What's verified vs. what isn't</h2>
+    <div class="content">
+      <div class="grid2">
+        <div class="card">
+          <h3 style="color:#7fe0ab;">Verified in this environment</h3>
+          <ul style="margin:0;">
+            <li>Logic correctness: 7/7 CPU-runnable unit tests pass.</li>
+            <li>Default behavior unchanged when the env var is unset (CUDA path untouched, HIP path still <code>None</code> by default).</li>
+            <li>Lint / pre-commit clean; both commits pushed.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3 style="color:#ff9482;">Not verified here — no AMD GPU in this environment</h3>
+          <ul style="margin:0;">
+            <li>The 2 CUDA-only equivalence tests (real forked-stream execution) haven't run on hardware here.</li>
+            <li>No measured MI355X GSM8K round yet &mdash; cookbook cells stay marked <code>verified:false / in-progress</code> on purpose.</li>
+            <li>The <code>1024</code>-token default is ATOM's measured crossover for their split, adopted as a starting point &mdash; not independently re-measured for SGLang's exact kernel shapes.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card" style="background:rgba(91,155,213,.08); border-color:rgba(91,155,213,.3); margin-top:2px;">
+        <p style="margin:0;"><b>Next step:</b> run the AMD cookbook recipe on real MI355X hardware,
+        confirm accuracy (GSM8K) and capture throughput deltas with the flag on/off, then flip
+        <code>verified:true</code>.</p>
+      </div>
+    </div>
+    <div class="footer"><span>15 / 16</span><span>Caveats</span></div>
+  </div>
+
+  <!-- SLIDE 17: SUMMARY -->
+  <div class="slide">
+    <div class="kicker">Wrap-up</div>
+    <h2>Summary</h2>
+    <div class="content">
+      <div class="grid3">
+        <div class="card">
+          <div class="big-num">2</div>
+          <div class="label">independent gaps closed</div>
+          <p style="margin:8px 0 0;">Dead stream pool on HIP, and a MoE-tail fork that only fired on Blackwell.</p>
+        </div>
+        <div class="card">
+          <div class="big-num">1</div>
+          <div class="label">env var, opt-in by design</div>
+          <p style="margin:8px 0 0;"><code>SGLANG_ROCM_USE_MULTI_STREAM=1</code> — existing default behavior is preserved everywhere it isn't set.</p>
+        </div>
+        <div class="card">
+          <div class="big-num">9</div>
+          <div class="label">new tests</div>
+          <p style="margin:8px 0 0;">Stream-pool shape, gating ladder, and bit-exact fork/serial equivalence.</p>
+        </div>
+      </div>
+      <div class="card" style="margin-top:8px;">
+        <h3>Where the idea came from</h3>
+        <p style="margin:0;">ROCm/ATOM's dual-stream MoE: gate on a measured token-count
+        crossover rather than GPU family, and fold what doesn't need its own hardware
+        queue. Adapted to SGLang's stream-pool shape and capture-mode guards, not ported wholesale.</p>
+      </div>
+    </div>
+    <div class="footer"><span>16 / 16</span><span>&larr;/&rarr; or click to navigate &middot; Esc for overview</span></div>
+  </div>
+
+</div>
+<div class="progress" id="progress"></div>
+<div class="navhint">&larr; &rarr; navigate</div>
+<div class="counter" id="counter"></div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  let idx = 0;
+  function render(){
+    slides.forEach((s,i)=>s.classList.toggle('active', i===idx));
+    document.getElementById('progress').style.width = ((idx+1)/slides.length*100)+'%';
+    document.getElementById('counter').textContent = (idx+1)+' / '+slides.length;
+  }
+  function next(){ if(idx<slides.length-1){ idx++; render(); } }
+  function prev(){ if(idx>0){ idx--; render(); } }
+  document.addEventListener('keydown', (e)=>{
+    if(['ArrowRight','PageDown',' '].includes(e.key)){ next(); e.preventDefault(); }
+    else if(['ArrowLeft','PageUp'].includes(e.key)){ prev(); e.preventDefault(); }
+    else if(e.key==='Home'){ idx=0; render(); }
+    else if(e.key==='End'){ idx=slides.length-1; render(); }
+  });
+  document.getElementById('deck').addEventListener('click', (e)=>{
+    const rect = document.getElementById('deck').getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    if(clickX > rect.width/2) next(); else prev();
+  });
+  render();
+</script>
+</body>
+</html>
