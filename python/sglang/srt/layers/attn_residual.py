@@ -24,7 +24,7 @@ import triton.language as tl
 
 from sglang.srt.layers.layernorm import RMSNorm
 from sglang.srt.layers.linear import ReplicatedLinear
-from sglang.srt.utils import is_hip
+from sglang.srt.utils import is_cuda, is_hip
 
 _BLOCK_H: int = 1024  # H = 7168 = 7 x 1024
 _MAX_ROWS: int = 16  # next_pow2(8 + 1), K3 has <= 8 snapshots
@@ -35,11 +35,18 @@ _HIP_SHAPE_GATE = None
 
 def _use_fast(hidden_size: int) -> bool:
     """The TMA kernel needs SM100+ (tcgen05, cp.async.bulk) and its H=7168
-    template instantiation; everything else takes the triton pipeline."""
+    template instantiation; everything else takes the triton pipeline.
+
+    The is_cuda() test is what every other SM probe in the tree carries (see
+    _check_cuda_device_version in srt/utils/common.py) and is load-bearing here:
+    HIP answers get_device_capability() with the gfx architecture, so every
+    gfx10xx/11xx/12xx part — gfx1030 reports (10, 3), the gfx1250 target reports
+    (12, 5) — clears `major >= 10` and would claim an NVIDIA-only kernel. Since
+    this is tested ahead of _use_hip_fused, an unguarded probe also costs those
+    parts the ROCm aggregation kernel."""
     global _FAST_SUPPORTED
     if _FAST_SUPPORTED is None:
-        major, _ = torch.cuda.get_device_capability()
-        _FAST_SUPPORTED = major >= 10
+        _FAST_SUPPORTED = is_cuda() and torch.cuda.get_device_capability()[0] >= 10
     return _FAST_SUPPORTED and hidden_size == 7168
 
 
