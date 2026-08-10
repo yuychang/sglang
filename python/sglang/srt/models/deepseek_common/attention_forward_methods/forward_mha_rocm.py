@@ -32,7 +32,7 @@ from sglang.srt.models.deepseek_common.utils import (
     _use_aiter_gfx95,
 )
 from sglang.srt.runtime_context import get_exec, get_parallel
-from sglang.srt.utils import BumpAllocator, get_bool_env_var
+from sglang.srt.utils import BumpAllocator, get_bool_env_var, next_power_of_2
 
 if TYPE_CHECKING:
     from sglang.srt.models.deepseek_v2 import DeepseekV2AttentionMLA
@@ -275,7 +275,18 @@ class DeepseekMHARocmForwardMixin:
     ):
         k_shape = (k_nope.shape[0], self.num_local_heads, self.qk_head_dim)
         k = k_nope.new_empty(*k_shape)
-        if self.current_attention_backend == "aiter":
+        # concat_and_cast_mha_k_triton indexes heads and both head dims with
+        # tl.arange, which triton only accepts on power-of-2 extents. Kimi-K3 at
+        # tp8 has 12 local heads, so guard the same way the CUDA path does
+        # (forward_mha._concat_and_cast_mha_k) and otherwise slice-assign.
+        if self.current_attention_backend == "aiter" and all(
+            next_power_of_2(dim) == dim
+            for dim in (
+                self.num_local_heads,
+                self.qk_nope_head_dim,
+                self.qk_rope_head_dim,
+            )
+        ):
             concat_and_cast_mha_k_triton(k, k_nope, k_pe)
         else:
             k[..., : self.qk_nope_head_dim] = k_nope

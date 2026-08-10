@@ -398,6 +398,33 @@ def _require_kimi_k3_cutedsl_dcp_support() -> None:
         )
 
 
+def _kimi_k3_rocm_overrides(server_args: Any) -> dict:
+    """Kimi-K3 on ROCm without DCP: run aiter MLA decode on the Gluon kernel.
+
+    Kimi-K3 has 96 attention heads, so every tp size that shards them below 16
+    leaves a local head count aiter's legacy MLA decode turns away -- 12 at tp8,
+    24 at tp4, 6 at tp16. mla_gluon tiles the heads into blocks of 16 and masks
+    the tail, so it serves all of them; the DCP branch above selects it for the
+    same reason. Without this, ``--attention-backend aiter`` fails the head-count
+    assertion in AiterAttnBackend before the first forward.
+
+    Only 'auto' is upgraded: an explicit --mla-runner-backend triton is a
+    deliberate request for the legacy kernel and is left to fail on its own
+    terms.
+    """
+    _, decode_backend = attention_backends_of(server_args)
+    if decode_backend not in ("aiter", None):
+        return {}
+    if server_args.mla_runner_backend != "auto":
+        return {}
+    logger.info(
+        "Kimi-K3 on ROCm uses aiter's Gluon MLA kernel "
+        "(mla_runner_backend -> 'gluon'): the legacy aiter MLA decode does not "
+        "serve this model's local head count."
+    )
+    return {"mla_runner_backend": "gluon"}
+
+
 @_register_for("KimiK3ForConditionalGeneration")
 def _kimi_k3_overrides(server_args: Any, hf_config: Any) -> dict:
     if server_args.dcp_size > 1:
@@ -431,6 +458,50 @@ def _kimi_k3_overrides(server_args: Any, hf_config: Any) -> dict:
             overrides["speculative_attention_mode"] = "decode"
 
         prefill_backend, decode_backend = attention_backends_of(server_args)
+        if decode_backend == "aiter":
+            # DCP decode runs aiter's gluon MLA kernel over each rank's KV shard
+            # and merges the partials, by default with ag_rs
+            # (cp_lse_ag_out_rs_mla). --dcp-comm-backend a2a switches the merge to
+            # dcp_a2a_lse_reduce, which avoids the ag_rs reduce_scatter's grouped
+            # self-P2P RCCL path (sgl-project/sglang#32831).
+            #
+            # Prefill defaults to aiter's paged absorb-prefill;
+            # --prefill-attention-backend triton stays available and is
+            # KV-compatible, since both write the same latent KV the gluon DCP
+            # decode reads.
+            prefill_ab = "triton" if prefill_backend == "triton" else "aiter"
+            dcp_comm = (
+                server_args.dcp_comm_backend
+                if server_args.dcp_comm_backend in ("a2a", "fi_a2a")
+                else "ag_rs"
+            )
+            if server_args.mla_runner_backend in ("auto", "gluon"):
+                overrides["mla_runner_backend"] = "gluon"
+            logger.info(
+                "Kimi-K3 DCP uses aiter gluon MLA decode: "
+                f"prefill={prefill_backend!r} -> {prefill_ab!r}, "
+                f"decode={decode_backend!r} -> 'aiter' "
+                f"(mla_runner_backend -> {overrides.get('mla_runner_backend', server_args.mla_runner_backend)!r}, "
+                f"dcp_comm_backend -> {dcp_comm!r})."
+            )
+            overrides.update(
+                prefill_attention_backend=prefill_ab,
+                decode_attention_backend="aiter",
+                dcp_comm_backend=dcp_comm,
+            )
+            # ag_rs needs the head-dim Q all-gather, so replicated Q stays off;
+            # a2a/fi_a2a project the full-head Q locally instead.
+            if server_args.dcp_replicate_q_proj is None:
+                overrides["dcp_replicate_q_proj"] = dcp_comm in ("a2a", "fi_a2a")
+            if server_args.page_size is None:
+                # gluon's MLA decode takes its KV tile straight from the paged
+                # block size, and under DCP the allocator's page is
+                # page_size * dcp_size, so this gives each rank 32 contiguous
+                # physical slots per virtual page. 32 measured fastest across
+                # shapes; the extend path stages its own copy with its own page
+                # size (_DCP_PREFILL_PAGE_SIZE).
+                overrides["page_size"] = 32
+            return overrides
         if decode_backend == "cutedsl_mla" or decode_backend is None:
             _require_kimi_k3_cutedsl_dcp_support()
             logger.info(
@@ -474,6 +545,9 @@ def _kimi_k3_overrides(server_args: Any, hf_config: Any) -> dict:
         )
         overrides["dcp_comm_backend"] = dcp_comm_backend
         return overrides
+
+    if is_hip():
+        return _kimi_k3_rocm_overrides(server_args)
 
     if not (is_sm100_supported() and get_device_sm() in (100, 103)):
         return {}
