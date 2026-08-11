@@ -847,4 +847,8 @@ class DeepseekMLARocmForwardMixin:
         when running aiter-backend MLA on gfx95 (i.e., the `else` branch in
         forward_absorb_rocm_core that calls fused_qk_rope_cat_and_cache_mla).
         """
-        return _use_aiter_gfx95 and self.current_attention_backend == "aiter"
+        return (
+            self.rotary_emb is not None
+            and _use_aiter_gfx95
+            and self.current_attention_backend == "aiter"
+        )

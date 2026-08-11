@@ -64,6 +64,7 @@ class TestModelOverridableWhitelist(CustomTestCase):
                     "disable_hybrid_swa_memory",
                     "sampling_backend",
                     "attention_backend",
+                    "mla_runner_backend",
                     "page_size",
                     "moe_runner_backend",
                     "quantization",
@@ -2346,6 +2347,71 @@ class TestGoldenModelOverrides(_IsolatedPublish):
             {"swa_full_tokens_ratio": 1.0, "disable_hybrid_swa_memory": True},
         )
         self.assertEqual(_step3p_overrides(_args(), None), {})
+
+
+class TestKimiK3RocmOverrides(CustomTestCase):
+    """Kimi-K3 on ROCm without DCP must land on aiter's Gluon MLA kernel.
+
+    The model has 96 attention heads, so every tp size that shards them below 16
+    leaves a local head count aiter's legacy MLA decode rejects (12 at tp8). Only
+    ``--mla-runner-backend gluon`` reaches a kernel that serves it, so leaving
+    the runner at 'auto' means ``--attention-backend aiter`` fails the head-count
+    assertion in AiterAttnBackend before the first forward.
+    """
+
+    @staticmethod
+    def _args(attention_backend=None, prefill=None, decode=None, runner="auto"):
+        return SimpleNamespace(
+            attention_backend=attention_backend,
+            prefill_attention_backend=prefill,
+            decode_attention_backend=decode,
+            mla_runner_backend=runner,
+        )
+
+    def test_aiter_backend_selects_gluon(self):
+        from sglang.srt.arg_groups.overrides import _kimi_k3_rocm_overrides
+
+        self.assertEqual(
+            _kimi_k3_rocm_overrides(self._args(attention_backend="aiter")),
+            {"mla_runner_backend": "gluon"},
+        )
+
+    def test_split_decode_backend_selects_gluon(self):
+        from sglang.srt.arg_groups.overrides import _kimi_k3_rocm_overrides
+
+        self.assertEqual(
+            _kimi_k3_rocm_overrides(self._args(decode="aiter", prefill="triton")),
+            {"mla_runner_backend": "gluon"},
+        )
+
+    def test_unset_backend_selects_gluon(self):
+        # With the backend unset the ROCm default resolver picks aiter for an
+        # MLA model precisely when the runner is gluon, so declare it here too.
+        from sglang.srt.arg_groups.overrides import _kimi_k3_rocm_overrides
+
+        self.assertEqual(
+            _kimi_k3_rocm_overrides(self._args()),
+            {"mla_runner_backend": "gluon"},
+        )
+
+    def test_explicit_runner_choice_is_left_alone(self):
+        from sglang.srt.arg_groups.overrides import _kimi_k3_rocm_overrides
+
+        for runner in ("triton", "gluon"):
+            self.assertEqual(
+                _kimi_k3_rocm_overrides(
+                    self._args(attention_backend="aiter", runner=runner)
+                ),
+                {},
+            )
+
+    def test_non_aiter_decode_backend_is_left_alone(self):
+        from sglang.srt.arg_groups.overrides import _kimi_k3_rocm_overrides
+
+        self.assertEqual(
+            _kimi_k3_rocm_overrides(self._args(attention_backend="triton")),
+            {},
+        )
 
 
 class TestDeclarationValidation(CustomTestCase):

@@ -642,8 +642,28 @@ SGLang supports various environment variables that can be used to configure its 
     </tr>
     <tr>
       <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}><code>SGLANG_ROCM_USE_MULTI_STREAM</code></td>
-      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Allocate alt CUDA/HIP stream on ROCm/AITER to overlap shared and routed experts in DeepseekV2 MoE. Requires the HIP env <code>GPU_MAX_HW_QUEUES&gt;=5</code> (default <code>4</code>, the cap on HSA/ROCr HW queues HIP creates) so the alt stream gets its own queue instead of serializing with the main stream. Best paired with <code>--deepep-mode low_latency</code> so Mori's AsyncLL kernel offloads dispatch/combine to copy engines and frees CUs.</td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Allocate an alternate CUDA/HIP stream on ROCm/AITER. DeepseekV2 and Kimi-K3 use it to overlap shared and routed experts. HIP needs one hardware queue per stream the model submits to, which its own default of <code>4</code> already covers; raising <code>GPU_MAX_HW_QUEUES</code> beyond that is not free, because every extra queue slows the tightly coupled per-layer collectives. DeepseekV2 is best paired with <code>--deepep-mode low_latency</code> so Mori's AsyncLL kernel offloads dispatch/combine to copy engines and frees CUs.</td>
       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}>`false`</td>
+    </tr>
+    <tr>
+      <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}><code>SGLANG_ROCM_K3_MULTI_STREAM_MOE</code></td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Kimi-K3 ROCm side-stream site: shared-expert compute against the routed-expert path, joined before the single flat all-reduce. Confined to the token window below.</td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}>`true`</td>
+    </tr>
+    <tr>
+      <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}><code>SGLANG_ROCM_K3_MULTI_STREAM_ATTN</code></td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Kimi-K3 ROCm side-stream site: the KDA <code>[f_a|b]</code>/<code>f_b</code> GEMVs against the wide <code>[q,k,v,g]</code> projection, and the MLA output-gate GEMM against the attention core. Off because it measured 17.8% slower at decode batch 8 on gfx950 — its fork/join window spans the whole attention core, and the penalty grows with the number of main-stream kernels inside the window.</td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}>`false`</td>
+    </tr>
+    <tr>
+      <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}><code>SGLANG_ROCM_K3_MULTI_STREAM_MIN_TOKENS</code></td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Minimum Kimi-K3 token count for ROCm dual-stream MoE compute overlap. Below it a decode step's kernels are small enough that the fork/join penalty dominates: the layer's collective cannot start until every rank arrives, so the scheduling jitter a second stream introduces is paid by the whole TP group on every layer.</td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}>`64`</td>
+    </tr>
+    <tr>
+      <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}><code>SGLANG_ROCM_K3_MULTI_STREAM_MAX_TOKENS</code></td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Maximum Kimi-K3 token count for ROCm dual-stream MoE compute overlap. Larger prefill batches retain the fused single-stream path: they already saturate CUs and memory bandwidth, so there is no idle capacity to overlap into.</td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}>`1024`</td>
     </tr>
     <tr>
       <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}><code>SGLANG_MOE_PADDING</code></td>

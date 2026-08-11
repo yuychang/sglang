@@ -636,13 +636,46 @@ class Envs:
     # the SHUFFLE KV layout that enables pa_decode_gluon for full-attn
     # decode without runtime permutes.
     SGLANG_AITER_KV_CACHE_LAYOUT = EnvStr("nhd")
+    # Opt into fp8 kv-cache under aiter MLA decode context parallel
+    # (--dcp-size > 1). The gluon DCP decode path is only validated on bf16
+    # kv-cache, so ServerArgs rejects fp8 there by default; this is an escape
+    # hatch for deliberate experiments, not a supported configuration.
+    SGLANG_EXPERIMENTAL_AITER_DCP_FP8 = EnvBool(False)
+    # Run the DCP MLA decode on aiter's Gluon kernel
+    # (aiter.ops.triton.gluon.mla_gluon) instead of the Triton MLA kernel
+    # reached via aiter.ops.triton.attention.mla.mla_decode_fwd. Prefer
+    # --mla-runner-backend gluon; this env is a legacy escape hatch.
+    # The Gluon kernel needs triton >= 3.7 (it passes cga_layout= to
+    # PaddedSharedLayout); aiter's own guard only checks >= 3.6, so on 3.6 this
+    # fails at kernel compile time rather than at import. Note it cannot serve
+    # fp8 kv-cache above batch 1, so it is mutually exclusive with
+    # SGLANG_EXPERIMENTAL_AITER_DCP_FP8.
+    SGLANG_USE_AITER_GLUON_MLA_DCP = EnvBool(False)
     SGLANG_ROCM_FUSED_DECODE_MLA = EnvBool(False)
     SGLANG_ROCM_DISABLE_LINEARQUANT = EnvBool(False)
     USE_ROCM_AITER_ROPE_BACKEND = EnvStr("0")
     SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK = EnvInt(4096)
-    # Enable dual-stream MoE (shared experts vs routed experts) on the
-    # ROCm/AITER path. Requires GPU_MAX_HW_QUEUES>=5 to avoid HW-queue serialization.
+    # Enable side-stream overlap on the ROCm/AITER path. Allocating a side stream
+    # costs nothing; submitting to it does, because binding a second HIP hardware
+    # queue slows the whole graph and not just the kernels that end up running
+    # concurrently. Do not widen GPU_MAX_HW_QUEUES to compensate: ROCm's default
+    # of four already covers main plus both K3 slots, and eight took a probe layer
+    # from 55 us to 263 us with an 8-rank collective in the loop.
     SGLANG_ROCM_USE_MULTI_STREAM = EnvBool(False)
+    # Kimi-K3 side-stream sites, individually selectable so each can be measured
+    # on its own. Both cost more than they hide on gfx950 decode. The overlap
+    # itself is perfect — traced at 100% of the side stream hidden, worth 952 us
+    # per decode step — but using the second queue inflates the rest of the graph
+    # by 2,071 us, 94% of that on kernels that never run beside the side stream.
+    # ATTN is the worse of the two and is off; MOE is on but confined to a token
+    # window it was measured neutral in.
+    SGLANG_ROCM_K3_MULTI_STREAM_ATTN = EnvBool(False)
+    SGLANG_ROCM_K3_MULTI_STREAM_MOE = EnvBool(True)
+    # Token window for the MoE site only. Below it a decode step's kernels are
+    # small enough that the fork/join penalty dominates; above it prefill
+    # saturates the machine and there is no idle capacity left to overlap into.
+    SGLANG_ROCM_K3_MULTI_STREAM_MIN_TOKENS = EnvInt(64)
+    SGLANG_ROCM_K3_MULTI_STREAM_MAX_TOKENS = EnvInt(1024)
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("tilelang")
 
     # MPS (Apple Silicon)

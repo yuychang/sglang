@@ -69,10 +69,6 @@ from sglang.srt.utils.custom_op import register_custom_op
 
 has_triton_kernels = is_triton_kernels_available()
 
-# Serialized MXFP4 scales use raw UE8M0 bytes. Keep fresh parameters valid for
-# post-load transforms and dummy initialization; 127 is the neutral scale (1.0).
-_UE8M0_ONE = 127
-
 
 if is_flashinfer_available():
     from flashinfer import (
@@ -103,6 +99,13 @@ _flashinfer_mxfp4_permute_indices_cache: dict[torch.Size, torch.Tensor] = {}
 _flashinfer_mxfp4_permute_indices_device_cache: dict[
     tuple[tuple[int, ...], int, int, str, int], torch.Tensor
 ] = {}
+
+
+def _aiter_situ_uses_gu_interleaved_weights() -> bool:
+    """Match AITER's SiTU activation-mode precedence when choosing weight layout."""
+    a8w4 = get_bool_env_var("AITER_SITUV2_A8W4", "false")
+    a4w4 = get_bool_env_var("AITER_SITUV2_A4W4", "false")
+    return a8w4 or not a4w4
 
 
 def _get_flashinfer_mxfp4_device_permute_indices(
@@ -169,17 +172,17 @@ if _is_hip:
 
 def _swizzle_mxfp4(quant_tensor, scale, num_warps):
     """weight swizzle for mxfp4 moe, used for OAI mxfp4 kernel"""
-    import triton_kernels.matmul_details.opt_flags as opt_flags
+    import triton_kernels.matmul_ogs_details.opt_flags as opt_flags
     from triton_kernels.numerics import InFlexData
     from triton_kernels.tensor import FP4, convert_layout, wrap_torch_tensor
     from triton_kernels.tensor_details import layout
 
-    value_layout = layout.make_default_matmul_mxfp4_w_layout(mx_axis=-2)
-    value_layout_opts = {}
-    scale_layout = layout.make_default_matmul_mxfp4_w_scale_layout(
-        mx_axis=-2, num_warps=num_warps
+    value_layout, value_layout_opts = layout.make_default_matmul_mxfp4_w_layout(
+        mx_axis=1
     )
-    scale_layout_opts = {}
+    scale_layout, scale_layout_opts = layout.make_default_matmul_mxfp4_w_scale_layout(
+        mx_axis=1, num_warps=num_warps
+    )
     if is_sm100_supported():
         constraints = {
             "is_persistent": True,
@@ -476,13 +479,10 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         set_weight_attrs(w13_weight, extra_weight_attrs)
 
         w13_weight_scale = torch.nn.Parameter(
-            torch.full(
-                (
-                    layer.num_local_experts,
-                    2 * intermediate_size_per_partition_after_pad,
-                    hidden_size // mxfp4_block,
-                ),
-                fill_value=_UE8M0_ONE,
+            torch.zeros(
+                layer.num_local_experts,
+                2 * intermediate_size_per_partition_after_pad,
+                hidden_size // mxfp4_block,
                 dtype=scale_dtype,
             ),
             requires_grad=False,
@@ -518,13 +518,10 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         set_weight_attrs(w2_weight, extra_weight_attrs)
 
         w2_weight_scale = torch.nn.Parameter(
-            torch.full(
-                (
-                    layer.num_local_experts,
-                    hidden_size,
-                    intermediate_size_per_partition_after_pad // mxfp4_block,
-                ),
-                fill_value=_UE8M0_ONE,
+            torch.zeros(
+                layer.num_local_experts,
+                hidden_size,
+                intermediate_size_per_partition_after_pad // mxfp4_block,
                 dtype=scale_dtype,
             ),
             requires_grad=False,
@@ -872,12 +869,17 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                         .view(-1, n)
                     )
 
-            k3_situ_a8w4 = (
-                os.environ.get("AITER_SITUV2_A8W4", "0") == "1"
-                and getattr(layer.moe_runner_config, "activation", None) == "situ"
-            )
-            use_aiter_gu_interleave = k3_situ_a8w4 or (
-                envs.SGLANG_USE_AITER_MOE_GU_ITLV.get() and gate_up_interleaved
+            # AITER selects the activation dtype at runtime. A8W4 takes precedence
+            # and, together with A16W4, uses the preshuffled GU-interleaved layout.
+            # A4W4 uses the generic separated layout instead; feeding it the
+            # A16/A8 layout makes real-checkpoint MoE outputs nearly orthogonal.
+            k3_situ = getattr(layer.moe_runner_config, "activation", None) == "situ"
+            use_aiter_gu_interleave = (
+                k3_situ and _aiter_situ_uses_gu_interleaved_weights()
+            ) or (
+                not k3_situ
+                and envs.SGLANG_USE_AITER_MOE_GU_ITLV.get()
+                and gate_up_interleaved
             )
             if use_aiter_gu_interleave:
                 layer.w13_weight.data = shuffle_weight_a16w4(layer.w13_weight, 16, True)
@@ -931,7 +933,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
 
         if self.use_triton_kernels:
 
-            from triton_kernels.matmul import FlexCtx, PrecisionConfig
+            from triton_kernels.matmul_ogs import FlexCtx, PrecisionConfig
 
             w13_weight_bias = layer.w13_weight_bias.to(torch.float32)
             w2_weight_bias = layer.w2_weight_bias.to(torch.float32)
@@ -949,10 +951,10 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
             )
 
             self.w13_precision_config = PrecisionConfig(
-                b_mx_scale=w13_scale, flex_ctx=FlexCtx(rhs_data=w13_flex)
+                weight_scale=w13_scale, flex_ctx=FlexCtx(rhs_data=w13_flex)
             )
             self.w2_precision_config = PrecisionConfig(
-                b_mx_scale=w2_scale, flex_ctx=FlexCtx(rhs_data=w2_flex)
+                weight_scale=w2_scale, flex_ctx=FlexCtx(rhs_data=w2_flex)
             )
 
             self.w13_weight_triton_tensor = w13_weight
@@ -1604,7 +1606,14 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                             expanded_idx_to_permuted_idx=expanded_idx,
                             top_k=packed_topk.shape[1],
                         )
-                    return StandardCombineInput(hidden_states=result)
+                        return StandardCombineInput(hidden_states=result)
+                    # The finalized kernel writes to its explicit output
+                    # argument. Do not propagate the FFI return tensor: some
+                    # SiTU runner versions return a distinct wrapper/allocation
+                    # even though symm_output contains the published result.
+                    # Returning the destination makes the pointer contract
+                    # explicit for K3's zero-copy latent buffer.
+                    return StandardCombineInput(hidden_states=symm_output)
 
                 # Bypassed topk: route from logits inside the op.
                 correction_bias = topk_output.topk_config.correction_bias

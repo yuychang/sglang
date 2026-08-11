@@ -11,7 +11,7 @@ from sglang.srt.models.deepseek_common.attention_forward_methods.forward_methods
     AttnForwardMethod,
 )
 from sglang.srt.models.deepseek_common.utils import _is_hip
-from sglang.srt.runtime_context import get_exec
+from sglang.srt.runtime_context import get_exec, get_parallel
 from sglang.srt.utils import is_sm100_or_sm110_supported, use_intel_amx_backend
 
 MHA_ONE_SHOT_SUPPORTED_BACKENDS = ["fa3", "flashinfer", "flashmla"]
@@ -190,6 +190,16 @@ def handle_attention_aiter(attn, forward_batch):
     if is_in_tc_piecewise_cuda_graph() or is_in_breakable_cuda_graph():
         return AttnForwardMethod.MHA
     if forward_batch.forward_mode.is_extend_without_speculative():
+        # Route model shapes that explicitly require absorbed AITER MLA through
+        # attn_mqa instead of expanding the latent KV for the MHA path. Kimi-K3
+        # opts in for its 12 local heads at tp8. DCP needs the same route for
+        # every MLA model because its KV cache is round-robin sharded.
+        model_mla_prefill_heads = getattr(attn, "aiter_mla_prefill_head_counts", ())
+        if (
+            get_parallel().dcp_enabled
+            or attn.num_local_heads in model_mla_prefill_heads
+        ):
+            return AttnForwardMethod.MLA
         return AttnForwardMethod.MHA
     else:
         return AttnForwardMethod.MLA
