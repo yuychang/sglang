@@ -438,6 +438,8 @@ class AiterAttnBackend(AttentionBackend):
                 f"Provided {self.num_head} number of heads.\n"
                 "Try adjusting tensor_parallel_size value."
             )
+            # mla_gluon's bh16bn128 regime supports batched FP8 KV decode.
+            # The KV dtype selects that regime automatically.
             self.num_head_padded = 16 if self.num_head < 16 else self.num_head
             self.head_repeat_factor = 16 // self.num_head if self.num_head < 16 else 1
 
@@ -947,6 +949,9 @@ class AiterAttnBackend(AttentionBackend):
             -1, layer.qk_head_dim
         )
         out = q.new_empty((bs, num_heads, kv_lora_rank), dtype=self.input_dtype)
+        kv_scale = getattr(layer, "k_scale_float", None)
+        if kv_c.dtype != fp8_dtype or kv_scale is None:
+            kv_scale = 1.0
 
         mla_gluon(
             q3[:, :, :kv_lora_rank],
@@ -957,6 +962,7 @@ class AiterAttnBackend(AttentionBackend):
             fm.kv_indptr,
             layer.scaling,
             use_2d_view=False,
+            kv_scale=kv_scale,
             min_kv_seq_len=gluon_mla_min_kv_seq_len(
                 bs, num_heads, self.max_context_len
             ),
@@ -1284,6 +1290,59 @@ class AiterAttnBackend(AttentionBackend):
                 )
         return self._mla_prefill_fwd_dcp_triton(q, layer, k_descale, forward_batch)
 
+    def _mla_prefill_fwd_triton_paged(
+        self,
+        q,
+        layer,
+        k_descale,
+        kv_buffer,
+        kv_indptr,
+        kv_indices,
+        qo_indptr,
+    ):
+        """Run aiter's paged Triton absorb-prefill kernel on ragged latent KV.
+
+        Unlike the ASM ``aiter.mla.mla_prefill_fwd`` entry point, this kernel
+        tiles query heads and therefore supports Kimi-K3's 12 local heads at
+        tp8. The ragged KV is repacked into page-aligned staging storage because
+        the kernel takes its KV tile size directly from the physical page size.
+        """
+        from aiter.ops.triton.attention.mla import mla_prefill_fwd
+
+        from sglang.kernels.ops.attention.dcp_mla_reduce import (
+            pack_dcp_kv_into_pages,
+        )
+
+        bs = kv_indptr.shape[0] - 1
+        num_heads = layer.tp_q_head_num
+        kv_lora_rank = layer.v_head_dim
+        qk_rope_head_dim = layer.qk_head_dim - kv_lora_rank
+        seqused_k = (kv_indptr[1 : bs + 1] - kv_indptr[:bs]).to(torch.int32)
+        max_kv = int(seqused_k.max().item())
+        paged_kv, block_tables = pack_dcp_kv_into_pages(
+            kv_buffer, kv_indptr, kv_indices, bs, _DCP_PREFILL_PAGE_SIZE
+        )
+
+        out = q.new_empty(
+            (q.shape[0], num_heads * kv_lora_rank), dtype=self.input_dtype
+        )
+        mla_prefill_fwd(
+            q.view(-1, num_heads, layer.qk_head_dim),
+            paged_kv,
+            out.view(-1, num_heads, kv_lora_rank),
+            qo_indptr,
+            seqused_k,
+            max_kv,
+            block_tables,
+            layer.scaling,
+            kv_lora_rank,
+            qk_rope_head_dim,
+            True,  # causal
+            k_descale,
+            k_descale,
+        )
+        return out
+
     def _mla_prefill_fwd_dcp_gluon(self, q, layer, forward_batch, q_len: int):
         """DCP prefill (extend) on aiter's Gluon MLA kernel, MTP mode.
 
@@ -1336,57 +1395,32 @@ class AiterAttnBackend(AttentionBackend):
         heads. Q is NOT gathered for extend (each rank computes full attention for
         its local heads over the full KV — no cross-rank merge).
         """
-        from aiter.ops.triton.attention.mla import mla_prefill_fwd
-
-        from sglang.kernels.ops.attention.dcp_mla_reduce import (
-            pack_dcp_kv_into_pages,
-        )
-
         dcp_meta = forward_batch.attn_dcp_metadata
         kv_buffer = dcp_meta.dcp_kv_buffer  # [seq_lens_sum, 1, qk_head_dim]
         kv_indptr = dcp_meta.dcp_kv_indptr  # [bs + 1] full-seq boundaries
         kv_indices = dcp_meta.dcp_kv_indices  # indices into dcp_kv_buffer
-        bs = kv_indptr.shape[0] - 1
-        num_heads = layer.tp_q_head_num
-        kv_lora_rank = layer.v_head_dim
-        qk_rope_head_dim = layer.qk_head_dim - kv_lora_rank
 
-        # NOTE: the .item() below is a GPU->CPU sync, which would be illegal
+        # NOTE: the helper's .item() is a GPU->CPU sync, which would be illegal
         # under cuda-graph capture -- but this path is uncapturable anyway
         # (pack_dcp_kv_into_pages allocates per batch) and prefill cuda graphs
         # are disabled for K3 DCP. Do NOT try to assert that via
         # ForwardMetadata.run_graph: it defaults to True and is only set to
         # False explicitly on the eager decode/verify paths, so on the prefill
         # metadata it is always True and says nothing about capture state.
-        seqused_k = (kv_indptr[1 : bs + 1] - kv_indptr[:bs]).to(torch.int32)
-        max_kv = int(seqused_k.max().item())
         # mla_prefill_fwd takes its KV tile straight from the paged block size, so feeding
         # the assembled buffer as block_size 1 collapses each tile to a single
         # token: a 16384x16384 chunk measured 5156 ms that way vs 39 ms at block
-        # size 64 on gfx950 (~131x). Repack into per-request page-aligned pages.
-        paged_kv, block_tables = pack_dcp_kv_into_pages(
-            kv_buffer, kv_indptr, kv_indices, bs, _DCP_PREFILL_PAGE_SIZE
-        )
-
-        out = q.new_empty(
-            (q.shape[0], num_heads * kv_lora_rank), dtype=self.input_dtype
-        )
-        mla_prefill_fwd(
-            q.view(-1, num_heads, layer.qk_head_dim),
-            paged_kv,
-            out.view(-1, num_heads, kv_lora_rank),
-            self.forward_metadata.qo_indptr,  # extend query-token boundaries
-            seqused_k,
-            max_kv,
-            block_tables,
-            layer.scaling,
-            kv_lora_rank,
-            qk_rope_head_dim,
-            True,  # causal
+        # size 64 on gfx950 (~131x). The shared helper repacks it into
+        # per-request page-aligned pages.
+        return self._mla_prefill_fwd_triton_paged(
+            q,
+            layer,
             k_descale,
-            k_descale,
+            kv_buffer,
+            kv_indptr,
+            kv_indices,
+            self.forward_metadata.qo_indptr,
         )
-        return out
 
     def mla_fp8_prefill_attn(
         self,
@@ -2668,7 +2702,32 @@ class AiterAttnBackend(AttentionBackend):
                         v_scale=v_descale,
                     )
                 elif self.use_mla:
-                    self.token_to_kv_pool.set_kv_buffer(layer, cache_loc, k, v)
+                    cache_k = k
+                    if self.kv_cache_dtype == fp8_dtype and layer.k_scale is not None:
+                        # MLATokenToKVPool casts to FP8 but does not apply the
+                        # checkpoint's per-tensor quantization scale.
+                        cache_k = k.clone().div_(layer.k_scale)
+                    if dcp_enabled():
+                        # DCP: the KV pool is physically round-robin sharded. Use
+                        # set_mla_kv_buffer, whose kernel takes the RAW virtual
+                        # out_cache_loc and INTERNALLY owner-filters
+                        # (loc % dcp_size == dcp_rank) and shards (loc // dcp_size).
+                        # Pass the raw cache_loc and the FULL (unmasked, undivided) k
+                        # split into (k_nope, k_pe): pre-dividing/pre-masking here
+                        # double-applies the kernel's own filter and corrupts the
+                        # write. (set_kv_buffer's MLA DCP path owner-filters but does
+                        # NOT //dcp_size, so it is wrong for this sharded pool.)
+                        kv_lora_rank = v.shape[-1]
+                        self.token_to_kv_pool.set_mla_kv_buffer(
+                            layer,
+                            cache_loc,
+                            cache_k[..., :kv_lora_rank],
+                            cache_k[..., kv_lora_rank:],
+                        )
+                    else:
+                        self.token_to_kv_pool.set_kv_buffer(
+                            layer, cache_loc, cache_k, v
+                        )
                 elif self._use_fused_fp8_kv_write(layer):
                     # FP8: fuse bf16->fp8 cast + paged write in one kernel.
                     k_cache, v_cache = self.token_to_kv_pool.get_kv_buffer(
@@ -2717,6 +2776,24 @@ class AiterAttnBackend(AttentionBackend):
                 and not forward_batch.forward_mode.is_target_verify()
                 and not forward_batch.forward_mode.is_draft_extend_v2()
             ):
+                if dcp_enabled():
+                    # DCP absorb-prefill over the assembled full-seq KV
+                    # (dcp_kv_buffer), since the local cache is round-robin sharded.
+                    return self._mla_prefill_fwd_dcp(q, layer, k_descale, forward_batch)
+                # The ASM prefill paths below abort unless the Q:KV head ratio
+                # is exactly 16 or 128. Kimi-K3 has 12 local query heads at
+                # TP8, so route every prefix shape (including an empty prefix)
+                # through aiter's head-tiled Triton MLA kernel.
+                if layer.tp_q_head_num not in (16, 128):
+                    return self._mla_prefill_fwd_triton_paged(
+                        q,
+                        layer,
+                        k_descale,
+                        K_Buffer,
+                        kv_indptr,
+                        kv_indices,
+                        qo_indptr,
+                    )
                 extend_no_prefix = not any(forward_batch.extend_prefix_lens_cpu)
                 if kv_indices.shape[0] == 0 or extend_no_prefix:
                     if _use_fp8_prefill_attn:
@@ -3194,6 +3271,10 @@ class AiterAttnBackend(AttentionBackend):
                 )
             elif self.use_mla:
                 # MLA pool has its own set_kv_buffer (no scale args).
+                if self.kv_cache_dtype == fp8_dtype and layer.k_scale is not None:
+                    # k is not used after the decode cache write, so quantize
+                    # in place before MLATokenToKVPool casts it to FP8.
+                    k.div_(layer.k_scale)
                 self.token_to_kv_pool.set_kv_buffer(
                     layer, forward_batch.out_cache_loc, k, v
                 )
