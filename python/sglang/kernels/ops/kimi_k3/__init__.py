@@ -55,6 +55,18 @@ def situ_and_mul_masked_post_quant(
     )
 
 
+def rmsnorm_gated_fp8_per_token(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    gate: torch.Tensor,
+    eps: float,
+    quant_dtype: "torch.dtype",
+) -> "tuple[torch.Tensor, torch.Tensor]":
+    from .rmsnorm_gated_quant import rmsnorm_gated_fp8_per_token as impl
+
+    return impl(x, weight, gate, eps, quant_dtype)
+
+
 def kimi_k3_tiny_gemm(
     x: torch.Tensor,
     w: torch.Tensor,
@@ -78,4 +90,5 @@ __all__ = [
     "situ_and_mul",
     "situ_and_mul_masked_post_quant",
     "kimi_k3_tiny_gemm",
+    "rmsnorm_gated_fp8_per_token",
 ]
