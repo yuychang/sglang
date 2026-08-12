@@ -214,6 +214,57 @@ def _merge_weights_as_views(
     return merged, sizes
 
 
+class _K3PtpcFp8LinearMethod:
+    """Per-token per-channel FP8 apply for a weight quantized after load.
+
+    Swapped onto the KDA o_proj by
+    ``KimiK3DeltaAttention._quantize_o_proj_fp8`` under
+    SGLANG_ROCM_K3_KDA_O_PROJ_FP8. Only ``apply``/``apply_into`` are ever
+    reached -- the layer was already created and loaded by the original
+    (unquantized) method, so there are no weights left to create.
+
+    ``x`` is either a bf16 activation, which the GEMM wrapper quantizes itself,
+    or the ``(fp8, per-token scale)`` pair the fused gated RMSNorm produces.
+    """
+
+    def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
+        # DefaultModelLoader sweeps every module's quant_method after
+        # load_weights returns, and _quantize_o_proj_fp8 (called from inside
+        # load_weights) has already swapped this method in. The weight is
+        # quantized and shuffled by then, so there is nothing left to do --
+        # but the hook has to exist or the sweep raises AttributeError.
+        return
+
+    def apply(
+        self,
+        layer: torch.nn.Module,
+        x,
+        bias: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        from sglang.srt.layers.quantization.fp8_utils import apply_fp8_ptpc_linear
+
+        return apply_fp8_ptpc_linear(
+            input=x,
+            weight=layer.weight,
+            weight_scale=layer.weight_scale,
+            bias=bias,
+            use_per_token_if_dynamic=True,
+        )
+
+    def apply_into(
+        self,
+        layer: torch.nn.Module,
+        x,
+        output: torch.Tensor,
+        bias: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        # aiter's a8w8 GEMM allocates its own output, so caller-owned storage
+        # costs an extra copy. _quantize_o_proj_fp8 declines the fp8 path in the
+        # configs that take this route, so this exists for correctness only.
+        output.copy_(self.apply(layer, x, bias))
+        return output
+
+
 # DP attention helpers.
 #
 # K3 cannot use LayerCommunicator: the attn-res aggregation kernels replace
@@ -1745,6 +1796,9 @@ class KimiK3DeltaAttention(nn.Module):
         self._kda_hip_fused_decode_ready = False
         self._kda_group64_weight = None
         self._kda_group64_scale = None
+        # Set by _quantize_o_proj_fp8() once weights are loaded; the FP8 dtype
+        # the gated output norm must quantize to, or None for the bf16 path.
+        self._o_proj_fp8_dtype: Optional[torch.dtype] = None
 
     def forward_qkvbfg(self, hidden_states: torch.Tensor):
         qkv, _ = self.qkv_proj(hidden_states)
@@ -1851,6 +1905,59 @@ class KimiK3DeltaAttention(nn.Module):
         self._kda_group64_weight = weight
         self._kda_group64_scale = scale
         kda_group64_aiter_hip.warmup(weight, scale)
+
+    def _quantize_o_proj_fp8(self) -> None:
+        """Re-quantize the KDA o_proj to per-token per-channel FP8 in place.
+
+        The K3 checkpoint ships attention in bf16, so this is an online quant of
+        the already-loaded weight: one scale per output channel (amax / fp8_max
+        over the input dim), the weight preshuffled into aiter's (16, 16) B
+        layout, and a matching quant_method swapped in. The gated output norm
+        then feeds the GEMM a pre-quantized (fp8, scale) pair -- see
+        SGLANG_ROCM_K3_KDA_O_PROJ_FP8.
+
+        Called once from load_weights (after all weights are loaded, before
+        cuda graph capture). A no-op unless the flag is on, aiter is in use, and
+        o_proj is still an unquantized bf16 layer.
+        """
+        if not (_use_aiter and envs.SGLANG_ROCM_K3_KDA_O_PROJ_FP8.get()):
+            return
+        w = getattr(self.o_proj, "weight", None)
+        if (
+            w is None
+            or type(w.data) is not torch.Tensor
+            or w.dim() != 2
+            or w.dtype != torch.bfloat16
+            or getattr(self.o_proj, "weight_scale", None) is not None
+        ):
+            # Already quantized (or a layout this online quant does not model);
+            # leave it alone rather than silently dropping the real scales.
+            return
+        if self.all_reduce_fusion or envs.SGLANG_K3_GEMM_AR.get():
+            # Both replace the plain GEMM with a fused GEMM+comm kernel that has
+            # no fp8 variant: all_reduce_fusion needs apply_into on a symmetric
+            # buffer, and the GEMM+AR wrapper hard-requires a bf16 weight (it
+            # would silently fall back for every call, so we would pay the quant
+            # and get none of the GEMM back).
+            return
+
+        from aiter.ops.shuffle import shuffle_weight
+
+        from sglang.srt.layers.quantization.fp8_utils import is_fp8_fnuz
+
+        fp8_dtype = torch.float8_e4m3fnuz if is_fp8_fnuz() else torch.float8_e4m3fn
+        fp8_max = torch.finfo(fp8_dtype).max
+        wf = w.data.float()
+        # Per output channel: rows of the (N, K) weight.
+        scale = wf.abs().amax(dim=1, keepdim=True).clamp_min(1e-12) / fp8_max
+        qw = (wf / scale).clamp(-fp8_max, fp8_max).to(fp8_dtype)
+        del wf
+        self.o_proj.weight = torch.nn.Parameter(
+            shuffle_weight(qw, (16, 16)), requires_grad=False
+        )
+        self.o_proj.weight_scale = torch.nn.Parameter(scale, requires_grad=False)
+        self.o_proj.quant_method = _K3PtpcFp8LinearMethod()
+        self._o_proj_fp8_dtype = fp8_dtype
 
     def _prepare_fused_decode(self) -> None:
         """Static inputs for the fused KDA decode kernel
@@ -2105,10 +2212,29 @@ class KimiK3DeltaAttention(nn.Module):
             fused_onorm = self.attn._k3_onorm_consumed
         if defer_f_b:
             self.attn._k3_deferred_f_b = False
+        o_input = None
         if not fused_onorm:
             norm_gate = g_proj_states.unflatten(-1, (-1, self.head_dim))
-            core_attn_out = self.o_norm(core_attn_out, norm_gate)
-        core_attn_out = core_attn_out.squeeze(0).flatten(-2)
+            if self._o_proj_fp8_dtype is not None:
+                # o_proj wants fp8 anyway, so quantize inside the norm: one pass
+                # over [tokens, heads*head_dim] instead of norm-write, quant-read,
+                # quant-write. Yields o_proj's (q_input, x_scale) pair directly.
+                from sglang.kernels.ops.kimi_k3 import rmsnorm_gated_fp8_per_token
+
+                o_input = rmsnorm_gated_fp8_per_token(
+                    core_attn_out.squeeze(0),
+                    self.o_norm.weight,
+                    norm_gate,
+                    self.o_norm.eps,
+                    self._o_proj_fp8_dtype,
+                )
+            else:
+                core_attn_out = self.o_norm(core_attn_out, norm_gate)
+        # When the norm was folded into the KDA kernel instead, o_proj gets the
+        # bf16 activation and (under fp8) quantizes it itself.
+        core_attn_out = (
+            o_input if o_input is not None else core_attn_out.squeeze(0).flatten(-2)
+        )
         if self.all_reduce_fusion:
             out = _k3_symm_o_proj_out(self.o_proj, core_attn_out)
             partial, _ = self.o_proj(core_attn_out, output_tensor=out)
@@ -3350,6 +3476,7 @@ class KimiK3LinearForCausalLM(nn.Module):
             if isinstance(layer.self_attn, KimiK3DeltaAttention):
                 layer.self_attn._merge_bfa_weights()
                 layer.self_attn._prepare_group64_projection()
+                layer.self_attn._quantize_o_proj_fp8()
                 layer.self_attn._prepare_fused_decode()
 
         for layer in self.model.layers:
@@ -3363,7 +3490,10 @@ class KimiK3LinearForCausalLM(nn.Module):
 
             if precompile_k3_recompute_w_u_kernel(
                 num_heads=layer.self_attn.local_num_heads,
-                dtype=layer.self_attn.o_proj.weight.dtype,
+                # The kernel runs in the activation dtype. o_norm's gain tracks
+                # it and, unlike o_proj's weight, is never re-quantized (see
+                # _quantize_o_proj_fp8).
+                dtype=layer.self_attn.o_norm.weight.dtype,
                 device=layer.self_attn.dt_bias.device,
             ):
                 rank0_log("Precompiled the Kimi-K3 KDA prefill kernel.")
