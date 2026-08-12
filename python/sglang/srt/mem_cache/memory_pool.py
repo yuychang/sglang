@@ -4032,15 +4032,44 @@ class MLATokenToKVPool(KVCache):
         cache_v: torch.Tensor,
     ):
         loc, _, _ = unwrap_write_loc(loc_info)
-        maybe_detect_oob(loc, 0, self.size + self.page_size, "set_kv_buffer (MLA)")
+        parallel = get_parallel()
+        if _is_hip:
+            maybe_detect_oob(
+                loc,
+                0,
+                # loc is widened under DCP, exactly as in set_mla_kv_buffer.
+                (self.size + self.page_size) * parallel.attn_dcp_size,
+                "set_kv_buffer (MLA)",
+            )
+        else:
+            maybe_detect_oob(
+                loc, 0, self.size + self.page_size, "set_kv_buffer (MLA)"
+            )
         layer_id = layer.layer_id
         assert not self.dsa_kv_cache_store_fp8
-        parallel = get_parallel()
         if parallel.dcp_enabled:
-            valid_mask = loc % parallel.attn_dcp_size == parallel.attn_dcp_rank
-            if not valid_mask.all():
-                loc = loc[valid_mask]
-                cache_k = cache_k[valid_mask]
+            if _is_hip:
+                # Same contract as set_mla_kv_buffer_triton (mla_buffer.py:39-41),
+                # which this single-tensor path has to match because both write the
+                # same buffer: `loc` is a WIDENED loc in [0, size * dcp_size), the
+                # owner is `loc % dcp_size`, and the physical row is `loc //
+                # dcp_size`. Rows owned by another rank go to the reserved dummy
+                # slot 0.
+                #
+                # The previous form compacted instead -- `if not valid_mask.all():
+                # loc = loc[valid_mask]` -- which was wrong twice over: it never
+                # divided, so every owned row was written `dcp_size` rows too far
+                # into the buffer (gsm8k 0.576 against a 0.958 baseline), and both
+                # the `.all()` host sync and the data-dependent index shape are
+                # illegal under hip graph capture.
+                valid_mask = loc % parallel.attn_dcp_size == parallel.attn_dcp_rank
+                loc = torch.where(valid_mask, loc, torch.zeros_like(loc))
+                loc = loc // parallel.attn_dcp_size
+            else:
+                valid_mask = loc % parallel.attn_dcp_size == parallel.attn_dcp_rank
+                if not valid_mask.all():
+                    loc = loc[valid_mask]
+                    cache_k = cache_k[valid_mask]
         if cache_k.dtype != self.dtype:
             cache_k = cache_k.to(self.dtype)
 
