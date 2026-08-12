@@ -1546,6 +1546,9 @@ class Envs:
     # Restore the pre-tuning (rows_per_wave, weight_cache_modifier) pair for the
     # KDA group64 projection, so the per-bucket tuning can be A/B'd in place.
     SGLANG_K3_KDA_GROUP64_LEGACY_LAUNCH = EnvBool(False)
+    # Prepend an SGLang-shipped BF16 tuned-GEMM profile for M=16384 to AITER's
+    # config search path. Read before any import can initialize AITER_CONFIGS.
+    SGLANG_K3_AITER_M16384_PROFILE = EnvBool(False)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_CACHE_CAPACITY = EnvInt(2)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_MIN_HITS = EnvInt(2)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_MAX_SEQLEN = EnvInt(6144)
