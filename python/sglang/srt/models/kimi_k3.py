@@ -443,6 +443,10 @@ class KimiK3MoE(nn.Module):
         self.num_shared_experts = config.num_shared_experts
         self.layer_idx = layer_idx
         self.alt_stream = alt_stream
+        # Fork/join events for the shared/routed overlap, built on first use
+        # (a torch.cuda.Event constructed here would be created before the
+        # device context this module ends up on). See _ms_events().
+        self._ms_event_pair: Optional[tuple] = None
         # Token window in which the ROCm shared/routed overlap is worth its
         # contention. Read once: the decode path replays a graph, but prefill
         # re-enters this forward for every layer of every batch.
@@ -461,6 +465,10 @@ class KimiK3MoE(nn.Module):
         # loading by _merge_front_weights().
         self._front_w: Optional[torch.Tensor] = None
         self._front_sizes: Optional[List[int]] = None
+        # The same merged weight with the shared gate_up rows dropped, for the
+        # dual-stream split (see _forward_fused). A dim-0 slice of _front_w, so
+        # it is a contiguous view and costs no extra memory.
+        self._front_w_nogu: Optional[torch.Tensor] = None
         # True when _front_w merges only [gate, routed_expert_down_proj] (the EP
         # a2a pair) rather than the three-way fused-front weight.
         self._front_is_ep_pair = False
@@ -715,6 +723,12 @@ class KimiK3MoE(nn.Module):
             return
         self._front_w, self._front_sizes = _merge_weights_as_views(mods)
         self._front_is_ep_pair = len(mods) == 2
+        # Row-slice past the shared gate_up block. _merge_weights_as_views cats
+        # along dim 0, so this is contiguous and aliases _front_w -- the
+        # dual-stream split gets the un-merged front for free.
+        self._front_w_nogu = (
+            None if self._front_is_ep_pair else self._front_w[self._front_sizes[0] :]
+        )
         # Invalidate the cached properties.
         for prop in (
             "_eligible_for_fused_front",
@@ -1151,6 +1165,28 @@ class KimiK3MoE(nn.Module):
             out=shared_output,
         )
 
+    def _ms_events(self):
+        """The fork/join event pair for the shared/routed overlap, or
+        ``(None, None)`` to use ``wait_stream``.
+
+        ``Stream.wait_stream`` builds a fresh ``torch.cuda.Event`` per call, so
+        each layer's fork and join pay a hipEventCreateWithFlags plus the
+        destroy when it is collected. Recording one long-lived pair instead
+        keeps exactly the same ordering and drops the create/destroy.
+
+        Measured on gfx950 that saves nothing: 8.0 vs 8.1 us per fork in a
+        92-layer graph of nothing else, and within noise of ``wait_stream`` in
+        eager mode too. It is kept because it is strictly no worse, not because
+        the allocation was ever the cost of a fork -- for what that cost
+        actually is, see SGLANG_ROCM_K3_MULTI_STREAM_MIN_TOKENS.
+        """
+        if self._ms_event_pair is None:
+            if not envs.SGLANG_ROCM_K3_MULTI_STREAM_REUSE_EVENTS.get():
+                self._ms_event_pair = (None, None)
+            else:
+                self._ms_event_pair = (torch.cuda.Event(), torch.cuda.Event())
+        return self._ms_event_pair
+
     def _get_fused_norm_params(self) -> tuple[torch.Tensor, float]:
         norm = self.routed_expert_norm
         assert self.fuse_ar_norm and norm is not None
@@ -1177,22 +1213,51 @@ class KimiK3MoE(nn.Module):
             )
 
         num_tokens, hidden_size = hidden_states.shape
-        fused = _k3_bf16_gemm(
-            hidden_states,
-            self._front_w,
-            out_dtype=torch.float32 if self._front_fp32 else None,
-        )
-        gate_up, router_logits, routed_input = torch.split(
-            fused, self._front_sizes, dim=-1
-        )
-        if num_tokens > 1 and _is_hip and not _aiter_k3_opt:
-            router_logits = router_logits.contiguous()
-        if self._moe_front_needs_dense_bf16:
-            # off an fp32 front the cast allocates the dense buffer, so the
-            # contiguous() behind it is free; off a bf16 front it is the copy
-            routed_input = routed_input.to(hidden_states.dtype).contiguous()
-        latent_numel = num_tokens * self.moe_hidden_size
         use_k3_ar_fusion = k3_ar_fusion.enabled()
+        use_rocm_multi_stream = num_tokens in self._rocm_overlap_tokens
+        # Un-merge the shared gate_up when the side stream is going to run, so
+        # the alt stream carries the whole shared MLP (gate_up + act + down)
+        # the way ATOM's dual_stream_moe_forward does, instead of just the down
+        # GEMM. The merge exists to read hidden_states once, which is worth far
+        # less than it costs here: at decode that read is 0.5 MB while the
+        # gate_up weight it drags onto the critical path is 22 MB. Free to do --
+        # _merge_weights_as_views cats along dim 0, so both halves are already
+        # contiguous views of the one buffer. It makes the fork less bad, not
+        # good; the dual-stream penalty tracks main-stream kernel count rather
+        # than side-payload size, so moving work across streams recovers only a
+        # fraction. See SGLANG_ROCM_K3_MULTI_STREAM_SPLIT_FRONT. Outside the
+        # overlap window (notably prefill, where reading an 8192-token
+        # activation three times is real) the merged front is kept.
+        split_shared_front = (
+            use_rocm_multi_stream
+            and not use_k3_ar_fusion
+            and self.alt_stream is not None
+            and self._front_w_nogu is not None
+            and not self._front_fp32
+            and envs.SGLANG_ROCM_K3_MULTI_STREAM_SPLIT_FRONT.get()
+        )
+
+        def _front_gemm(weight, sizes):
+            fused = _k3_bf16_gemm(
+                hidden_states,
+                weight,
+                out_dtype=torch.float32 if self._front_fp32 else None,
+            )
+            parts = list(torch.split(fused, sizes, dim=-1))
+            if num_tokens > 1 and _is_hip and not _aiter_k3_opt:
+                parts[-2] = parts[-2].contiguous()
+            if self._moe_front_needs_dense_bf16:
+                # off an fp32 front the cast allocates the dense buffer, so the
+                # contiguous() behind it is free; off a bf16 front it is the copy
+                parts[-1] = parts[-1].to(hidden_states.dtype).contiguous()
+            return parts
+
+        gate_up = None
+        if not split_shared_front:
+            gate_up, router_logits, routed_input = _front_gemm(
+                self._front_w, self._front_sizes
+            )
+        latent_numel = num_tokens * self.moe_hidden_size
         if use_k3_ar_fusion:
             # the shared-expert AR is pull-only, so its input must be a
             # symm_buffer slice for every rank to resolve the same offset
@@ -1211,7 +1276,6 @@ class KimiK3MoE(nn.Module):
         latent = buf[:latent_numel].view(num_tokens, self.moe_hidden_size)
         shared_output = buf[latent_numel:].view(num_tokens, hidden_size)
         fused_norm = False
-        use_rocm_multi_stream = num_tokens in self._rocm_overlap_tokens
         if self.alt_stream is not None and (use_k3_ar_fusion or use_rocm_multi_stream):
             defer_finalize = (
                 use_k3_ar_fusion
@@ -1220,7 +1284,20 @@ class KimiK3MoE(nn.Module):
                 and k3_ar_fusion.finalize_push_fits(num_tokens)
             )
             current_stream = torch.cuda.current_stream()
-            self.alt_stream.wait_stream(current_stream)
+            fork_ev, join_ev = self._ms_events()
+            if fork_ev is None:
+                self.alt_stream.wait_stream(current_stream)
+            else:
+                fork_ev.record(current_stream)
+                self.alt_stream.wait_event(fork_ev)
+            if split_shared_front:
+                # Inside the fork so the narrowed front GEMM overlaps the
+                # shared gate_up on the alt stream too, not just the routed
+                # experts -- forking after it would leave the biggest
+                # main-stream GEMM outside the overlap.
+                router_logits, routed_input = _front_gemm(
+                    self._front_w_nogu, self._front_sizes[1:]
+                )
             if defer_finalize:
                 deferred = self._forward_routed_deferred(
                     hidden_states, router_logits, routed_input
@@ -1228,6 +1305,10 @@ class KimiK3MoE(nn.Module):
             else:
                 self._forward_routed(hidden_states, router_logits, routed_input, latent)
             with torch.cuda.stream(self.alt_stream):
+                if split_shared_front:
+                    gate_up = _k3_bf16_gemm(
+                        hidden_states, self.shared_experts.gate_up_proj.weight
+                    )
                 self._forward_shared(gate_up, shared_output)
                 if use_k3_ar_fusion:
                     # Low-SM pull leaves the SMs to the routed GEMMs it
@@ -1238,7 +1319,11 @@ class KimiK3MoE(nn.Module):
             # Joining after the expert GEMMs rather than between them and the
             # router top-k: the shared branch outlasts the top-k, so the earlier
             # join stalls the main stream and measured 3% worse at batch 8 and 32.
-            current_stream.wait_stream(self.alt_stream)
+            if join_ev is None:
+                current_stream.wait_stream(self.alt_stream)
+            else:
+                join_ev.record(self.alt_stream)
+                current_stream.wait_event(join_ev)
             if use_k3_ar_fusion:
                 # NOTE: the latent AR must stay serialized after the shared AR
                 # (both reuse the v2 pull semaphores; concurrent calls would

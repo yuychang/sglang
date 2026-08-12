@@ -667,15 +667,58 @@ class Envs:
     # itself is perfect — traced at 100% of the side stream hidden, worth 952 us
     # per decode step — but using the second queue inflates the rest of the graph
     # by 2,071 us, 94% of that on kernels that never run beside the side stream.
-    # ATTN is the worse of the two and is off; MOE is on but confined to a token
-    # window it was measured neutral in.
+    # ATTN is the worse of the two and is off; MOE is the one to use if the
+    # master switch is ever turned on, but see the window note below -- on
+    # gfx950 there is no window in which it wins.
     SGLANG_ROCM_K3_MULTI_STREAM_ATTN = EnvBool(False)
     SGLANG_ROCM_K3_MULTI_STREAM_MOE = EnvBool(True)
     # Token window for the MoE site only. Below it a decode step's kernels are
     # small enough that the fork/join penalty dominates; above it prefill
     # saturates the machine and there is no idle capacity left to overlap into.
+    # Measured on gfx950, the profitable band between those two is empty:
+    # enabling it cost 2.0-7.5% output throughput at ISL 8192 / OSL 1024 / TP 8,
+    # and 2.8-7.1% decode throughput at batch 64/128/256 inside this window.
+    # The cause is not the fork barrier and not the payload size, both of which
+    # were checked and cleared -- a bare fork/join is 8.1 us per layer, and
+    # off-model the same overlap returns 9-18 us in every payload and bandwidth
+    # regime tried, including at 76% of peak HBM. What it is: a per-node tax on
+    # the main stream for the whole time a second queue is live. Holding total
+    # main-stream work fixed and sweeping only how many kernels it is split
+    # into (overlap_kernelcount.py) the gain goes +17 us at 4 kernels/layer,
+    # +7 at 16, -8 at 32, -51 at 64. K3's routed path -- router sigmoid, bias,
+    # top-k, sort, moe_align, grouped mxfp4 GEMM, situ, second GEMM,
+    # scatter-reduce -- sits past that crossover, which is the same effect the
+    # SGLANG_ROCM_USE_MULTI_STREAM note measures as 94% of the added time
+    # landing on kernels that never run beside the side stream.
+    # Left at the stock values because no other pair is better, not because
+    # these are good.
     SGLANG_ROCM_K3_MULTI_STREAM_MIN_TOKENS = EnvInt(64)
     SGLANG_ROCM_K3_MULTI_STREAM_MAX_TOKENS = EnvInt(1024)
+    # Fork/join the MoE site with one long-lived event pair instead of
+    # Stream.wait_stream, which allocates and destroys a torch.cuda.Event on
+    # every call. Two calls per MoE layer per forward. Measured neutral on
+    # gfx950 in graph mode and in eager -- 8.0 vs 8.1 us per fork in an
+    # otherwise-empty 92-layer graph -- so this is kept only because it is
+    # strictly no worse, not because the allocation was the cost.
+    SGLANG_ROCM_K3_MULTI_STREAM_REUSE_EVENTS = EnvBool(True)
+    # Inside the overlap window, pull the shared gate_up back out of the merged
+    # front GEMM so the side stream runs the whole shared MLP -- gate_up (22 MB
+    # at TP8) + act + down (11 MB) -- instead of the down GEMM alone. This is
+    # ATOM's shape: it has no merged front at all. The merged front saves one
+    # read of hidden_states, which at decode is 0.5 MB against the 22 MB of
+    # gate_up weight it pins to the main stream, so inside the window the trade
+    # is one-sided; outside it the merged front is kept, because an 8192-token
+    # prefill activation is 117 MB and reading it three times is not free.
+    # Costs nothing to do: _merge_weights_as_views cats along dim 0, so both
+    # halves are already contiguous views of the one buffer.
+    # This does NOT rescue the overlap, it only makes it less bad -- at ISL 8192
+    # / OSL 1024 / TP 8 it recovered +0.8/+0.6/+0.3/-0.0/+0.0% at concurrency
+    # 2/4/8/16/32 against a 6.8/6.0/4.4/2.6/2.0% loss versus not forking at all.
+    # The dual-stream penalty scales with main-stream kernel count, not with
+    # side-payload size (see SGLANG_ROCM_K3_MULTI_STREAM_MIN_TOKENS), and this
+    # moves work across streams rather than removing main-stream nodes.
+    # Kept on because it is free and strictly better wherever the fork runs.
+    SGLANG_ROCM_K3_MULTI_STREAM_SPLIT_FRONT = EnvBool(True)
     # Fold the KDA [f_a|b] tail into the wide [q,k,v,g] projection so the whole
     # in-proj is one GEMM (what ATOM does). The N=6288 shape has no tuned aiter
     # config and the 6144 one does, but at decode the projection is bandwidth
