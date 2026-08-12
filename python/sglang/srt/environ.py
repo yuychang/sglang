@@ -676,6 +676,17 @@ class Envs:
     # saturates the machine and there is no idle capacity left to overlap into.
     SGLANG_ROCM_K3_MULTI_STREAM_MIN_TOKENS = EnvInt(64)
     SGLANG_ROCM_K3_MULTI_STREAM_MAX_TOKENS = EnvInt(1024)
+    # Fold the KDA [f_a|b] tail into the wide [q,k,v,g] projection so the whole
+    # in-proj is one GEMM (what ATOM does). The N=6288 shape has no tuned aiter
+    # config and the 6144 one does, but at decode the projection is bandwidth
+    # bound and the 144 extra output columns ride along nearly free, so dropping
+    # the second launch wins outright: measured on gfx950 at H=7168/TP8, one
+    # GEMM is 0.55-0.73x the split at M<=64 and 0.83-0.97x through M=256. Past
+    # that the untuned config costs more than the launch it saves, so the split
+    # stays. NVIDIA keeps the split at every M (cublas picks worse kernels for
+    # 6288 - see the fused_qkvg_proj comment).
+    SGLANG_ROCM_K3_FUSE_KDA_INPROJ = EnvBool(True)
+    SGLANG_ROCM_K3_FUSE_KDA_INPROJ_MAX_TOKENS = EnvInt(256)
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("tilelang")
 
     # MPS (Apple Silicon)

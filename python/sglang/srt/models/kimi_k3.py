@@ -10,6 +10,7 @@ import logging
 import os
 from collections.abc import Iterable
 from functools import cached_property
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import torch
@@ -1368,6 +1369,8 @@ class KimiK3DeltaAttention(nn.Module):
             # (6144/rank at TP8). Folding b (12/rank) and f_a (128, replicated)
             # in as well skews the output dim to 6284 and measurably degrades
             # the GEMM kernel selection; they stay as separate tiny GEMVs.
+            # (ROCm reverses this below the token threshold -- see
+            # _merge_bfa_weights.)
             self.fused_qkvg_proj = MergedColumnParallelLinear(
                 self.hidden_size,
                 [
@@ -1412,8 +1415,15 @@ class KimiK3DeltaAttention(nn.Module):
                 prefix=f"{prefix}.f_b_proj",
             )
             # Merged [f_a | b] weight, built after weight loading by
-            # _merge_bfa_weights().
+            # _merge_bfa_weights(). On ROCm the same call also produces
+            # _qkvgbfa_w, the whole [q,k,v,g | f_a | b] buffer that _bfa_w is
+            # then a tail view of.
             self._bfa_w: Optional[torch.Tensor] = None
+            self._qkvgbfa_w: Optional[torch.Tensor] = None
+            self._qkvgbfa_sizes: Optional[list[int]] = None
+            self._qkvgbfa_bs_limit = (
+                envs.SGLANG_ROCM_K3_FUSE_KDA_INPROJ_MAX_TOKENS.get() if _is_hip else 0
+            )
         elif self.do_fuse_qkvbfg:
             self.qkvb_sizes = [
                 projection_size,
@@ -1632,13 +1642,66 @@ class KimiK3DeltaAttention(nn.Module):
         stays 16-byte aligned for vectorized consumers (tiny-GEMM on f_b).
 
         Called once from load_weights (after all weights are loaded, before
-        cuda graph capture)."""
+        cuda graph capture).
+
+        On ROCm the tail is instead appended to the wide [q,k,v,g] buffer so
+        one GEMM covers the whole in-proj (ATOM's layout). The merge is
+        view-only either way, so both the wide-only and the whole-buffer
+        weights stay live and forward_qkvbfg_fused picks per batch size.
+        """
         if not self.use_full_rank_gate:
             return
-        self._bfa_w, sizes = _merge_weights_as_views(
-            [self.f_a_proj, self.b_proj], pad_rows_to=8
+
+        mods = [self.f_a_proj, self.b_proj]
+        if self._may_fuse_kda_inproj():
+            # [q,k,v,g | f_a | b | pad]; f_a/b keep the same relative order so
+            # the tail view is byte-identical to the wide-only merge.
+            mods = [self.fused_qkvg_proj] + mods
+
+        merged, sizes = _merge_weights_as_views(mods, pad_rows_to=8)
+
+        if len(mods) == 3:
+            self._qkvgbfa_w = merged
+            # Stand-in "layer" so the fused GEMM goes through the same
+            # quant_method.apply (and therefore the same backend choice) as
+            # the wide projection, whose own .weight stays the 6144-row view
+            # for the above-threshold split path. Not an nn.Module on purpose:
+            # this must not add a duplicate entry to state_dict.
+            self._qkvgbfa_layer = SimpleNamespace(weight=merged)
+            self._bfa_w = merged[sizes[0] :]
+            self._bfa_fa_size, self._bfa_b_size = sizes[1], sizes[2]
+            self._qkvgbfa_sizes = [
+                self.split_sizes[0],  # q,k,v
+                self.split_sizes[1],  # g
+                self._bfa_fa_size,
+                self._bfa_b_size,
+                merged.shape[0] - sum(sizes),  # alignment pad
+            ]
+        else:
+            self._bfa_w = merged
+            self._bfa_fa_size, self._bfa_b_size = sizes
+
+    def _may_fuse_kda_inproj(self) -> bool:
+        """Whether the [f_a|b] tail can share the wide projection's buffer.
+
+        Needs the wide fused projection to exist and all three weights to be
+        plain unquantized tensors of the same dtype -- the checkpoint keeps
+        attention in bf16, but a quantized variant would carry scales that a
+        raw row-cat would silently drop."""
+        if not (_is_hip and envs.SGLANG_ROCM_K3_FUSE_KDA_INPROJ.get()):
+            return False
+        if not (self.do_fuse_qkvbfg and self.use_full_rank_gate):
+            return False
+        ws = [
+            getattr(m, "weight", None)
+            for m in (self.fused_qkvg_proj, self.f_a_proj, self.b_proj)
+        ]
+        return (
+            all(w is not None and type(w.data) is torch.Tensor for w in ws)
+            and len({w.dtype for w in ws}) == 1
+            and all(w.dim() == 2 for w in ws)
+            and len({w.shape[1] for w in ws}) == 1
         )
-        self._bfa_fa_size, self._bfa_b_size = sizes
 
     def _prepare_fused_decode(self) -> None:
         """Static inputs for the fused KDA decode kernel
@@ -1745,6 +1808,23 @@ class KimiK3DeltaAttention(nn.Module):
                 w = self._bfa_w
                 n_fa, n_b = self._bfa_fa_size, self._bfa_b_size
                 from sglang.kernels.ops.kimi_k3 import kimi_k3_tiny_gemm as gemm
+
+                if (
+                    self._qkvgbfa_w is not None
+                    and 0 < hidden_states.shape[0] <= self._qkvgbfa_bs_limit
+                ):
+                    # One GEMM for the whole in-proj: the [f_a|b] tail rides
+                    # along in the wide projection's bandwidth instead of
+                    # paying its own launch. Worth ~30% of the in-proj at
+                    # decode on gfx950; see SGLANG_ROCM_K3_FUSE_KDA_INPROJ.
+                    fused_states = self.fused_qkvg_proj.quant_method.apply(
+                        self._qkvgbfa_layer, hidden_states, None
+                    )
+                    qkv, g_proj_states, f_a, beta, _pad = torch.split(
+                        fused_states, self._qkvgbfa_sizes, dim=-1
+                    )
+                    forget_gate = f_a if defer_f_b else gemm(f_a, self.f_b_proj.weight)
+                    return qkv, beta, forget_gate, g_proj_states
 
                 if (
                     self._bfa_alt_stream is not None
