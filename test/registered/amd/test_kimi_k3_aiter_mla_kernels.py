@@ -106,9 +106,7 @@ class TestKimiK3AiterMlaKernels(CustomTestCase):
         total_kv = sum(seq_lens)
         pool_rows = total_kv + 37
         kv_scale = 0.375
-        physical = torch.randperm(pool_rows, device="cuda")[:total_kv].to(
-            torch.int32
-        )
+        physical = torch.randperm(pool_rows, device="cuda")[:total_kv].to(torch.int32)
         pool_bf16 = torch.randn(
             pool_rows,
             1,
