@@ -25,6 +25,11 @@ from sglang.kernels.ops.kvcache.aiter_unified_attention import (
     scatter_req_to_token_to_page_table_kernel,
 )
 from sglang.srt.layers.attention.base_attn_backend import AttentionBackend
+from sglang.srt.layers.dcp import (
+    dcp_enabled,
+    get_attention_dcp_rank,
+    get_attention_dcp_world_size,
+)
 from sglang.srt.layers.dp_attention import (
     is_dp_attention_enabled,
 )
