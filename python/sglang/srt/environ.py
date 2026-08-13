@@ -675,6 +675,11 @@ class Envs:
     # is worth 0.7-1.7% output throughput and 1.4-1.8% ITL at ISL 8192 /
     # OSL 1024 / TP 8 across concurrency 2..32.
     SGLANG_ROCM_K3_KDA_O_PROJ_FP8 = EnvBool(True)
+    # K3-specific packed MoE collective: all-reduce [latent|shared], RMSNorm
+    # only the latent row prefix. This is not the generic K2.5 residual fusion.
+    SGLANG_ROCM_K3_AR_NORM = EnvBool(False)
+    SGLANG_ROCM_K3_AR_NORM_1STAGE_MAX_BYTES = EnvInt(512 * 1024)
+    SGLANG_ROCM_K3_AR_NORM_MAX_TOKENS = EnvInt(2)
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("tilelang")
 
     # MPS (Apple Silicon)
