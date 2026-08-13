@@ -431,7 +431,8 @@ class AiterAttnBackend(AttentionBackend):
             _gluon_serves_heads = (
                 self.use_aiter_gluon_mla and self.num_head <= _GLUON_MLA_MAX_HEADS
             )
-            assert self.dcp_world_size > 1 or _valid_heads or _gluon_serves_heads, (
+            dcp_world_size = getattr(self, "dcp_world_size", 1)
+            assert dcp_world_size > 1 or _valid_heads or _gluon_serves_heads, (
                 f"Aiter MLA supports num_head of 4, 8, or multiples of 16 "
                 f"in [16, 128], or any head count <= {_GLUON_MLA_MAX_HEADS} with "
                 f"--mla-runner-backend gluon.\n"
