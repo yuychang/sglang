@@ -215,11 +215,7 @@ def _merge_weights_as_views(
 
 
 def _k3_ptpc_fp8_enabled() -> bool:
-    return (
-        _is_hip
-        and _use_aiter
-        and envs.SGLANG_ROCM_K3_PTPC_FP8.get()
-    )
+    return _is_hip and _use_aiter and envs.SGLANG_ROCM_K3_PTPC_FP8.get()
 
 
 def _k3_o_proj_fp8_enabled() -> bool:
@@ -278,7 +274,9 @@ def _k3_apply_post_attn_norm(
     return out, residual_out
 
 
-from sglang.kernels.ops.kimi_k3.ptpc_fp8 import K3PtpcFp8LinearMethod as _K3PtpcFp8LinearMethod
+from sglang.kernels.ops.kimi_k3.ptpc_fp8 import (
+    K3PtpcFp8LinearMethod as _K3PtpcFp8LinearMethod,
+)
 
 
 # DP attention helpers.
