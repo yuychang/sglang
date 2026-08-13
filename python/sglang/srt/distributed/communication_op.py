@@ -40,6 +40,18 @@ def tensor_model_parallel_fused_allreduce_rmsnorm(
     return get_tp_group().fused_allreduce_rmsnorm(input_, residual_inp_, weight_, eps)
 
 
+def tensor_model_parallel_fused_allreduce_partial_rmsnorm(
+    input_: torch.Tensor,
+    weight_: torch.Tensor,
+    norm_rows: int,
+    eps: float,
+) -> Optional[torch.Tensor]:
+    """All-reduce all packed rows and RMS-normalize only a leading prefix."""
+    return get_tp_group().fused_allreduce_partial_rmsnorm(
+        input_, weight_, norm_rows, eps
+    )
+
+
 def tensor_model_parallel_fused_allreduce_rmsnorm_quant_per_group(
     input_: torch.Tensor,
     residual_inp_: torch.Tensor,

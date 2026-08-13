@@ -405,6 +405,7 @@ def _add3(
 
 # One-shot log guard: proves the merged front is live (see _ep_front).
 _EP_FRONT_LOGGED = False
+_ROCM_PARTIAL_AR_NORM_LOGGED = False
 
 
 def _o_proj_takes_output(o_proj: RowParallelLinear) -> bool:
@@ -1237,6 +1238,41 @@ class KimiK3MoE(nn.Module):
         assert self.fuse_ar_norm and norm is not None
         return norm.weight, norm.variance_epsilon
 
+    def _try_rocm_partial_ar_norm(
+        self, buf: torch.Tensor, num_tokens: int
+    ) -> Optional[torch.Tensor]:
+        """Fuse packed latent/shared AR with latent-only RMSNorm on gfx950."""
+        if not (
+            _is_hip
+            and envs.SGLANG_ROCM_K3_AR_NORM.get()
+            and 0 < num_tokens <= envs.SGLANG_ROCM_K3_AR_NORM_MAX_TOKENS.get()
+            and self.fuse_ar_norm
+            and self._routed_needs_reduce
+            and not self._dp_attention
+            and buf.dtype == torch.bfloat16
+            and buf.is_contiguous()
+        ):
+            return None
+        from sglang.srt.distributed.communication_op import (
+            tensor_model_parallel_fused_allreduce_partial_rmsnorm,
+        )
+
+        rows = buf.view(-1, self.moe_hidden_size)
+        weight, eps = self._get_fused_norm_params()
+        result = tensor_model_parallel_fused_allreduce_partial_rmsnorm(
+            rows, weight, num_tokens, eps
+        )
+        if result is not None:
+            global _ROCM_PARTIAL_AR_NORM_LOGGED
+            if not _ROCM_PARTIAL_AR_NORM_LOGGED:
+                _ROCM_PARTIAL_AR_NORM_LOGGED = True
+                rank0_log(
+                    "K3 ROCm packed all-reduce + latent RMSNorm fusion active "
+                    f"({num_tokens} tokens, TP{self.tp_size})."
+                )
+            return result.view(-1)
+        return None
+
     def _forward_fused(
         self, hidden_states: torch.Tensor, *, prefix_sum: Optional[torch.Tensor]
     ) -> torch.Tensor:
@@ -1399,7 +1435,12 @@ class KimiK3MoE(nn.Module):
             elif k3_ar_fusion.enabled():
                 k3_ar_fusion.all_reduce(buf)
             else:
-                buf = tensor_model_parallel_all_reduce(buf)
+                fused_buf = self._try_rocm_partial_ar_norm(buf, num_tokens)
+                if fused_buf is not None:
+                    buf = fused_buf
+                    fused_norm = True
+                else:
+                    buf = tensor_model_parallel_all_reduce(buf)
 
         latent = buf[:latent_numel].view(num_tokens, self.moe_hidden_size)
         shared_output = buf[latent_numel:].view(num_tokens, hidden_size)
