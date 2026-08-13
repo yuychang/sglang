@@ -2318,43 +2318,26 @@ class TestKimiK3RocmOverrides(CustomTestCase):
             mla_runner_backend=runner,
         )
 
-    def test_aiter_backend_selects_gluon(self):
+    def test_aiter_backend_keeps_auto_runner(self):
         from sglang.srt.arg_groups.overrides import _kimi_k3_rocm_overrides
 
         self.assertEqual(
             _kimi_k3_rocm_overrides(self._args(attention_backend="aiter")),
-            {
-                "prefill_attention_backend": "triton",
-                "decode_attention_backend": "aiter",
-                "mla_runner_backend": "gluon",
-            },
+            {},
         )
 
-    def test_split_decode_backend_selects_gluon(self):
+    def test_split_decode_backend_keeps_auto_runner(self):
         from sglang.srt.arg_groups.overrides import _kimi_k3_rocm_overrides
 
         self.assertEqual(
             _kimi_k3_rocm_overrides(self._args(decode="aiter", prefill="triton")),
-            {
-                "prefill_attention_backend": "triton",
-                "decode_attention_backend": "aiter",
-                "mla_runner_backend": "gluon",
-            },
+            {},
         )
 
-    def test_unset_backend_selects_gluon(self):
-        # With the backend unset the ROCm default resolver picks aiter for an
-        # MLA model precisely when the runner is gluon, so declare it here too.
+    def test_unset_backend_keeps_auto_runner(self):
         from sglang.srt.arg_groups.overrides import _kimi_k3_rocm_overrides
 
-        self.assertEqual(
-            _kimi_k3_rocm_overrides(self._args()),
-            {
-                "prefill_attention_backend": "triton",
-                "decode_attention_backend": "aiter",
-                "mla_runner_backend": "gluon",
-            },
-        )
+        self.assertEqual(_kimi_k3_rocm_overrides(self._args()), {})
 
     def test_explicit_runner_choice_is_left_alone(self):
         from sglang.srt.arg_groups.overrides import _kimi_k3_rocm_overrides
