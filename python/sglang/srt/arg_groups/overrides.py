@@ -408,25 +408,24 @@ def _kimi_k3_rocm_overrides(server_args: Any) -> dict:
     same reason. Without this, ``--attention-backend aiter`` fails the head-count
     assertion in AiterAttnBackend before the first forward.
 
-    Decode uses Gluon, while prefill remains on Triton. The absorbed AITER
-    prefill path drops GSM8K flexible-extract from ~1.0 to ~0.57 on a 100-item
-    diagnostic; the split backend preserves accuracy.
+    When explicitly requested, decode uses Gluon while prefill remains on
+    Triton. Keep auto unchanged: the complete serving ladder shows Gluon helps
+    high concurrency but regresses 8K concurrency 2/4/8, so it is not an
+    unconditional default. The absorbed AITER prefill path is also inaccurate.
     """
     _, decode_backend = attention_backends_of(server_args)
     if decode_backend not in ("aiter", None):
         return {}
-    if server_args.mla_runner_backend not in ("auto", "gluon"):
+    if server_args.mla_runner_backend != "gluon":
         return {}
     overrides = {
         "prefill_attention_backend": "triton",
         "decode_attention_backend": "aiter",
     }
-    if server_args.mla_runner_backend == "auto":
-        overrides["mla_runner_backend"] = "gluon"
     logger.info(
-        "Kimi-K3 on ROCm uses Triton MLA prefill and AITER Gluon MLA decode "
-        "(prefill_attention_backend -> 'triton', decode_attention_backend -> "
-        "'aiter', mla_runner_backend -> 'gluon')."
+        "Kimi-K3 explicit Gluon mode uses Triton MLA prefill and AITER Gluon "
+        "MLA decode (prefill_attention_backend -> 'triton', "
+        "decode_attention_backend -> 'aiter')."
     )
     return overrides
 
