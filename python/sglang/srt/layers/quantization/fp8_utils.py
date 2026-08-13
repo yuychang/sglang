@@ -1980,6 +1980,8 @@ def apply_fp8_ptpc_linear(
 
     # View input as 2D matrix for fp8 methods
     input_2d = input.view(-1, input.shape[-1])
+    if not input_2d.is_contiguous():
+        input_2d = input_2d.contiguous()
 
     # weight is transposed (K, N)
     output_shape = [*input.shape[:-1], weight.shape[1]]
