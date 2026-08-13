@@ -408,21 +408,27 @@ def _kimi_k3_rocm_overrides(server_args: Any) -> dict:
     same reason. Without this, ``--attention-backend aiter`` fails the head-count
     assertion in AiterAttnBackend before the first forward.
 
-    Only 'auto' is upgraded: an explicit --mla-runner-backend triton is a
-    deliberate request for the legacy kernel and is left to fail on its own
-    terms.
+    Decode uses Gluon, while prefill remains on Triton. The absorbed AITER
+    prefill path drops GSM8K flexible-extract from ~1.0 to ~0.57 on a 100-item
+    diagnostic; the split backend preserves accuracy.
     """
     _, decode_backend = attention_backends_of(server_args)
     if decode_backend not in ("aiter", None):
         return {}
-    if server_args.mla_runner_backend != "auto":
+    if server_args.mla_runner_backend not in ("auto", "gluon"):
         return {}
+    overrides = {
+        "prefill_attention_backend": "triton",
+        "decode_attention_backend": "aiter",
+    }
+    if server_args.mla_runner_backend == "auto":
+        overrides["mla_runner_backend"] = "gluon"
     logger.info(
-        "Kimi-K3 on ROCm uses aiter's Gluon MLA kernel "
-        "(mla_runner_backend -> 'gluon'): the legacy aiter MLA decode does not "
-        "serve this model's local head count."
+        "Kimi-K3 on ROCm uses Triton MLA prefill and AITER Gluon MLA decode "
+        "(prefill_attention_backend -> 'triton', decode_attention_backend -> "
+        "'aiter', mla_runner_backend -> 'gluon')."
     )
-    return {"mla_runner_backend": "gluon"}
+    return overrides
 
 
 @_register_for("KimiK3ForConditionalGeneration")
