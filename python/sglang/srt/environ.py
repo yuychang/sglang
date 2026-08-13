@@ -660,8 +660,10 @@ class Envs:
     # regressed the batch 2/8/32 medians by 0.1%/0.6%/1.4%.
     SGLANG_ROCM_K3_KDA_O_PROJ_FP8 = EnvBool(False)
     # K3-specific packed MoE collective: all-reduce [latent|shared], RMSNorm
-    # only the latent row prefix. This is not the generic K2.5 residual fusion.
-    SGLANG_ROCM_K3_AR_NORM = EnvBool(False)
+    # only the latent row prefix. Graph microbench latency improved 16.8%/14.9%
+    # at one/two tokens and regressed beyond four, so the runtime cap remains 2.
+    # Full GSM8K 5-shot held at 0.9613 vs 0.9629 control (within one SEM).
+    SGLANG_ROCM_K3_AR_NORM = EnvBool(True)
     SGLANG_ROCM_K3_AR_NORM_1STAGE_MAX_BYTES = EnvInt(512 * 1024)
     SGLANG_ROCM_K3_AR_NORM_MAX_TOKENS = EnvInt(2)
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("tilelang")
