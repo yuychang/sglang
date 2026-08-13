@@ -11,6 +11,7 @@ from sglang.srt.utils import is_hip
 _HEADS = 12
 _DIM = 128
 _CHANNELS = 3 * _HEADS * _DIM
+_MAX_VALIDATED_BATCH = 256
 _WARMED: set[tuple[int, float, float]] = set()
 
 
@@ -58,7 +59,7 @@ def covered(
         return False
     batch = f_a.shape[0]
     return (
-        batch > 0
+        0 < batch <= _MAX_VALIDATED_BATCH
         and f_a.shape == (batch, _DIM)
         and f_a.dtype == torch.bfloat16
         and f_a.stride(-1) == 1

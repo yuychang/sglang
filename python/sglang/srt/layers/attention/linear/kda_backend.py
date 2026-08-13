@@ -493,6 +493,14 @@ class KDAAttnBackend(MambaAttnBackendBase):
                         )
 
                 if core_attn_out is not None:
+                    if self._fused_override_notice is not None:
+                        rank0_log(
+                            "K3 AITER fused KDA decode active: f_b projection, "
+                            "conv update, recurrence, and gated RMSNorm run in one "
+                            "gfx950 kernel; the configured Triton dispatcher is "
+                            "fallback-only."
+                        )
+                        self._fused_override_notice = None
                     layer._k3_onorm_consumed = True
                     self._track_mamba_state_decode(
                         forward_batch,
