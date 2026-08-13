@@ -638,6 +638,14 @@ class Envs:
     # Enable dual-stream MoE (shared experts vs routed experts) on the
     # ROCm/AITER path. Requires GPU_MAX_HW_QUEUES>=5 to avoid HW-queue serialization.
     SGLANG_ROCM_USE_MULTI_STREAM = EnvBool(False)
+    # Fold the KDA [f_a|b] tail into the wide [q,k,v,g] projection so the whole
+    # in-proj is one GEMM. Decode is bandwidth bound there, so the 144 extra
+    # output columns ride along nearly free: on gfx950 at H=7168/TP8 the fused
+    # GEMM is 0.55-0.73x the split at M<=64 and 0.83-0.97x through M=256, past
+    # which the untuned N=6288 config costs more than the launch it saves.
+    # NVIDIA keeps the split at every M (see the fused_qkvg_proj comment).
+    SGLANG_ROCM_K3_FUSE_KDA_INPROJ = EnvBool(True)
+    SGLANG_ROCM_K3_FUSE_KDA_INPROJ_MAX_TOKENS = EnvInt(256)
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("tilelang")
 
     # MPS (Apple Silicon)
