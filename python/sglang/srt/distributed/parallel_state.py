@@ -812,6 +812,45 @@ class GroupCoordinator:
         )
         return fused_outputs
 
+    def fused_allreduce_partial_rmsnorm(
+        self,
+        input_: torch.Tensor,
+        weight_: torch.Tensor,
+        norm_rows: int,
+        eps: float,
+    ) -> Optional[torch.Tensor]:
+        """K3 packed collective: all-reduce all rows, normalize a prefix."""
+        ca_comm = self.ca_comm
+        if (
+            ca_comm is None
+            or getattr(ca_comm, "disabled", True)
+            or not hasattr(ca_comm, "custom_fused_ar_partial_rms")
+        ):
+            return None
+        if (
+            input_.ndim != 2
+            or not input_.is_contiguous()
+            or input_.dtype != torch.bfloat16
+            or weight_.dtype != input_.dtype
+            or weight_.numel() != input_.shape[1]
+            or not (0 <= norm_rows <= input_.shape[0])
+        ):
+            return None
+        total_bytes = input_.numel() * input_.element_size()
+        if envs.SGLANG_USE_1STAGE_ALLREDUCE.is_set():
+            use_1stage = envs.SGLANG_USE_1STAGE_ALLREDUCE.get()
+        else:
+            use_1stage = (
+                total_bytes
+                <= envs.SGLANG_ROCM_K3_AR_NORM_1STAGE_MAX_BYTES.get()
+            )
+        try:
+            return ca_comm.custom_fused_ar_partial_rms(
+                input_, weight_, norm_rows, eps, use_1stage
+            )
+        except Exception:
+            return None
+
     def fused_allreduce_rmsnorm_quant_per_group(
         self,
         input_: torch.Tensor,

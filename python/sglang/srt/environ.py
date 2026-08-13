@@ -658,6 +658,11 @@ class Envs:
     # MLA stack, 8K/1K serving improved throughput/GPU by 0.13%-0.16% at
     # concurrency 2/8/32, and full GSM8K held (0.9651 vs 0.9629 control).
     SGLANG_ROCM_K3_KDA_O_PROJ_FP8 = EnvBool(True)
+    # K3-specific packed MoE collective: all-reduce [latent|shared], RMSNorm
+    # only the latent row prefix. This is not the generic K2.5 residual fusion.
+    SGLANG_ROCM_K3_AR_NORM = EnvBool(False)
+    SGLANG_ROCM_K3_AR_NORM_1STAGE_MAX_BYTES = EnvInt(512 * 1024)
+    SGLANG_ROCM_K3_AR_NORM_MAX_TOKENS = EnvInt(2)
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("tilelang")
 
     # MPS (Apple Silicon)
