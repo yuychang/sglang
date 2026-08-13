@@ -654,11 +654,9 @@ class Envs:
     # gemm_a8w8_bpreshuffle) instead of bf16, quantizing the weight once after
     # load. The gated output RMSNorm then emits (fp8, scale) directly, so the
     # activation is written once instead of three times -- this is what ATOM's
-    # recipe does via `--online_quant_config ptpc_fp8`. It quantizes a layer the
-    # K3 checkpoint ships in bf16, so it was validated before being turned on:
-    # gsm8k n=400 scores 0.9850 with it and 0.9825 without (SEM 0.66pp), and it
-    # is worth 0.7-1.7% output throughput and 1.4-1.8% ITL at ISL 8192 /
-    # OSL 1024 / TP 8 across concurrency 2..32.
+    # recipe does via `--online_quant_config ptpc_fp8`. On the accurate split
+    # MLA stack, 8K/1K serving improved throughput/GPU by 0.13%-0.16% at
+    # concurrency 2/8/32, and full GSM8K held (0.9651 vs 0.9629 control).
     SGLANG_ROCM_K3_KDA_O_PROJ_FP8 = EnvBool(True)
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("tilelang")
 
