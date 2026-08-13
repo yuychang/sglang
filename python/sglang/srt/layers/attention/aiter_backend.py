@@ -969,9 +969,11 @@ class AiterAttnBackend(AttentionBackend):
             layer.scaling,
             use_2d_view=False,
             kv_scale=kv_scale,
-            min_kv_seq_len=gluon_mla_min_kv_seq_len(
-                bs, num_heads, self.max_context_len
-            ),
+            # Pin one split. Sizing from max_context_len creates empty splits
+            # for short live sequences; bh16bn128's stage-2 reduction does not
+            # preserve model accuracy in that regime. One split is graph-stable
+            # and correct for every live sequence length.
+            min_kv_seq_len=1,
         )
         return out
 
