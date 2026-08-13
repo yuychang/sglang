@@ -654,10 +654,10 @@ class Envs:
     # gemm_a8w8_bpreshuffle) instead of bf16, quantizing the weight once after
     # load. The gated output RMSNorm then emits (fp8, scale) directly, so the
     # activation is written once instead of three times -- this is what ATOM's
-    # recipe does via `--online_quant_config ptpc_fp8`. On the accurate split
-    # MLA stack, 8K/1K serving improved throughput/GPU by 0.13%-0.16% at
-    # concurrency 2/8/32, and full GSM8K held (0.9651 vs 0.9629 control).
-    SGLANG_ROCM_K3_KDA_O_PROJ_FP8 = EnvBool(True)
+    # recipe does via `--online_quant_config ptpc_fp8`. Full GSM8K held
+    # (0.9651 vs 0.9629 control), but the complete 1K/8K serving ladder was
+    # mixed and regressed concurrency 4 at both ISLs, so keep it opt-in.
+    SGLANG_ROCM_K3_KDA_O_PROJ_FP8 = EnvBool(False)
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("tilelang")
 
     # MPS (Apple Silicon)
