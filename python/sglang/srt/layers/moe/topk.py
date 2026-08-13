@@ -1593,9 +1593,12 @@ def biased_grouped_topk_gpu(
         scaling = routed_scaling_factor if routed_scaling_factor is not None else 1.0
 
         from sglang.kernels.ops.moe import moe_route_radix4
+        from sglang.srt.environ import envs
 
+        # Gated on the routing shape. Kimi-K3 (896 experts, top-16, ungrouped)
+        # is the only config covered for now; anything else falls back to aiter.
         if (
-            moe_route_radix4.enabled()
+            envs.SGLANG_MOE_ROUTE_RADIX4.get()
             and moe_route_radix4.available()
             and moe_route_radix4.covered(
                 gating_output, correction_bias, topk, num_expert_group, topk_group

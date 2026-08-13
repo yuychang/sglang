@@ -660,6 +660,23 @@ class Envs:
     # is worth 0.7-1.7% output throughput and 1.4-1.8% ITL at ISL 8192 /
     # OSL 1024 / TP 8 across concurrency 2..32.
     SGLANG_ROCM_K3_KDA_O_PROJ_FP8 = EnvBool(True)
+    # Selective K3 ptpc_fp8 for dense linears that compose with the model's
+    # packed KDA and MoE fusions. Explicit opt-in: this must not change RMSNorm
+    # dispatch or model memory for unrelated/default ROCm runs.
+    SGLANG_ROCM_K3_PTPC_FP8 = EnvBool(False)
+    # K3-specific packed MoE collective: all-reduce [latent|shared], RMSNorm
+    # only the latent row prefix. This is not the generic K2.5 residual fusion.
+    SGLANG_ROCM_K3_AR_NORM = EnvBool(False)
+    SGLANG_ROCM_K3_AR_NORM_1STAGE_MAX_BYTES = EnvInt(512 * 1024)
+    SGLANG_ROCM_K3_AR_NORM_MAX_TOKENS = EnvInt(2)
+    # AITER MoE sorting backend (FlyDSL). Read by aiter at runtime.
+    AITER_USE_FLYDSL_MOE_SORTING = EnvBool(True)
+    # Lossy 4-bit intermediate transform in aiter fused MoE (shape-gated in aiter).
+    AITER_MXFP4_INTERMEDIATE = EnvBool(True)
+    # Quick all-reduce quantization regime for large TP collectives (ROCm).
+    ROCM_QUICK_REDUCE_QUANTIZATION = EnvStr("FP")
+    # PR #34490: Radix-4 MoE top-k router for Kimi-K3 (896 experts, top-16).
+    SGLANG_MOE_ROUTE_RADIX4 = EnvBool(True)
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("tilelang")
 
     # MPS (Apple Silicon)
