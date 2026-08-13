@@ -655,11 +655,10 @@ class Envs:
     # load. The gated output RMSNorm then emits (fp8, scale) directly, so the
     # activation is written once instead of three times -- this is what ATOM's
     # recipe does via `--online_quant_config ptpc_fp8`. It quantizes a layer the
-    # K3 checkpoint ships in bf16, so it was validated before being turned on:
-    # gsm8k n=400 scores 0.9850 with it and 0.9825 without (SEM 0.66pp), and it
-    # is worth 0.7-1.7% output throughput and 1.4-1.8% ITL at ISL 8192 /
-    # OSL 1024 / TP 8 across concurrency 2..32.
-    SGLANG_ROCM_K3_KDA_O_PROJ_FP8 = EnvBool(True)
+    # K3 checkpoint ships in bf16. Keep it opt-in: on the requested K3 Gluon MLA
+    # stack, two alternating static-decode A/Bs improved batch 1 by ~0.7% but
+    # regressed the batch 2/8/32 medians by 0.1%/0.6%/1.4%.
+    SGLANG_ROCM_K3_KDA_O_PROJ_FP8 = EnvBool(False)
     # K3-specific packed MoE collective: all-reduce [latent|shared], RMSNorm
     # only the latent row prefix. This is not the generic K2.5 residual fusion.
     SGLANG_ROCM_K3_AR_NORM = EnvBool(False)
