@@ -1,0 +1,4 @@
+{
+  "name": "SGLang (CPU dev)",
+  "install": "bash .cursor/install.sh"
+}
