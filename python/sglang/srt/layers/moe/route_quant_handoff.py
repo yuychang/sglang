@@ -45,9 +45,6 @@ class _Handoff(msgspec.Struct):
 
 
 _handoff = _Handoff()
-_miss_logged = False
-_hit_logged = False
-_take_miss_logged = False
 
 
 def stage(x: torch.Tensor) -> None:
@@ -78,41 +75,16 @@ def try_route_quant_fused(
     """Fused replacement for the ungrouped-sigmoid moe_fused_gate call when a
     staged request covers it. Returns (weights, ids) on a hit, None otherwise
     (caller falls through to the unfused router)."""
-    global _hit_logged, _miss_logged
     x = _handoff.request_x
     if x is None or num_fused_shared_experts != 0:
-        if x is not None and not _miss_logged:
-            import logging
-
-            _miss_logged = True
-            logging.getLogger(__name__).info(
-                "K3 route-quant handoff miss: num_fused_shared_experts=%d",
-                num_fused_shared_experts,
-            )
         return None
 
     from sglang.kernels.ops.moe import moe_route_quant_fused
 
-    covered = moe_route_quant_fused.covered(gating_output, correction_bias, topk, x)
-    available = moe_route_quant_fused.available() if covered else False
-    if not covered or not available:
-        if not _miss_logged:
-            import logging
-
-            _miss_logged = True
-            logging.getLogger(__name__).info(
-                "K3 route-quant handoff miss: covered=%s available=%s "
-                "scores=%s/%s/stride%s bias=%s x=%s/%s/stride%s",
-                covered,
-                available,
-                tuple(gating_output.shape),
-                gating_output.dtype,
-                gating_output.stride(),
-                correction_bias.dtype,
-                tuple(x.shape),
-                x.dtype,
-                x.stride(),
-            )
+    if (
+        not moe_route_quant_fused.covered(gating_output, correction_bias, topk, x)
+        or not moe_route_quant_fused.available()
+    ):
         return None
 
     weights, ids, packed, x_q, x_s = moe_route_quant_fused.route_quant_fused(
@@ -131,13 +103,6 @@ def try_route_quant_fused(
     _handoff.packed = packed
     _handoff.x_q = x_q
     _handoff.x_s = x_s
-    if not _hit_logged:
-        import logging
-
-        _hit_logged = True
-        logging.getLogger(__name__).info(
-            "K3 route-quant handoff produced fused outputs for M=%d", x.shape[0]
-        )
     return weights, ids
 
 
@@ -147,7 +112,6 @@ def take(
     """Consume the published (packed_topk, x_q, x_s int32) for these exact
     activation rows, or None. Storage identity is verified so a re-viewed or
     copied tensor simply misses."""
-    global _take_miss_logged
     produced = _handoff.produced_x
     if produced is None:
         return None
@@ -157,20 +121,6 @@ def take(
         or produced.dtype != x.dtype
         or produced.stride() != x.stride()
     ):
-        if not _take_miss_logged:
-            import logging
-
-            _take_miss_logged = True
-            logging.getLogger(__name__).info(
-                "K3 route-quant handoff take miss: produced=%s/%s/stride%s, "
-                "runner=%s/%s/stride%s",
-                tuple(produced.shape),
-                produced.dtype,
-                produced.stride(),
-                tuple(x.shape),
-                x.dtype,
-                x.stride(),
-            )
         return None
     out = (_handoff.packed, _handoff.x_q, _handoff.x_s)
     _handoff.produced_x = None
