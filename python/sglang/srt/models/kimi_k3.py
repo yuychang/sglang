@@ -3615,6 +3615,28 @@ class KimiK3LinearForCausalLM(nn.Module):
                         if getattr(o_proj, "weight_scale", None) is not None
                         else None
                     )
+                elif isinstance(layer.self_attn, KimiK3MLAAttention) and (
+                    getattr(
+                        layer.self_attn.fused_qkv_a_proj_with_mqa,
+                        "_k3_ptpc_per_token",
+                        False,
+                    )
+                    and getattr(
+                        getattr(layer.self_attn, "g_proj", None),
+                        "_k3_ptpc_per_token",
+                        False,
+                    )
+                ):
+                    # The ROCm AttnRes epilogue already owns input_layernorm;
+                    # emit the shared FP8 activation and scale from that same
+                    # register-resident result.
+                    layer.input_layernorm._k3_ptpc_emit_fp8 = True
+                if isinstance(layer.mlp, KimiK3MLP) and getattr(
+                    layer.mlp.gate_up_proj, "_k3_ptpc_per_token", False
+                ):
+                    # Dense layers have one consumer, so post-attention norm can
+                    # likewise hand gate_up_proj a fused (fp8, scale) tuple.
+                    layer.post_attention_layernorm._k3_ptpc_emit_fp8 = True
             rank0_log(
                 f"Kimi-K3 ptpc_fp8: quantized {n_quant} MLA/KDA-output/dense-MLP "
                 "linears; kept KDA input, router, routed experts, shared experts, "

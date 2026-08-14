@@ -270,7 +270,7 @@ def _aggregate_hip(
     score_norm: RMSNorm,
     out_norm: Optional[RMSNorm],
     write_bank_row: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor | tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
     """Single ROCm Triton kernel: the bank stays in registers so scoring and
     mixing share one read, and the pending residual add, the bank snapshot and
     the output RMSNorm all fold into the same launch. out_norm None returns the
@@ -279,13 +279,28 @@ def _aggregate_hip(
 
     cw = get_cw(score_proj, score_norm)
     prefix = prefix_sum if addend is None else torch.empty_like(prefix_sum)
-    out = torch.empty_like(prefix_sum)
+    quantize_out = bool(
+        out_norm is not None and getattr(out_norm, "_k3_ptpc_emit_fp8", False)
+    )
+    if quantize_out:
+        from sglang.kernels.ops.kimi_k3.ptpc_fp8 import k3_ptpc_fp8_dtype
+
+        out = torch.empty_like(prefix_sum, dtype=k3_ptpc_fp8_dtype())
+        out_scale = torch.empty(
+            (prefix_sum.shape[0], 1),
+            dtype=torch.float32,
+            device=prefix_sum.device,
+        )
+    else:
+        out = torch.empty_like(prefix_sum)
+        out_scale = None
     attn_res_hip(
         prefix_sum,
         bank,
         cw,
         out_norm.weight if out_norm is not None else None,
         out,
+        out_scale,
         nvb,
         score_norm.variance_epsilon,
         out_norm.variance_epsilon if out_norm is not None else 0.0,
@@ -293,7 +308,8 @@ def _aggregate_hip(
         prefix_out=prefix,
         write_prefix=write_bank_row,
     )
-    return out, prefix
+    result = (out, out_scale) if out_scale is not None else out
+    return result, prefix
 
 
 def aggregate_stream_torch(
@@ -473,6 +489,19 @@ class AttnResidual:
             assert prefix_sum is None
             if write:
                 self.write(hidden_states, rows)
+            if getattr(out_norm, "_k3_ptpc_emit_fp8", False):
+                from sglang.kernels.ops.kimi_k3.rmsnorm_fp8_quant import (
+                    rmsnorm_fp8_per_token,
+                )
+
+                return (
+                    rmsnorm_fp8_per_token(
+                        hidden_states,
+                        out_norm.weight,
+                        out_norm.variance_epsilon,
+                    ),
+                    hidden_states,
+                )
             return out_norm(hidden_states), hidden_states
 
         # SP-MoE: the caller holds only its token shard; align the banked
