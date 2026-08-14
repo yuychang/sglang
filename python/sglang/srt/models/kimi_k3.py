@@ -1174,15 +1174,23 @@ class KimiK3MoE(nn.Module):
     @cached_property
     def _route_quant_fuse_eligible(self) -> bool:
         """Whether to stage routed_input for the fused route+pack+quant launch
-        (route_quant_handoff). Only the trtllm-gen SiTU runner with mxfp8
-        activations consumes the staged quant, so only that runner stages."""
+        (route_quant_handoff). ROCm AITER consumes the prequantized MXFP8 rows
+        and sorts only their E8M0 scales; the CUDA TRT-LLM path consumes the
+        same handoff directly."""
         from sglang.srt.layers.quantization.mxfp4 import Mxfp4MoEMethod
 
         method = self.experts.quant_method
+        if not isinstance(method, Mxfp4MoEMethod):
+            return False
+        runner = getattr(self.experts, "runner", None)
+        aiter_mxfp8 = (
+            runner is not None
+            and runner.runner_backend.is_aiter()
+            and os.environ.get("AITER_SITUV2_A8W4", "0") == "1"
+        )
+        trtllm_mxfp8 = method.use_flashinfer and not method.use_marlin
         return (
-            isinstance(method, Mxfp4MoEMethod)
-            and method.use_flashinfer
-            and not method.use_marlin
+            (aiter_mxfp8 or trtllm_mxfp8)
             and method.flashinfer_mxfp4_moe_precision == "default"
             and self.experts.moe_runner_config.activation == "situ"
         )
