@@ -27,7 +27,6 @@ class TestKimiK3PtpcFp8(CustomTestCase):
         assert mod.weight.shape[0] == 128
         assert mod._k3_ptpc_orig_out_features == 96
         assert isinstance(mod.quant_method, K3PtpcFp8LinearMethod)
-        assert not mod._k3_ptpc_global_row_scale
         # Padding rows encode exact zero with a benign scale.
         torch.testing.assert_close(
             mod.weight_scale[96:], torch.ones_like(mod.weight_scale[96:])
@@ -155,7 +154,7 @@ class TestKimiK3PtpcFp8(CustomTestCase):
         )
         self.assertTrue(torch.all(global_scale[:8] > local_scale[:8]))
 
-    def test_selective_layer_coverage_preserves_fusions(self):
+    def test_layer_coverage_preserves_moe_fusions(self):
         from sglang.kernels.ops.kimi_k3 import ptpc_fp8
 
         def named(name):
@@ -184,6 +183,30 @@ class TestKimiK3PtpcFp8(CustomTestCase):
             count = ptpc_fp8.quantize_k3_dense_linears_in_layer(layer)
         self.assertEqual(count, 1)
         self.assertEqual(calls, ["o"])
+
+        mla = types.SimpleNamespace(
+            fused_qkv_a_proj_with_mqa=named("qkv_a"),
+            q_b_proj=named("q_b"),
+            o_proj=named("mla_o"),
+            g_proj=named("g"),
+            use_output_gate=True,
+        )
+        dense = types.SimpleNamespace(
+            gate_up_proj=named("dense_up"),
+            down_proj=named("dense_down"),
+        )
+        layer = types.SimpleNamespace(self_attn=mla, mlp=dense)
+        calls = []
+        with mock.patch.object(
+            ptpc_fp8,
+            "quantize_linear_weight_ptpc",
+            side_effect=lambda module: calls.append(module.name) or True,
+        ):
+            count = ptpc_fp8.quantize_k3_dense_linears_in_layer(layer)
+        self.assertEqual(count, 6)
+        self.assertEqual(
+            calls, ["qkv_a", "q_b", "mla_o", "g", "dense_up", "dense_down"]
+        )
 
     def test_rmsnorm_fp8_per_token(self):
         from sglang.kernels.ops.kimi_k3.rmsnorm_fp8_quant import rmsnorm_fp8_per_token

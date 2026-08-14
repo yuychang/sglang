@@ -596,12 +596,6 @@ class RMSNorm(BaseFusedOp):
             if residual is not None:
                 return x, residual
             return x
-        # K3 marks only its own norms when PTPC loads AITER's quant JIT. That
-        # module currently lacks graph-stream rebinding for plain RMSNorm; keep
-        # the graph-safe native implementation without globally changing every
-        # ROCm model merely because a K3 environment flag is set.
-        if getattr(self, "_k3_force_native", False):
-            return self.forward_native(x, residual, post_residual_addition)
         if self.weight.data.dtype != x.dtype:
             # AITER's ROCm rmsnorm2d_fwd requires weight/activation dtypes to match;
             # FP32 weight + BF16 activation yields finite-but-corrupted output on gfx950.

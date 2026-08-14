@@ -3569,17 +3569,6 @@ class KimiK3LinearForCausalLM(nn.Module):
         if hasattr(self.model, "output_attn_res_proj"):
             _warm_cw(self.model.output_attn_res_proj, self.model.output_attn_res_norm)
 
-        # Scope the PTPC graph-safety workaround to K3's own norms. A process
-        # may serve/import other models, so a global environment-based RMSNorm
-        # dispatch override is not acceptable. Off by default: the norms that
-        # still reach RMSNorm.forward under PTPC are the ones feeding BF16
-        # consumers, i.e. exactly the ones a non-PTPC server already runs on the
-        # AITER kernels under the same graph capture.
-        if _k3_ptpc_fp8_enabled() and envs.SGLANG_ROCM_K3_PTPC_NATIVE_NORM.get():
-            for module in self.modules():
-                if isinstance(module, RMSNorm):
-                    module._k3_force_native = True
-
         # Post-load: merge horizontally-fused decode weights on bf16, then
         # online-quantize only linears that do not invalidate those merges.
         for layer in self.model.layers:
@@ -3627,8 +3616,9 @@ class KimiK3LinearForCausalLM(nn.Module):
                         else None
                     )
             rank0_log(
-                f"Kimi-K3 selective ptpc_fp8: quantized {n_quant} dense linears; "
-                "kept KDA input, router, and merged MoE-front weights in BF16."
+                f"Kimi-K3 ptpc_fp8: quantized {n_quant} MLA/KDA-output/dense-MLP "
+                "linears; kept KDA input, router, routed experts, shared experts, "
+                "and merged MoE-front weights in their native formats."
             )
 
         for layer in self.model.layers:
