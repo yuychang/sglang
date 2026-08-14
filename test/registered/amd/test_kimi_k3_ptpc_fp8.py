@@ -149,14 +149,9 @@ class TestKimiK3PtpcFp8(CustomTestCase):
         )
         expected_q, expected_scale = rmsnorm_fp8_per_token(q, qw, 1e-6)
         expected_kv = F.rms_norm(kv.float(), (512,), kvw.float(), 1e-6)
+        assert torch.equal(actual_q[0], expected_q)
         torch.testing.assert_close(
             actual_q[1], expected_scale, rtol=1e-6, atol=1e-8
-        )
-        torch.testing.assert_close(
-            actual_q[0].float() * actual_q[1],
-            expected_q.float() * expected_scale,
-            rtol=0.08,
-            atol=0.002,
         )
         torch.testing.assert_close(
             actual_kv.float(), expected_kv, rtol=0.01, atol=0.01
