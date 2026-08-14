@@ -1157,11 +1157,11 @@ class KimiK3MoE(nn.Module):
         runner backend is the same."""
         from sglang.srt.layers.quantization.mxfp4 import Mxfp4MoEMethod
 
+        method = self.experts.quant_method
         runner = getattr(method, "runner", None)
         if runner is not None and runner.runner_backend.is_aiter():
             return False
 
-        method = self.experts.quant_method
         return not (
             isinstance(method, Mxfp4MoEMethod)
             and method.use_flashinfer
@@ -1182,7 +1182,7 @@ class KimiK3MoE(nn.Module):
         method = self.experts.quant_method
         if not isinstance(method, Mxfp4MoEMethod):
             return False
-        runner = getattr(self.experts, "runner", None)
+        runner = getattr(method, "runner", None)
         aiter_mxfp8 = (
             runner is not None
             and runner.runner_backend.is_aiter()
