@@ -420,6 +420,7 @@ def _add3(
 # One-shot log guard: proves the merged front is live (see _ep_front).
 _EP_FRONT_LOGGED = False
 _ROCM_PARTIAL_AR_NORM_LOGGED = False
+_ROCM_DUAL_STREAM_MOE_LOGGED = False
 
 
 def _o_proj_takes_output(o_proj: RowParallelLinear) -> bool:
@@ -809,6 +810,23 @@ class KimiK3MoE(nn.Module):
             and get_moe_a2a_backend().is_none()
             and self.shared_experts.down_proj.weight.dtype
             in (torch.bfloat16, torch.float16)
+        )
+
+    def _use_rocm_dual_stream_moe(self, num_tokens: int) -> bool:
+        """Decode-only shared-vs-routed overlap on the ROCm fused-front path.
+
+        Mirrors ATOM's dual_stream_moe_forward: the shared-expert branch rides
+        the persistent alt_stream under the routed-expert branch. Gated to
+        decode sizes so prefill (already CU-saturated) stays single-stream.
+        Requires SGLANG_ROCM_USE_MULTI_STREAM so the model builds the stream
+        pool; k3_ar_fusion's own dual-stream site stays exclusive (handled by
+        the `if k3_ar_fusion.enabled()` branch above this call).
+        """
+        return (
+            _is_hip
+            and self.alt_stream is not None
+            and self.shared_experts is not None
+            and 0 < num_tokens <= envs.SGLANG_ROCM_K3_DUAL_STREAM_MOE_MAX_TOKENS.get()
         )
 
     @cached_property
@@ -1447,8 +1465,36 @@ class KimiK3MoE(nn.Module):
                     prefix_sum,
                 )
         else:  # single collective over the flat [latent | shared] pair
-            self._forward_shared(gate_up, shared_output)
-            self._forward_routed(hidden_states, router_logits, routed_input, latent)
+            # ROCm dual-stream (ATOM pattern): at decode sizes the shared-expert
+            # branch under-utilizes the CUs while the routed AITER MoE is the
+            # long pole. Issue shared on the persistent alt_stream so it hides
+            # under routed; join before the packed [latent|shared] collective
+            # (both branches write disjoint slices of `buf`, so no communicator
+            # contention until the join). Prefill keeps single-stream — the
+            # GEMMs already saturate, and overlapping them only contends.
+            if self._use_rocm_dual_stream_moe(num_tokens):
+                global _ROCM_DUAL_STREAM_MOE_LOGGED
+                if not _ROCM_DUAL_STREAM_MOE_LOGGED:
+                    _ROCM_DUAL_STREAM_MOE_LOGGED = True
+                    logger.info(
+                        "K3 ROCm dual-stream MoE active "
+                        "(shared on alt_stream under routed; <=%d tokens)",
+                        envs.SGLANG_ROCM_K3_DUAL_STREAM_MOE_MAX_TOKENS.get(),
+                    )
+                current_stream = torch.cuda.current_stream()
+                self.alt_stream.wait_stream(current_stream)
+                with torch.cuda.stream(self.alt_stream):
+                    self._forward_shared(gate_up, shared_output)
+                self._forward_routed(
+                    hidden_states, router_logits, routed_input, latent
+                )
+                current_stream.wait_stream(self.alt_stream)
+                shared_output.record_stream(current_stream)
+            else:
+                self._forward_shared(gate_up, shared_output)
+                self._forward_routed(
+                    hidden_states, router_logits, routed_input, latent
+                )
             if self.fuse_ar_norm and k3_ar_fusion.enabled() and not use_latent_tail:
                 fused_norm = True
                 k3_ar_fusion.all_reduce_norm(
@@ -3059,8 +3105,16 @@ class KimiK3LinearModel(nn.Module):
         #   [2] MLA output-gate GEMM, overlaps the attention core
         # (The attn-res bank write no longer needs a stream: it is fused
         # into the agg1 fast kernel, see AttnResidual.forward(write=True).)
-        # Disable on HIP code path.
-        self.alt_streams = None if _is_hip else [torch.cuda.Stream() for _ in range(3)]
+        #
+        # On HIP the CUDA-only overlap sites (k3_ar_fusion multicast, the MLA
+        # gate GEMM path) do not apply, but the MoE dual-stream overlap (slot 0:
+        # shared-expert branch hidden under the routed-expert branch) does — it
+        # is the same win ATOM ships. Build the pool when the operator opts in
+        # with SGLANG_ROCM_USE_MULTI_STREAM=1.
+        _build_stream_pool = (not _is_hip) or envs.SGLANG_ROCM_USE_MULTI_STREAM.get()
+        self.alt_streams = (
+            [torch.cuda.Stream() for _ in range(3)] if _build_stream_pool else None
+        )
 
         self.layers, self.start_layer, self.end_layer = make_layers(
             config.num_hidden_layers,

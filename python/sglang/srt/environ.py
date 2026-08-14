@@ -636,8 +636,14 @@ class Envs:
     USE_ROCM_AITER_ROPE_BACKEND = EnvStr("0")
     SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK = EnvInt(4096)
     # Enable dual-stream MoE (shared experts vs routed experts) on the
-    # ROCm/AITER path. Requires GPU_MAX_HW_QUEUES>=5 to avoid HW-queue serialization.
+    # ROCm/AITER path.
     SGLANG_ROCM_USE_MULTI_STREAM = EnvBool(False)
+    # Decode-only gate for the K3 ROCm dual-stream MoE overlap: the shared-expert
+    # branch is issued on the side stream to hide under the routed-expert branch
+    # only when the batch has <= this many tokens. At larger (prefill) batches the
+    # GEMMs already saturate the CUs, so the overlap only adds contention; there
+    # single-stream is kept. Mirrors ATOM's ATOM_DUAL_STREAM_MOE_TOKEN_THRESHOLD.
+    SGLANG_ROCM_K3_DUAL_STREAM_MOE_MAX_TOKENS = EnvInt(1024)
     # Fold the KDA [f_a|b] tail into the wide [q,k,v,g] projection so the whole
     # in-proj is one GEMM (what ATOM does). The N=6288 shape has no tuned aiter
     # config and the 6144 one does, but at decode the projection is bandwidth
