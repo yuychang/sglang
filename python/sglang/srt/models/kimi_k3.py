@@ -3605,7 +3605,13 @@ class KimiK3LinearForCausalLM(nn.Module):
                 # gate-logit dtype instead, so match that one to the same end.
                 bias = layer.mlp.gate.e_score_correction_bias
                 _bias_dtype = (
-                    layer.mlp.gate.weight.dtype if _use_aiter else torch.float32
+                    torch.float32
+                    if envs.SGLANG_MOE_ROUTE_RADIX4.get()
+                    else (
+                        layer.mlp.gate.weight.dtype
+                        if _use_aiter
+                        else torch.float32
+                    )
                 )
                 if bias.dtype != _bias_dtype:
                     bias.data = bias.data.to(_bias_dtype)

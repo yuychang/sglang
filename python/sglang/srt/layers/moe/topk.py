@@ -1608,24 +1608,29 @@ def biased_grouped_topk_gpu(
         if fused is not None:
             return fused
 
+        bias = (
+            correction_bias
+            if correction_bias.dtype == gating_output.dtype
+            else correction_bias.to(dtype=gating_output.dtype)
+        )
         # Gated on the routing shape. Kimi-K3 (896 experts, top-16, ungrouped)
         # is the only config covered for now; anything else falls back to aiter.
         if (
             envs.SGLANG_MOE_ROUTE_RADIX4.get()
             and moe_route_radix4.available()
             and moe_route_radix4.covered(
-                gating_output, correction_bias, topk, num_expert_group, topk_group
+                gating_output, bias, topk, num_expert_group, topk_group
             )
         ):
             return moe_route_radix4.route_radix4(
-                gating_output, correction_bias, topk, renormalize, scaling
+                gating_output, bias, topk, renormalize, scaling
             )
 
         topk_weights = torch.empty((token, topk), dtype=torch.float32, device=device)
         topk_ids = torch.empty((token, topk), dtype=torch.int32, device=device)
         aiter_biased_grouped_topk(
             gating_output,
-            correction_bias,
+            bias,
             topk_weights,
             topk_ids,
             num_expert_group,
