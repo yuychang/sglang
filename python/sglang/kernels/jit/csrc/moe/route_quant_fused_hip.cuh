@@ -69,7 +69,7 @@ __global__ __launch_bounds__(kRouteQuantHipBlock) void route_quant_fused_hip_ker
   if (blockIdx.x < params.M) {
     route_radix4_block<
         bf16_t,
-        fp32_t,
+        bf16_t,
         kRadix4NumExperts,
         kRadix4TopK,
         kRadix4Block>(params.route, static_cast<int>(blockIdx.x));
@@ -103,7 +103,7 @@ struct RouteQuantFusedHipKernel {
         .with_strides({-1, 1})
         .verify(scores);
     TensorMatcher({kRadix4NumExperts})
-        .with_dtype<fp32_t>()
+        .with_dtype<bf16_t>()
         .with_device(device_)
         .verify(bias);
     TensorMatcher({M_, kRadix4TopK})

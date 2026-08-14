@@ -82,8 +82,14 @@ def covered(
 ) -> bool:
     """route_radix coverage plus the quant half: [M<=64, 3584] bf16 rows with
     32B-aligned starts (base and stride), same token count as the scores."""
+    if torch.version.hip is not None:
+        from sglang.kernels.ops.moe import moe_route_radix4
+
+        route_covered = moe_route_radix4.covered(scores, bias, topk, 1, 1)
+    else:
+        route_covered = moe_route_radix.covered(scores, bias, topk)
     return (
-        moe_route_radix.covered(scores, bias, topk)
+        route_covered
         and (
             torch.version.hip is None
             or (scores.dtype == torch.bfloat16 and x.dtype == torch.bfloat16)

@@ -2165,12 +2165,7 @@ def select_experts(
     packed_topk = None
 
     if _use_aiter and use_grouped_topk and correction_bias is not None:
-        from sglang.srt.environ import envs
-
-        if not envs.SGLANG_MOE_ROUTE_RADIX4.get():
-            correction_bias = topk_config.correction_bias_for_dtype(
-                router_logits.dtype
-            )
+        correction_bias = topk_config.correction_bias_for_dtype(router_logits.dtype)
 
     (
         router_logits,
