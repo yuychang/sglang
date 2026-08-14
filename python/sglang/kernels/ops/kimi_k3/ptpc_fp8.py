@@ -47,18 +47,26 @@ def _quantize_weight_rows(
     *,
     pad_n: int,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """PTPC weight quantization before backend-specific sharding/shuffling."""
+    """ATOM-compatible PTPC weight quantization.
+
+    Quantize the real rows with AITER's canonical per-token/per-output-channel
+    kernel, then append exact-zero output rows with scale one. ATOM follows this
+    order in ``LinearBase.process_weights_after_loading``; using a handwritten
+    float32 divide differed at FP8 rounding ties and made SGLang's online format
+    subtly different from the validated ATOM recipe.
+    """
+    from aiter import QuantType, get_hip_quant
+
     orig_n = weight.shape[0]
-    fp8_max = torch.finfo(fp8_dtype).max
-    wf = weight.float()
+    qw, scale = get_hip_quant(QuantType.per_Token)(
+        weight.contiguous(), quant_dtype=fp8_dtype
+    )
     if pad_n > orig_n:
-        wf = torch.nn.functional.pad(wf, (0, 0, 0, pad_n - orig_n))
-    amax = wf.abs().amax(dim=1, keepdim=True)
-    # A zero row (including output padding) is represented exactly. A scale of
-    # one avoids division by zero and matches ATOM's padded-scale convention.
-    scale = torch.where(amax > 0, amax / fp8_max, torch.ones_like(amax))
-    qw = (wf / scale).clamp(-fp8_max, fp8_max).to(fp8_dtype)
-    return qw, scale
+        qw = torch.nn.functional.pad(qw, (0, 0, 0, pad_n - orig_n))
+        scale = torch.cat(
+            [scale, scale.new_ones((pad_n - orig_n, *scale.shape[1:]))], dim=0
+        )
+    return qw.contiguous(), scale.contiguous()
 
 
 def _linear_has_plain_bf16_weight(module: torch.nn.Module) -> bool:
@@ -103,16 +111,30 @@ def quantize_linear_weight_ptpc(
 
     pad_n = _round_up(orig_n, n_tile)
     row_parallel = _is_row_parallel_weight(module, w)
-    # A row-parallel weight is K-sharded and each rank's partial product is
-    # summed by the output all-reduce, so a per-rank row scale reconstructs the
-    # same sum: rank r contributes s_r * (Q_r @ x_r) == W_r @ x_r whatever s_r
-    # is. Gathering the full row first only buys agreement with ATOM's offline
-    # scale, and it costs a load-time collective plus a rank-indexing contract:
-    # the gather runs on the global TP group while the narrow uses the module's
-    # own tp_rank, which for MLA is the *attention* TP rank. Quantize the local
-    # shard instead -- no collective, no cross-group assumption, and a tighter
-    # scale because the amax is taken over this rank's K only.
-    qw, scale = _quantize_weight_rows(w, fp8_dtype, pad_n=pad_n)
+    if row_parallel:
+        # Match ATOM: PTPC's scale is max(abs(full logical output row)), not the
+        # max of each K shard. Gather once at load, quantize once, then return
+        # this rank's K shard while retaining the replicated full-row scale.
+        #
+        # K3 may run attention TP inside a larger global world under DP
+        # attention. Select the group whose size matches the layer contract
+        # instead of assuming the global TP group.
+        from sglang.srt.distributed.parallel_state import get_tp_group
+        from sglang.srt.runtime_context import get_parallel
+
+        parallel = get_parallel()
+        group = (
+            parallel.attn_tp_group
+            if parallel.attn_tp_group.world_size == int(getattr(module, "tp_size", 1))
+            else get_tp_group()
+        )
+        full_w = group.all_gather(w.contiguous(), dim=1)
+        qw, scale = _quantize_weight_rows(full_w, fp8_dtype, pad_n=pad_n)
+        tp_rank = int(getattr(module, "tp_rank", group.rank_in_group))
+        qw = qw.narrow(1, tp_rank * k, k).contiguous()
+        del full_w
+    else:
+        qw, scale = _quantize_weight_rows(w, fp8_dtype, pad_n=pad_n)
 
     from aiter.ops.shuffle import shuffle_weight
 
@@ -120,7 +142,7 @@ def quantize_linear_weight_ptpc(
         shuffle_weight(qw, (16, 16)), requires_grad=False
     )
     module.weight_scale = torch.nn.Parameter(scale, requires_grad=False)
-    module._k3_ptpc_row_sharded_scale = row_parallel  # type: ignore[attr-defined]
+    module._k3_ptpc_global_row_scale = row_parallel  # type: ignore[attr-defined]
     if pad_n != orig_n:
         module._k3_ptpc_orig_out_features = orig_n  # type: ignore[attr-defined]
     module.quant_method = K3PtpcFp8LinearMethod()

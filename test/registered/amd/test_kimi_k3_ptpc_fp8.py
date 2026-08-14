@@ -27,7 +27,7 @@ class TestKimiK3PtpcFp8(CustomTestCase):
         assert mod.weight.shape[0] == 128
         assert mod._k3_ptpc_orig_out_features == 96
         assert isinstance(mod.quant_method, K3PtpcFp8LinearMethod)
-        assert not mod._k3_ptpc_row_sharded_scale
+        assert not mod._k3_ptpc_global_row_scale
         # Padding rows encode exact zero with a benign scale.
         torch.testing.assert_close(
             mod.weight_scale[96:], torch.ones_like(mod.weight_scale[96:])
@@ -55,6 +55,27 @@ class TestKimiK3PtpcFp8(CustomTestCase):
         assert out.shape == (8, 2112)
         assert out.is_contiguous(), "padded PTPC output must be repacked"
         assert out.stride(0) == 2112
+
+    def test_weight_quant_matches_aiter_per_token(self):
+        """PTPC weights must be byte-identical to ATOM's AITER quantizer."""
+        from aiter import QuantType, get_hip_quant
+
+        from sglang.kernels.ops.kimi_k3.ptpc_fp8 import (
+            _quantize_weight_rows,
+            k3_ptpc_fp8_dtype,
+        )
+
+        torch.manual_seed(19)
+        weight = (
+            torch.randn(96, 7168, device="cuda", dtype=torch.bfloat16) * 0.02
+        )
+        dtype = k3_ptpc_fp8_dtype()
+        expected_q, expected_scale = get_hip_quant(QuantType.per_Token)(
+            weight, quant_dtype=dtype
+        )
+        actual_q, actual_scale = _quantize_weight_rows(weight, dtype, pad_n=96)
+        assert torch.equal(actual_q, expected_q)
+        assert torch.equal(actual_scale, expected_scale)
 
     def test_ptpc_linear_bf16_and_prequantized_inputs(self):
         import aiter
