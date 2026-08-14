@@ -43,6 +43,13 @@ _MAX_TOKENS = 64
 
 @cache_once
 def _jit_module() -> Module:
+    if torch.version.hip is not None:
+        return load_jit(
+            "moe_route_quant_fused_hip",
+            cuda_files=["moe/route_quant_fused_hip.cuh"],
+            cuda_wrappers=[("run", "RouteQuantFusedHipKernel::run")],
+            extra_cuda_cflags=["-O3"],
+        )
     args = make_cpp_args(is_arch_support_pdl())
     return load_jit(
         "moe_route_quant_fused",
@@ -77,6 +84,10 @@ def covered(
     32B-aligned starts (base and stride), same token count as the scores."""
     return (
         moe_route_radix.covered(scores, bias, topk)
+        and (
+            torch.version.hip is None
+            or (scores.dtype == torch.bfloat16 and x.dtype == torch.bfloat16)
+        )
         and x.dim() == 2
         and x.shape[0] == scores.shape[0]
         and 0 < x.shape[0] <= _MAX_TOKENS

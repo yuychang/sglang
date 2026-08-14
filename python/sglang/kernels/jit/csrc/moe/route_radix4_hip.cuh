@@ -102,8 +102,8 @@ SGL_DEVICE void wave_sum_dpp(uint32_t (&x)[N]) {
 
 }  // namespace radix4
 
-template <typename T, int EXPERTS, int TOPK, int BLOCK>
-__global__ __launch_bounds__(BLOCK) void route_radix4_kernel(__grid_constant__ const RouteRadix4Params params) {
+template <typename ScoreT, typename BiasT, int EXPERTS, int TOPK, int BLOCK>
+SGL_DEVICE void route_radix4_block(const RouteRadix4Params& params, int token) {
   constexpr int WAVE = static_cast<int>(kRadix4Wave);
   constexpr int NWAVE = BLOCK / WAVE;
   constexpr int VPT = (EXPERTS + BLOCK - 1) / BLOCK;
@@ -115,12 +115,13 @@ __global__ __launch_bounds__(BLOCK) void route_radix4_kernel(__grid_constant__ c
   static_assert(TOPK <= WAVE, "topk must fit in one lane-indexed row");
   static_assert(VPT <= 32, "alive mask is 32 bits");
 
-  const int token = blockIdx.x;
   const int tid = threadIdx.x;
   const int lane = tid % WAVE;
   const int wid = tid / WAVE;
-  const auto* srow = static_cast<const T*>(params.scores) + static_cast<size_t>(token) * params.stride_scores;
-  const auto* sbias = static_cast<const T*>(params.bias);
+  const auto* srow =
+      static_cast<const ScoreT*>(params.scores) +
+      static_cast<size_t>(token) * params.stride_scores;
+  const auto* sbias = static_cast<const BiasT*>(params.bias);
 
   float sig[VPT];
   uint32_t key[VPT];
@@ -338,6 +339,13 @@ __global__ __launch_bounds__(BLOCK) void route_radix4_kernel(__grid_constant__ c
     params.out_w[o] = s_w[tid] * scale;
     params.out_i[o] = s_id[tid];
   }
+}
+
+template <typename T, int EXPERTS, int TOPK, int BLOCK>
+__global__ __launch_bounds__(BLOCK) void route_radix4_kernel(
+    __grid_constant__ const RouteRadix4Params params) {
+  route_radix4_block<T, T, EXPERTS, TOPK, BLOCK>(
+      params, static_cast<int>(blockIdx.x));
 }
 
 struct RouteRadix4Kernel {
