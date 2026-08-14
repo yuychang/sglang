@@ -143,6 +143,11 @@ def quantize_linear_weight_ptpc(
     )
     module.weight_scale = torch.nn.Parameter(scale, requires_grad=False)
     module._k3_ptpc_global_row_scale = row_parallel  # type: ignore[attr-defined]
+    # Generic ROCm MLA has dtype-only FP8 shortcuts for 128-group blockscale
+    # weights. PTPC is per-output-channel and must not enter those paths: q_b
+    # would receive group-quantized activations, and o_proj would be quantized
+    # before K3's output gate. Keep the scheme explicit on the layer.
+    module._k3_ptpc_per_token = True  # type: ignore[attr-defined]
     if pad_n != orig_n:
         module._k3_ptpc_orig_out_features = orig_n  # type: ignore[attr-defined]
     module.quant_method = K3PtpcFp8LinearMethod()
