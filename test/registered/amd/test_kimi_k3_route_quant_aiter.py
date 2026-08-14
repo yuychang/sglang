@@ -71,8 +71,12 @@ class TestKimiK3RouteQuantAiter(CustomTestCase):
                 scale_type=dtypes.fp8_e8m0,
                 shuffle=False,
             )
-            self.assertTrue(torch.equal(x_q.view(torch.uint8), ref_q.view(torch.uint8)))
-            self.assertTrue(torch.equal(x_s.view(torch.uint8), ref_s.view(torch.uint8)))
+            self.assertTrue(
+                torch.equal(x_q.view(torch.uint8), ref_q.view(torch.uint8))
+            )
+            self.assertTrue(
+                torch.equal(x_s.view(torch.uint8), ref_s.view(torch.uint8))
+            )
 
             sorted_ids, _, _, num_valid_ids, _ = moe_sorting(
                 ids, weights, NUM_EXPERTS, HIDDEN, torch.bfloat16
