@@ -123,6 +123,40 @@ class TestKimiK3PtpcFp8(CustomTestCase):
             actual_scale, expected_scale, rtol=1e-6, atol=1e-8
         )
 
+    def test_padded_group_fuses_q_ptpc_and_kv_norm(self):
+        from aiter.ops.triton.quant.fused_fp8_quant import (
+            fused_rms_fp8_group_quant,
+        )
+
+        from sglang.kernels.ops.kimi_k3.rmsnorm_fp8_quant import (
+            rmsnorm_fp8_per_token,
+        )
+
+        torch.manual_seed(37)
+        q = torch.randn(8, 1536, device="cuda", dtype=torch.bfloat16)
+        kv = torch.randn(8, 512, device="cuda", dtype=torch.bfloat16)
+        qw = torch.randn(1536, device="cuda", dtype=torch.bfloat16)
+        kvw = torch.randn(512, device="cuda", dtype=torch.bfloat16)
+        actual_q, _, actual_kv, _ = fused_rms_fp8_group_quant(
+            q,
+            qw,
+            1e-6,
+            kv,
+            kvw,
+            1e-6,
+            group_size=2048,
+            dtype_quant=torch.float8_e4m3fn,
+        )
+        expected_q, expected_scale = rmsnorm_fp8_per_token(q, qw, 1e-6)
+        expected_kv = F.rms_norm(kv.float(), (512,), kvw.float(), 1e-6)
+        assert torch.equal(actual_q[0], expected_q)
+        torch.testing.assert_close(
+            actual_q[1], expected_scale, rtol=1e-6, atol=1e-8
+        )
+        torch.testing.assert_close(
+            actual_kv.float(), expected_kv, rtol=0.01, atol=0.01
+        )
+
     def test_ptpc_linear_bf16_and_prequantized_inputs(self):
         import aiter
 
