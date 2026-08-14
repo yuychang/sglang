@@ -10,6 +10,7 @@
 #include "route_radix4_hip.cuh"
 
 #include <sgl_kernel/deepseek_v4/fp8_utils.cuh>
+#include <hip/hip_fp8.h>
 
 namespace sglang {
 
@@ -48,7 +49,6 @@ SGL_DEVICE void quant_mxfp8_row(const RouteQuantHipParams& params, uint32_t toke
   amax = fmaxf(amax, 1.0e-10f);
 
   using deepseek_v4::fp8::cast_to_ue8m0;
-  using deepseek_v4::fp8::cvt_float_to_fp8_e4m3;
   using deepseek_v4::fp8::inv_scale_ue8m0;
   const int32_t exp = cast_to_ue8m0(amax * (1.0f / 448.0f));
   const bf16_t quant_scale = __float2bfloat16(inv_scale_ue8m0(exp));
@@ -60,7 +60,7 @@ SGL_DEVICE void quant_mxfp8_row(const RouteQuantHipParams& params, uint32_t toke
 #pragma unroll
   for (uint32_t i = 0; i < 16; ++i) {
     const bf16_t scaled = __hmul(in[begin + i], quant_scale);
-    out[begin + i] = cvt_float_to_fp8_e4m3(__bfloat162float(scaled));
+    out[begin + i] = __hip_fp8_e4m3(scaled).__x;
   }
 }
 
