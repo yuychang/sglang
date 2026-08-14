@@ -168,14 +168,24 @@ class AiterRunnerCore(MoeRunnerCore):
             if runner_input.a1_scale is not None
             else quant_info.a13_scale
         )
+        output_dtype = runner_input.output_dtype
+        if (
+            output_dtype is None
+            and runner_input.quant_type == AiterQuantType.PER_1X32
+            and runner_input.hidden_states.dtype == torch.float8_e4m3fn
+            and a1_scale is not None
+        ):
+            # Prequantized MXFP8 is only the stage1 input representation; K3's
+            # routed expert result and caller-owned latent buffer remain BF16.
+            output_dtype = torch.bfloat16
 
         extra: dict = {}
         if quant_info.fused_moe_kwargs:
             extra.update(quant_info.fused_moe_kwargs)
         if runner_input.num_local_tokens is not None:
             extra["num_local_tokens"] = runner_input.num_local_tokens
-        if runner_input.output_dtype is not None:
-            extra["dtype"] = runner_input.output_dtype
+        if output_dtype is not None:
+            extra["dtype"] = output_dtype
         if self.config.activation == "situ":
             from aiter.ops.flydsl.moe_common import GateMode
 
@@ -215,8 +225,8 @@ class AiterRunnerCore(MoeRunnerCore):
                     (runner_input.hidden_states.shape[0], quant_info.w2_weight.shape[1])
                 ),
                 (
-                    runner_input.output_dtype
-                    if runner_input.output_dtype is not None
+                    output_dtype
+                    if output_dtype is not None
                     else runner_input.hidden_states.dtype
                 ),
                 runner_input.hidden_states.device,

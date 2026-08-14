@@ -1717,22 +1717,42 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                 w13_weight.is_shuffled = True
                 w2_weight.is_shuffled = True
 
+            # K3's fused route launch may already have produced the exact MXFP8
+            # activation and unswizzled E8M0 scales consumed by AITER. Take it
+            # once and let AITER perform only its required sort/swizzle.
+            from sglang.srt.layers.moe import route_quant_handoff
+
+            prepared = route_quant_handoff.take(x)
+            if prepared is not None:
+                _, x_padded, a13_scale_packed = prepared
+                if self.hidden_pad != 0:
+                    raise RuntimeError(
+                        "K3 prequantized AITER handoff requires hidden_pad=0"
+                    )
+                from aiter import dtypes as aiter_dtypes
+
+                a13_scale = a13_scale_packed.view(
+                    aiter_dtypes.fp8_e8m0
+                ).reshape(x.shape[0], -1)
             # Skip the explicit pad if x already arrives at the padded
             # hidden_size (the upstream RMSNorm fused the pad into its
             # output — see RMSNorm.x_pad_to_multiple). Saves a separate
             # zero-pad kernel launch per layer.
-            if x.shape[-1] == self.hidden_size:
+            elif x.shape[-1] == self.hidden_size:
                 x_padded = x
+                a13_scale = None
             else:
                 x_padded = torch.nn.functional.pad(
                     x, (0, self.hidden_pad), mode="constant", value=0.0
                 )
+                a13_scale = None
             quant_info = AiterMoeQuantInfo(
                 w13_weight=w13_weight,
                 w2_weight=w2_weight,
                 quant_type=AiterQuantType.PER_1X32,
                 w13_scale=layer.w13_weight_scale,
                 w2_scale=layer.w2_weight_scale,
+                a13_scale=a13_scale,
                 b13=layer.w13_weight_bias if self.with_bias else None,
                 b2=layer.w2_weight_bias if self.with_bias else None,
                 expert_mask=layer.dispatcher.expert_mask_gpu,
