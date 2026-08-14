@@ -77,6 +77,30 @@ class TestKimiK3PtpcFp8(CustomTestCase):
         assert torch.equal(actual_q, expected_q)
         assert torch.equal(actual_scale, expected_scale)
 
+    def test_mla_input_quant_is_shared_by_both_ptpc_consumers(self):
+        from aiter import dtypes, per_token_quant_hip
+
+        from sglang.srt.models.kimi_k3 import KimiK3MLAAttention
+
+        attn = KimiK3MLAAttention.__new__(KimiK3MLAAttention)
+        torch.nn.Module.__init__(attn)
+        attn.use_output_gate = True
+        attn.fused_qkv_a_proj_with_mqa = types.SimpleNamespace(
+            _k3_ptpc_per_token=True
+        )
+        attn.g_proj = types.SimpleNamespace(_k3_ptpc_per_token=True)
+
+        torch.manual_seed(23)
+        x = torch.randn(8, 7168, device="cuda", dtype=torch.bfloat16)
+        actual = attn.maybe_quantize_ptpc_input(x)
+        expected = per_token_quant_hip(x, quant_dtype=dtypes.fp8)
+        assert isinstance(actual, tuple)
+        assert torch.equal(actual[0], expected[0])
+        assert torch.equal(actual[1], expected[1])
+
+        # A pre-quantized tuple is handed through, not quantized twice.
+        assert attn.maybe_quantize_ptpc_input(actual) is actual
+
     def test_ptpc_linear_bf16_and_prequantized_inputs(self):
         import aiter
 

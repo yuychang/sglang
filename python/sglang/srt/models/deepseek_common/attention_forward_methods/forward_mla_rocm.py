@@ -341,6 +341,24 @@ class DeepseekMLARocmForwardMixin:
                     self.kv_a_layernorm.weight,
                     self.kv_a_layernorm.variance_epsilon,
                 )
+            elif getattr(self.q_b_proj, "_k3_ptpc_per_token", False):
+                # ATOM-compatible PTPC: fuse q RMSNorm + per-token activation
+                # quantization and the independent kv RMSNorm in one pass.
+                # Setting group_size to the full q_lora width yields one scale
+                # per token, matching q_b's per-output-channel FP8 weight.
+                q, _, k_nope, _ = fused_rms_fp8_group_quant(
+                    q,
+                    self.q_a_layernorm.weight,
+                    self.q_a_layernorm.variance_epsilon,
+                    k_nope,
+                    self.kv_a_layernorm.weight,
+                    self.kv_a_layernorm.variance_epsilon,
+                    group_size=q.shape[-1],
+                    dtype_quant=self.q_b_proj.weight.dtype,
+                    res1=None,
+                    output_unquantized_inp1=False,
+                    transpose_scale=False,
+                )
             elif (
                 _use_aiter_gfx95
                 and self.q_b_proj.weight.dtype == torch.float8_e4m3fn

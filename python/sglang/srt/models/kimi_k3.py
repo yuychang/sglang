@@ -2426,7 +2426,17 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
                         mla_output_gate,
                     )
 
-                    if (
+                    if isinstance(gate_input, tuple):
+                        # Full MLA PTPC: input_layernorm quantizes once and both
+                        # fused_qkv_a and g_proj consume the same (fp8, scale).
+                        # The BF16-only fused gate GEMM cannot own this case.
+                        gate = self.g_proj(gate_input)[0]
+                        x = (
+                            mla_output_gate.kimi_k3_mla_output_gate(x, gate)
+                            if mla_output_gate.covered(x, gate)
+                            else x * torch.sigmoid(gate)
+                        )
+                    elif (
                         precomputed is None
                         and _aiter_mla_gate
                         and mla_gate_aiter_hip.covered(
@@ -2465,13 +2475,39 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
             # event record and the o_proj-side wait, so under breakable capture
             # the wait would cross graph segments; use the lazy path instead.
             and not is_in_breakable_cuda_graph()
-            and (0 < hidden_states.shape[0] <= self._gate_bs_limit)
+            and (
+                0
+                < (hidden_states[0] if isinstance(hidden_states, tuple) else hidden_states).shape[0]
+                <= self._gate_bs_limit
+            )
         ):
             alt = self._gate_alt_stream
             alt.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(alt):
                 gate, _ = self.g_proj(hidden_states)
             self._gate_precomputed = (gate, alt)
+
+    def maybe_quantize_ptpc_input(
+        self, hidden_states: Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]
+    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        """Quantize the normalized MLA input once for both input projections.
+
+        ATOM only fuses input RMSNorm quantization when fused_qkv_a and g_proj
+        use the same scheme. K3's attention-residual kernel already produced the
+        normalized BF16 tensor here; share one dynamic per-token quant instead
+        of letting the two PTPC linears launch identical quantizers.
+        """
+        if isinstance(hidden_states, tuple) or not self.use_output_gate:
+            return hidden_states
+        if not (
+            getattr(self.fused_qkv_a_proj_with_mqa, "_k3_ptpc_per_token", False)
+            and getattr(self.g_proj, "_k3_ptpc_per_token", False)
+        ):
+            return hidden_states
+        from aiter import dtypes, per_token_quant_hip
+
+        x = hidden_states.contiguous()
+        return per_token_quant_hip(x, quant_dtype=dtypes.fp8)
 
     def forward(
         self,
@@ -2481,6 +2517,7 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
         zero_allocator: BumpAllocator,
         **kwargs,
     ):
+        hidden_states = self.maybe_quantize_ptpc_input(hidden_states)
         if self.use_output_gate:
             self._gate_hidden_states = hidden_states
             self._precompute_output_gate(hidden_states)
@@ -2708,6 +2745,15 @@ class KimiK3DecoderLayer(nn.Module):
         if forward_batch.forward_mode.is_idle():
             return hidden_states
 
+        quantize_ptpc_input = getattr(
+            self.self_attn, "maybe_quantize_ptpc_input", None
+        )
+        if quantize_ptpc_input is not None:
+            hidden_states = quantize_ptpc_input(hidden_states)
+        hidden_tensor = (
+            hidden_states[0] if isinstance(hidden_states, tuple) else hidden_states
+        )
+
         # mlp-sync (DP attention OR MoE a2a/EP — require_mlp_sync) pads
         # extend batches to a multiple of attn_tp_size
         # (prepare_mlp_sync_batch ceil_align), but the attention metadata
@@ -2717,7 +2763,7 @@ class KimiK3DecoderLayer(nn.Module):
         # out_cache_loc entries (clobbering pool slot 0 → cross-request
         # corruption). Run attention on the real rows and zero-pad the
         # output back; padded rows are discarded downstream.
-        num_padded = hidden_states.shape[0]
+        num_padded = hidden_tensor.shape[0]
         num_real = num_padded
         if self._trim_padded_attn and forward_batch.forward_mode.is_extend():
             extend_lens = forward_batch.extend_seq_lens_cpu
@@ -2725,8 +2771,13 @@ class KimiK3DecoderLayer(nn.Module):
                 num_real = min(int(sum(extend_lens)), num_padded)
         if num_real != num_padded:
             with k3_sp_collective.o_proj_output_rows(num_padded):
+                attn_input = (
+                    (hidden_states[0][:num_real], hidden_states[1][:num_real])
+                    if isinstance(hidden_states, tuple)
+                    else hidden_states[:num_real]
+                )
                 attn_out = self._run_self_attn_inner(
-                    hidden_states[:num_real],
+                    attn_input,
                     positions[:num_real],
                     forward_batch,
                     zero_allocator,
@@ -2736,7 +2787,7 @@ class KimiK3DecoderLayer(nn.Module):
             )
             if padded_o_proj is not None:
                 return padded_o_proj
-            out = hidden_states.new_zeros(num_padded, attn_out.shape[-1])
+            out = hidden_tensor.new_zeros(num_padded, attn_out.shape[-1])
             out[:num_real] = attn_out
             return out
         return self._run_self_attn_inner(
