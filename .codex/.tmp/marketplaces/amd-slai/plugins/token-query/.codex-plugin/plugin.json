@@ -1,0 +1,5 @@
+{
+  "name": "token-query",
+  "description": "Connects to the AMD MCP Platform token_query server for natural-language",
+  "version": "1.0.8"
+}

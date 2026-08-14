@@ -1,0 +1,5 @@
+{
+  "name": "splat-agent-workspace",
+  "description": "End-to-end Claude Code agent that triages SWSPLAT security findings — fetch the JIRA ticket, run a 7-step validation pipeline against pinned source...",
+  "version": "1.0.3"
+}

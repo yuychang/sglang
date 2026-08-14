@@ -1,0 +1,5 @@
+{
+  "name": "rtl-explorer",
+  "description": "Generate a self-contained interactive HTML file that visualizes the RTL",
+  "version": "4.0.3"
+}

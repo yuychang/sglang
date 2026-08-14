@@ -1,0 +1,5 @@
+{
+  "name": "sn-walle-repo-pull",
+  "description": "Pull the latest SimNow source and check out the target YY_MM_DD release",
+  "version": "1.0.2"
+}

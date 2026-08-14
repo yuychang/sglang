@@ -1,0 +1,5 @@
+{
+  "name": "coverage-report",
+  "description": "Query URG functional coverage groups by package name from the latest",
+  "version": "1.1.0"
+}

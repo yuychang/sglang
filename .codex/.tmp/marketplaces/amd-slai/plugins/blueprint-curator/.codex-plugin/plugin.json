@@ -1,0 +1,5 @@
+{
+  "name": "blueprint-curator",
+  "description": "Author, validate, and submit ConneX blueprint profiles for the SLAI.Blueprints",
+  "version": "1.3.0"
+}

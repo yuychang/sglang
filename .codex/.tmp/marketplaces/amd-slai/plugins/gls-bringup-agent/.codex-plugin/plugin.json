@@ -1,0 +1,5 @@
+{
+  "name": "gls-bringup-agent",
+  "description": "Deploy all GLS collaterals for a new Caliptra netlist release (PMCA+Caliptra).",
+  "version": "1.0.5"
+}

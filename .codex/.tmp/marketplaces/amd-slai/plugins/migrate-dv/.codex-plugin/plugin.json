@@ -1,0 +1,5 @@
+{
+  "name": "migrate-dv",
+  "description": "Update DV files based on a legacy file, legacy inputs, target migration file, migration inputs, and a user-supplied update request.",
+  "version": "1.0.4"
+}

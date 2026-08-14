@@ -1,0 +1,5 @@
+{
+  "name": "pm-meeting-to-action",
+  "description": "Transform a Teams meeting transcript (.docx) into structured meeting",
+  "version": "1.0.0"
+}

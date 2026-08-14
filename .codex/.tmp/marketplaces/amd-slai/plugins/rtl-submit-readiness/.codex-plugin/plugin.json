@@ -1,0 +1,5 @@
+{
+  "name": "rtl-submit-readiness",
+  "description": "Use AFTER an RTL change has passed its final full test and is being prepared for submit —",
+  "version": "1.0.5"
+}

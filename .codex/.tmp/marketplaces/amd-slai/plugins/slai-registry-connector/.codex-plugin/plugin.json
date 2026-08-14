@@ -1,0 +1,5 @@
+{
+  "name": "slai-registry-connector",
+  "description": "A small curl-based REST client for the AMD SLAI-Registry. Invoke when",
+  "version": "1.0.1"
+}

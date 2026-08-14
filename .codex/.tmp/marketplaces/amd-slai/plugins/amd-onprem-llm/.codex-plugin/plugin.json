@@ -1,0 +1,5 @@
+{
+  "name": "amd-onprem-llm",
+  "description": "Connects Claude Code to AMD's internal on-premise LLM gateway (llm-api.amd.com/onprem).",
+  "version": "1.0.5"
+}

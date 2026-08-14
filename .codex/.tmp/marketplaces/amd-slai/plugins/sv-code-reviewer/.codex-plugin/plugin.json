@@ -1,0 +1,5 @@
+{
+  "name": "sv-code-reviewer",
+  "description": "Use this agent to autonomously review SystemVerilog code against AMD",
+  "version": "1.0.3"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "agentmap",
+  "description": "Generate or refresh an agent-friendly code navigation index (AGENTS.md) for a directory, so agents orient from a small map instead of scanning ever...",
+  "version": "1.0.1"
+}

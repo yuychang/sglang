@@ -1,0 +1,5 @@
+{
+  "name": "lec-debug",
+  "description": "Use when the user says \"LEC failed\", \"Formality failed\", \"non-equivalent points\", \"NEP\",",
+  "version": "1.0.1"
+}

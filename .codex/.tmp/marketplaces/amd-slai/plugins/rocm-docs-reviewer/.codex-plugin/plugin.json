@@ -1,0 +1,5 @@
+{
+  "name": "rocm-docs-reviewer",
+  "description": "Standalone documentation quality review skill for ROCm content (release",
+  "version": "1.0.0"
+}

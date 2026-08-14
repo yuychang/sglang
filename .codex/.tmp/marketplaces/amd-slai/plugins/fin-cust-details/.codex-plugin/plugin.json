@@ -1,0 +1,5 @@
+{
+  "name": "fin-cust-details",
+  "description": "Query PKG_FINANCE.dbo.Dim_Customer_Details on ATLEIMSOXDBP1 SQL Server with natural language questions",
+  "version": "1.0.0"
+}

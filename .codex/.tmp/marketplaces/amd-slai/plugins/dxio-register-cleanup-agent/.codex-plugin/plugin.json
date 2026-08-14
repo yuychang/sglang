@@ -1,0 +1,5 @@
+{
+  "name": "dxio-register-cleanup-agent",
+  "description": "Orchestrates end-to-end PCS register cleanup: collects candidate registers",
+  "version": "1.0.15"
+}

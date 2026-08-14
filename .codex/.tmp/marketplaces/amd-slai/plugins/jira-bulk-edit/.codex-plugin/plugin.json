@@ -1,0 +1,5 @@
+{
+  "name": "jira-bulk-edit",
+  "description": "Read-only producer of a Jira bulk-edit dashboard. Fetches issues, comments,",
+  "version": "0.2.2"
+}

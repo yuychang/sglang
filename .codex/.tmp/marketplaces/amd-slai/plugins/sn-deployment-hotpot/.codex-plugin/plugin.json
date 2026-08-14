@@ -1,0 +1,5 @@
+{
+  "name": "sn-deployment-hotpot",
+  "description": "Check if one or more serial numbers exist in the AMD Hotpot volume/deployment database (MQE_PROD.HOTPOT_STAGE.SERVER_DPPM_VOLUME_UNIT). Returns dep...",
+  "version": "1.0.2"
+}

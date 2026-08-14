@@ -1,0 +1,5 @@
+{
+  "name": "pnr-runtime-comparison",
+  "description": "Compare stage-by-stage PnR runtime between two TileBuilder run directories.",
+  "version": "1.1.2"
+}

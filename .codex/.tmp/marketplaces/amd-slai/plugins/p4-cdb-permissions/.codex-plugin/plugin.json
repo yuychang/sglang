@@ -1,0 +1,5 @@
+{
+  "name": "p4-cdb-permissions",
+  "description": "Request group permissions to be added to the Codeline Database (CDB) for a Perforce branch, enabling p4_mkwa usage. Runs the CDB sanity check, emai...",
+  "version": "1.0.0"
+}

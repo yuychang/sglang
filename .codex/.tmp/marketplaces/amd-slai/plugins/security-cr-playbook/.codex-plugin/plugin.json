@@ -1,0 +1,5 @@
+{
+  "name": "security-cr-playbook",
+  "description": "Per-tag fix recipes for SW-BP-* delta review security CRs in xilpm/xilpm_ng.",
+  "version": "2.0.1"
+}

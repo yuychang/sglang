@@ -1,0 +1,5 @@
+{
+  "name": "m365-contacts",
+  "description": "Manage personal Outlook contacts using Microsoft Graph API. Use when",
+  "version": "2.2.1"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "repeater-report",
+  "description": "Run the repeater error/warning report generator over tile-view logs.",
+  "version": "1.0.8"
+}

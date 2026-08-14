@@ -1,0 +1,5 @@
+{
+  "name": "create-email",
+  "description": "Generate professional HTML-formatted .eml draft emails from session context",
+  "version": "1.2.5"
+}

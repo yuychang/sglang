@@ -1,0 +1,5 @@
+{
+  "name": "channel-mb-summary",
+  "description": "Query AMD channel ODM websites (ASUS, GIGABYTE, MSI, ASRock, Biostar) to inventory AMD-socket motherboard models by socket/chipset, and produce a c...",
+  "version": "1.2.0"
+}

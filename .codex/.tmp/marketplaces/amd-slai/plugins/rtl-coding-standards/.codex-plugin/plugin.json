@@ -1,0 +1,5 @@
+{
+  "name": "rtl-coding-standards",
+  "description": "Use when about to Edit or Write any .v or .sv file under blocks/*/src/rtl/; when planning",
+  "version": "1.0.1"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "floorplan-tools",
+  "description": "Parse BOM files, visualize floorplans, and analyze chip designs. Use when you need to parse or query BOM/uber.bom.json files, examine chip layouts,...",
+  "version": "2.1.0"
+}

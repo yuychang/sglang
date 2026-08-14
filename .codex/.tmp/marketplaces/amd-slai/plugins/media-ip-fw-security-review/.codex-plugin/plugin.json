@@ -1,0 +1,5 @@
+{
+  "name": "media-ip-fw-security-review",
+  "description": "Security-review process for AMD Media IP firmware (VCN/VPE family). Use",
+  "version": "0.5.1"
+}

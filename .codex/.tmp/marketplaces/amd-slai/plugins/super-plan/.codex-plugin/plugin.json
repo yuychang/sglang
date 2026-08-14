@@ -1,0 +1,5 @@
+{
+  "name": "super-plan",
+  "description": "Generate structured `.plan` directories that break work into numbered",
+  "version": "1.0.1"
+}

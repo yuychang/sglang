@@ -1,0 +1,5 @@
+{
+  "name": "llvm-code-reviewer",
+  "description": "Code reviewer persona aligned with LLVM code-review policy, coding standards,",
+  "version": "1.0.1"
+}

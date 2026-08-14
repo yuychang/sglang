@@ -1,0 +1,5 @@
+{
+  "name": "xoah-data-access",
+  "description": "Unified XOAH data retrieval skill. Query XOAH test results using natural language or direct Elasticsearch queries. Routes to YODA/Lucene for NL sea...",
+  "version": "2.0.0"
+}

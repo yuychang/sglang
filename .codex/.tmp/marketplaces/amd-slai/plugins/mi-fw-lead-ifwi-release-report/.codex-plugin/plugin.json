@@ -1,0 +1,5 @@
+{
+  "name": "mi-fw-lead-ifwi-release-report",
+  "description": "Generate a self-contained HTML release-notes report for an MI4xx IFWI",
+  "version": "1.0.30"
+}

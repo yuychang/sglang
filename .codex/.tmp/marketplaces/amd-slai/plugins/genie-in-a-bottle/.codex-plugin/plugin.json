@@ -1,0 +1,5 @@
+{
+  "name": "genie-in-a-bottle",
+  "description": "Run AMD genie / Claude Code inside a sandboxed apptainer container so",
+  "version": "0.3.5"
+}

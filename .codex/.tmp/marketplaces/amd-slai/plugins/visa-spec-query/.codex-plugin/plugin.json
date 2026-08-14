@@ -1,0 +1,5 @@
+{
+  "name": "visa-spec-query",
+  "description": "Ask natural language questions about a loaded spec document. Searches",
+  "version": "1.0.0"
+}

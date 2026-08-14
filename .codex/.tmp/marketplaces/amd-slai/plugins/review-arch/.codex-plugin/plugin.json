@@ -1,0 +1,5 @@
+{
+  "name": "review-arch",
+  "description": "Architecture and design review for C++ - SRP violations, layer violations, coupling, FSM design, interface consistency.",
+  "version": "1.0.0"
+}

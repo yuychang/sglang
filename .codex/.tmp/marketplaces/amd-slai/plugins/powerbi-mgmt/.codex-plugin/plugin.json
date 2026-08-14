@@ -1,0 +1,5 @@
+{
+  "name": "powerbi-mgmt",
+  "description": "Manage Power BI and Fabric workspaces, reports, datasets, refresh schedules,",
+  "version": "0.1.5"
+}

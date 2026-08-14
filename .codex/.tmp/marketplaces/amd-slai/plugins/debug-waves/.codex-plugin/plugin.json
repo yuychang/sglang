@@ -1,0 +1,5 @@
+{
+  "name": "debug-waves",
+  "description": "Read FSDB waveform signals and trace RTL connectivity for AMD GPU SoC",
+  "version": "1.0.2"
+}

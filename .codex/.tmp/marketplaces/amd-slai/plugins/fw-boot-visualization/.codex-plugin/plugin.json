@@ -1,0 +1,5 @@
+{
+  "name": "fw-boot-visualization",
+  "description": "Five-phase AMD bootcode analysis tool. Phase 1: Auto-detects bootcode",
+  "version": "2.0.1"
+}

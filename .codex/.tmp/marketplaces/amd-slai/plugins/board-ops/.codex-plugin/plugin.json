@@ -1,0 +1,5 @@
+{
+  "name": "board-ops",
+  "description": "Board farm operations for Versal boards - discovery, acquisition, power",
+  "version": "4.0.0"
+}

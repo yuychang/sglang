@@ -1,0 +1,5 @@
+{
+  "name": "writing-llvm-pass",
+  "description": "End-to-end recipe for adding a New Pass Manager LLVM pass: transform",
+  "version": "1.0.10"
+}

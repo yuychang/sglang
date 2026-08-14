@@ -1,0 +1,5 @@
+{
+  "name": "jumpgate",
+  "description": "Query AMD/ATI PCI Device ID registry from jumpgate.amd.com. Use when:",
+  "version": "2.0.1"
+}

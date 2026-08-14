@@ -1,0 +1,5 @@
+{
+  "name": "mi-fw-lead-prerelease-notes",
+  "description": "Generate a pre-release testing-focus summary from a single IFWI release",
+  "version": "1.0.1"
+}

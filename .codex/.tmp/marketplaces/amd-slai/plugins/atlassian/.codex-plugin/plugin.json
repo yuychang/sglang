@@ -1,0 +1,5 @@
+{
+  "name": "atlassian",
+  "description": "Use the atlassian CLI to interact with Jira and Confluence. Use when",
+  "version": "0.9.1"
+}

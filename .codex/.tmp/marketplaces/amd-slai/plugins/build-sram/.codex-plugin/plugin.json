@@ -1,0 +1,5 @@
+{
+  "name": "build-sram",
+  "description": "Full memory rebuild flow (buildMyRam, update_memserver, bootenv, clean build). Use when RAM",
+  "version": "1.0.1"
+}

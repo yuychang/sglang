@@ -1,0 +1,5 @@
+{
+  "name": "sync-master",
+  "description": "Sync master workflow - rebase feature branch onto origin/master with stash, conflict handling, and force push.",
+  "version": "1.0.0"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "teams-transcript-windows",
+  "description": "Fetch full formatted transcripts from Microsoft Teams meeting recordings",
+  "version": "1.0.0"
+}

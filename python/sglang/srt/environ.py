@@ -644,6 +644,14 @@ class Envs:
     # GEMMs already saturate the CUs, so the overlap only adds contention; there
     # single-stream is kept. Mirrors ATOM's ATOM_DUAL_STREAM_MOE_TOKEN_THRESHOLD.
     SGLANG_ROCM_K3_DUAL_STREAM_MOE_MAX_TOKENS = EnvInt(1024)
+    # Dual-stream overlap mode. "ar" (default) runs the shared-expert branch AND
+    # its all-reduce on the side stream so the collective (communication) hides
+    # under the routed-expert GEMMs on the main stream — this is ATOM's win and
+    # the only variant that beats single-stream on gfx950, because comm does not
+    # consume CUs. "compute" keeps the packed single collective and overlaps only
+    # the two compute branches; kept for A/B since ROCm taxes every main-stream
+    # node while a second queue is live, so compute/compute overlap alone loses.
+    SGLANG_ROCM_K3_DUAL_STREAM_MOE_MODE = EnvStr("ar")
     # Fold the KDA [f_a|b] tail into the wide [q,k,v,g] projection so the whole
     # in-proj is one GEMM (what ATOM does). The N=6288 shape has no tuned aiter
     # config and the 6144 one does, but at decode the projection is bandwidth

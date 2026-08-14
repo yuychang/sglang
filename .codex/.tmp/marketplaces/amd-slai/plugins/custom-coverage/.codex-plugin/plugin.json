@@ -1,0 +1,5 @@
+{
+  "name": "custom-coverage",
+  "description": "Run DBGU/PMC coverage analysis for a user-supplied command list and IP on the silicon lab. Use when the user asks to coverage-analyze commands, pro...",
+  "version": "1.0.2"
+}

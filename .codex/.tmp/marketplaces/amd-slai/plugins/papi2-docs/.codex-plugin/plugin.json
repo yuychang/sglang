@@ -1,0 +1,5 @@
+{
+  "name": "papi2-docs",
+  "description": "PAPI2 library reference for AMD ASIC register access and firmware interaction.",
+  "version": "1.0.1"
+}

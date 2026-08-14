@@ -1,0 +1,5 @@
+{
+  "name": "aocl-optimizer",
+  "description": "Analyzes C/C++/Fortran/Assembly code for AOCL optimization opportunities",
+  "version": "1.0.0"
+}

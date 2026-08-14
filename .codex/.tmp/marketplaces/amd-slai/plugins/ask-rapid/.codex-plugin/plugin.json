@@ -1,0 +1,5 @@
+{
+  "name": "ask-rapid",
+  "description": "Query AMD's RAPID agent (DXIO/PCIe/PIPE spec Q&A service) and get a cited,",
+  "version": "1.0.5"
+}

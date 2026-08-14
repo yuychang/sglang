@@ -1,0 +1,5 @@
+{
+  "name": "qsc-conductor-worker",
+  "description": "Apply per-team Conductor conventions (team_name, default reservation title/project) when managing reservations (check by user, check availability, ...",
+  "version": "0.1.0"
+}

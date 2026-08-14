@@ -1,0 +1,5 @@
+{
+  "name": "setup-email",
+  "description": "One-time bring-up for the OAuth2 / Outlook (Office365) IMAP token that powers the agent-email",
+  "version": "1.0.6"
+}

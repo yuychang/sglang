@@ -1,0 +1,5 @@
+{
+  "name": "plst-debug",
+  "description": "Decode and debug PCIe PL-Streaming (CPM6/PSTBR) waveforms as a companion to wavesniffer. Use when analyzing PL-streaming RX/TX transactions, the RC...",
+  "version": "1.0.1"
+}

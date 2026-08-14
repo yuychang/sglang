@@ -1,0 +1,5 @@
+{
+  "name": "multi-user-application-testing",
+  "description": "Load test and stress test any web application — AI analyzes the app, derives realistic user behaviors, writes and runs Playwright scripts, and repo...",
+  "version": "1.0.3"
+}

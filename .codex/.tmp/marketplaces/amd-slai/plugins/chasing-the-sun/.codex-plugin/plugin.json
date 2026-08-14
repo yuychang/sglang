@@ -1,0 +1,5 @@
+{
+  "name": "chasing-the-sun",
+  "description": "Persist and load Chasing the Sun handoff notes for a shared agent session. Use when the user asks for chasing-the-sun, chasing the sun, handoff log...",
+  "version": "1.0.0"
+}

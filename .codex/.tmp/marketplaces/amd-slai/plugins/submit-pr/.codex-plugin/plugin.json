@@ -1,0 +1,5 @@
+{
+  "name": "submit-pr",
+  "description": "PR submission workflow - git branch/commit/push, and GitHub Pull Request creation.",
+  "version": "1.0.0"
+}

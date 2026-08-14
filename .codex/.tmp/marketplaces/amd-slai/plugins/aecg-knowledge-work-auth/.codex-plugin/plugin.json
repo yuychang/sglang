@@ -1,0 +1,5 @@
+{
+  "name": "aecg-knowledge-work-auth",
+  "description": "Unified authentication orchestrator for the AECG Knowledge Work persona. Authenticates M365/Teams, Confluence (AMD cloud), Jira (on-prem jira.xilin...",
+  "version": "1.0.0"
+}

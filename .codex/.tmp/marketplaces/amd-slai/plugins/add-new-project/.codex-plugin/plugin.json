@@ -1,0 +1,5 @@
+{
+  "name": "add-new-project",
+  "description": "Full project provisioning in one command -- create JIRA project or GitHub",
+  "version": "1.0.5"
+}

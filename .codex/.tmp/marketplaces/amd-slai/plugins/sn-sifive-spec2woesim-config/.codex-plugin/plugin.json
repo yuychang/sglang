@@ -1,0 +1,5 @@
+{
+  "name": "sn-sifive-spec2woesim-config",
+  "description": "Given a SiFive specification, this skill will analyze certain sections",
+  "version": "1.0.0"
+}

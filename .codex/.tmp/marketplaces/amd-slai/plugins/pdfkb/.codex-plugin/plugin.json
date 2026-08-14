@@ -1,0 +1,5 @@
+{
+  "name": "pdfkb",
+  "description": "Build and query a searchable knowledge base from PDF documents with vision enrichment, cross-referencing, and cited answers.",
+  "version": "1.0.0"
+}

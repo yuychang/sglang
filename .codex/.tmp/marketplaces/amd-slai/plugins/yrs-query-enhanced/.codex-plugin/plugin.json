@@ -1,0 +1,5 @@
+{
+  "name": "yrs-query-enhanced",
+  "description": "Query YMS wafer-level yield data with multi-PSF support, AMD Work Week",
+  "version": "1.7.6"
+}

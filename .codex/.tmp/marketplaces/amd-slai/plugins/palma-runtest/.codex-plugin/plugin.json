@@ -1,0 +1,5 @@
+{
+  "name": "palma-runtest",
+  "description": "Invoke the Pensando runtest simulation harness with the right flag combinations for sanity / nightly / full / compile-only / run-only / FSDB-debug ...",
+  "version": "1.0.4"
+}

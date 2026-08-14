@@ -1,0 +1,5 @@
+{
+  "name": "sn-atforge",
+  "description": "Add a test function (like MDS1BootEnTest in mds1_direct.py) to a Tester",
+  "version": "0.2.2"
+}

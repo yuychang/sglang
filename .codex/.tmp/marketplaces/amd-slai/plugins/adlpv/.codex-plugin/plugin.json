@@ -1,0 +1,5 @@
+{
+  "name": "adlpv",
+  "description": "Run ADLPV (AI-Driven Logic and Data Path Static Verification) Mode 1-4",
+  "version": "1.1.3"
+}

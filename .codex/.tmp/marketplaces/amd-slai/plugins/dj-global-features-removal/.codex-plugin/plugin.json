@@ -1,0 +1,5 @@
+{
+  "name": "dj-global-features-removal",
+  "description": "Automated migration from global feature files to component-specific feature",
+  "version": "2.1.1"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "palma-block-init",
+  "description": "Create or refresh a palma/verif/<block>/CLAUDE.md block-context file by introspecting the block's actual source. Auto-discovers TB build flavors, t...",
+  "version": "1.0.4"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "gen-scopefile",
+  "description": "Auto-generate VCS scopefiles (.f files passed via +dump_var_file) from",
+  "version": "1.0.2"
+}

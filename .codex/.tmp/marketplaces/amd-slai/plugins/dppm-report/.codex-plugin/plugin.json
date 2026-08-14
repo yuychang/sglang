@@ -1,0 +1,5 @@
+{
+  "name": "dppm-report",
+  "description": "Generate a live field return DPPM HTML report for any AMD customer and product from Snowflake Hotpot. No Excel files needed — production cohort DPP...",
+  "version": "1.0.1"
+}

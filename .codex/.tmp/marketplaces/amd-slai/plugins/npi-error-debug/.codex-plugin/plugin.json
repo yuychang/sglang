@@ -1,0 +1,5 @@
+{
+  "name": "npi-error-debug",
+  "description": "Debug NPI (NoC Peripheral Interconnect) errors during PL configuration. Use when PLM logs show NPI_NIR_ISR, NPI_NIR_ERR_TYPE registers, \\\"Error loa...",
+  "version": "2.0.0"
+}

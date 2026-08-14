@@ -1,0 +1,5 @@
+{
+  "name": "bootcode-debug",
+  "description": "Debug and fix bootcode and megaip test failures. Use when user mentions bootcode test failures, megaip test failures, UVM test debugging, or any ve...",
+  "version": "1.1.0"
+}

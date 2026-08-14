@@ -1,0 +1,5 @@
+{
+  "name": "podman-rootless-etx",
+  "description": "Set up and run rootless Podman on AMD ETX/LSF/SDE hosts where Docker",
+  "version": "0.1.2"
+}

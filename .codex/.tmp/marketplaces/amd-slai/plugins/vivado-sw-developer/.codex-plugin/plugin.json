@@ -1,0 +1,5 @@
+{
+  "name": "vivado-sw-developer",
+  "description": "Bundle tools for Vivado software developers covering build, debug, triage, testing, and source control workflows.",
+  "version": "1.0.0"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "make-instinct-wiki",
+  "description": "Build a complete AMD Instinct / ROCm knowledge base from scratch. Fetches",
+  "version": "1.0.1"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "audit-claude-structure",
+  "description": "Generate (or regenerate) a comprehensive structural audit of a project's .claude/ directory — mindmap, dependency graph, ownership matrix, hook bri...",
+  "version": "1.0.0"
+}

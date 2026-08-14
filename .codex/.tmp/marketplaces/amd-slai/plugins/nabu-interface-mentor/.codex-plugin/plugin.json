@@ -1,0 +1,5 @@
+{
+  "name": "nabu-interface-mentor",
+  "description": "Interface protocol debug assistant powered by Nabu. Accepts waveform snippets, error logs, or natural language symptom descriptions and provides sp...",
+  "version": "1.0.1"
+}

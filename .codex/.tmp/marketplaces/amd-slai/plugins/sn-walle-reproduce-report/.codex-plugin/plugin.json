@@ -1,0 +1,5 @@
+{
+  "name": "sn-walle-reproduce-report",
+  "description": "Generate a combined reproduction report after /sn-walle-reproduce-attempt",
+  "version": "2.3.0"
+}

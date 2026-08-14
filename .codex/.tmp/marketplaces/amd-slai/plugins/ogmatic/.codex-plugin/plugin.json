@@ -1,0 +1,5 @@
+{
+  "name": "ogmatic",
+  "description": "Work with AMD's ogmatic data warehouse via MCP - query Dremio, discover",
+  "version": "1.0.5"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "gdb",
+  "description": "Use when starting or using a GDB debugging session for CSIM/RTL simv executables — debugging CSIM model code, DPI functions, simv binaries; setting...",
+  "version": "1.1.0"
+}

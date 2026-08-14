@@ -1,0 +1,5 @@
+{
+  "name": "testplan-author",
+  "description": "Generate or extend a DV testplan from any combination of inputs: architecture",
+  "version": "1.2.2"
+}

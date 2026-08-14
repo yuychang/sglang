@@ -1,0 +1,5 @@
+{
+  "name": "sn-gh-track",
+  "description": "Create a tracked GitHub issue from conversation context — auto-discovers",
+  "version": "1.2.5"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "sn-covai",
+  "description": "Agentic coverage triage pipeline for SimNow. Orchestrates AI review",
+  "version": "0.1.2"
+}

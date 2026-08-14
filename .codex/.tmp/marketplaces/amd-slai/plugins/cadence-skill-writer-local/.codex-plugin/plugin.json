@@ -1,0 +1,5 @@
+{
+  "name": "cadence-skill-writer-local",
+  "description": "Write and generate Cadence SKILL (.il) scripts for Virtuoso layout/schematic automation using the cadence-skill-mcp tool library, pinned to this pr...",
+  "version": "1.0.4"
+}

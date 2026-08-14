@@ -1,0 +1,5 @@
+{
+  "name": "perview",
+  "description": "Perforce workspace and sandbox management tool for Vivado development. Use when users need to (1) create, update, describe, or destroy Perforce san...",
+  "version": "1.6.0"
+}

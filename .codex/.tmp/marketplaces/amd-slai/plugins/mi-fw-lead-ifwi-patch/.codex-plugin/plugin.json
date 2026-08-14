@@ -1,0 +1,5 @@
+{
+  "name": "mi-fw-lead-ifwi-patch",
+  "description": "Interactive IFWI patching assistant for AMD GPU firmware images. Patches",
+  "version": "1.0.4"
+}

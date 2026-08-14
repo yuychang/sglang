@@ -1,0 +1,5 @@
+{
+  "name": "gh-config",
+  "description": "Helps users set up their GitHub.com account by verifying AMD group membership",
+  "version": "1.0.14"
+}

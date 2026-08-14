@@ -1,0 +1,5 @@
+{
+  "name": "sn-woesim-trace",
+  "description": "Correlate woesim instruction trace log entries with their associated disassembly file for any SimNow woesim core. Use when analyzing woesim ITrace/...",
+  "version": "1.0.1"
+}

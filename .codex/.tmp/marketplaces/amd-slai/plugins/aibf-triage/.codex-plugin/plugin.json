@@ -1,0 +1,5 @@
+{
+  "name": "aibf-triage",
+  "description": "Triage software test failures with AI BlameFinder (AIBF) 2.0. Submits a JIRA UE ticket or an XOAH history URL to the hosted AIBF triage service, wh...",
+  "version": "2.0.0"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "sn-pr-review",
+  "description": "SimNow PR reviewer — per-file deep review of GitHub PRs against SimNow",
+  "version": "1.6.2"
+}

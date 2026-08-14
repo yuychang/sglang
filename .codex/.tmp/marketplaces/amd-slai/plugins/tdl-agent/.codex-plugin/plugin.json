@@ -1,0 +1,5 @@
+{
+  "name": "tdl-agent",
+  "description": "Route Technical Documentation and Localization requests to skills included in the TDL persona. Use when: a TDL user wants one conversational entry ...",
+  "version": "0.1.0"
+}

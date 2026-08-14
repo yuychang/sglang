@@ -1,0 +1,5 @@
+{
+  "name": "nextgen-integration-test",
+  "description": "Run the integration test suite inside the pod. Use when asked to \"run",
+  "version": "1.0.0"
+}

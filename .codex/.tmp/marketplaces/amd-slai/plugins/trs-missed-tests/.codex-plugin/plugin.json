@@ -1,0 +1,5 @@
+{
+  "name": "trs-missed-tests",
+  "description": "Find missed/killed/errored tests from TRS batches and generate console",
+  "version": "2.0.0"
+}

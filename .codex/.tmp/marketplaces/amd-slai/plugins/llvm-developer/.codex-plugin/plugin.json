@@ -1,0 +1,5 @@
+{
+  "name": "llvm-developer",
+  "description": "Complete LLVM compiler development toolkit — 9 specialized agents and 2 skill workflows for passes, backends, Clang, runtimes, testing, review, and...",
+  "version": "1.0.1"
+}

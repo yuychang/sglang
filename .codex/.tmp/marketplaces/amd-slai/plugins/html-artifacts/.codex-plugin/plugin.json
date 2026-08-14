@@ -1,0 +1,5 @@
+{
+  "name": "html-artifacts",
+  "description": "Generate self-contained HTML files as a richer Claude Code output format",
+  "version": "0.1.0"
+}

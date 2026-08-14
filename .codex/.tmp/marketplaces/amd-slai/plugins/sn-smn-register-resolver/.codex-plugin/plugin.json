@@ -1,0 +1,5 @@
+{
+  "name": "sn-smn-register-resolver",
+  "description": "Resolves hardcoded SMN hex addresses to register names using the PPR",
+  "version": "1.0.3"
+}

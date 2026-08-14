@@ -1,0 +1,5 @@
+{
+  "name": "rocm-tct-code-reviewer",
+  "description": "Code review skill for ROCm Test Content Team (TCT) PRs to the AMD-ROCm-Internal/AIGQA-Tests",
+  "version": "1.2.0"
+}

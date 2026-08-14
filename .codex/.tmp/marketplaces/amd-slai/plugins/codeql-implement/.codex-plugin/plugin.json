@@ -1,0 +1,5 @@
+{
+  "name": "codeql-implement",
+  "description": "Transform existing Jenkins pipelines into CodeQL-enabled equivalents",
+  "version": "1.0.0"
+}

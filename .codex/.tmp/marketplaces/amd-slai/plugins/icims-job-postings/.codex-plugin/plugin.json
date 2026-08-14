@@ -1,0 +1,5 @@
+{
+  "name": "icims-job-postings",
+  "description": "AMD iCIMS from Claude Code, across both hosts. Job board (internal-amd.icims.com):",
+  "version": "0.2.0"
+}

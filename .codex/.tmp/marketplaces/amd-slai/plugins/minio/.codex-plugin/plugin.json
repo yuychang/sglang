@@ -1,0 +1,5 @@
+{
+  "name": "minio",
+  "description": "Interact with AMD MinIO object storage using the mc CLI. Manage aliases,",
+  "version": "1.0.1"
+}

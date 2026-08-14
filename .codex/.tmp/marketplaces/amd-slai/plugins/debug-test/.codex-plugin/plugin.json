@@ -1,0 +1,5 @@
+{
+  "name": "debug-test",
+  "description": "End-to-end automated test failure root-cause analysis for AMD RTG DV",
+  "version": "2.0.10"
+}

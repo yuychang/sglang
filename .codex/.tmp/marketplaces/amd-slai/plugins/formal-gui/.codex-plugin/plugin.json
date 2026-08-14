@@ -1,0 +1,5 @@
+{
+  "name": "formal-gui",
+  "description": "Formal Orchestrator GUI and launcher — embedded xterm agent terminal, 10-step review workflow (proof plan, SVA, flow setup, results, fixes, report)...",
+  "version": "1.0.42"
+}

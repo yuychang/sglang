@@ -1,0 +1,5 @@
+{
+  "name": "amd-etx-containers",
+  "description": "Run, validate, build, pull, bind, and troubleshoot containers on AMD's",
+  "version": "1.0.1"
+}

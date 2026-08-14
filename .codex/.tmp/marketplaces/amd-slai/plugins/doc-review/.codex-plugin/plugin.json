@@ -1,0 +1,5 @@
+{
+  "name": "doc-review",
+  "description": "Review technical documentation (ROCm docs, blog posts, general tech docs) for AMD style, clarity, and correctness. Returns inline comments grouped ...",
+  "version": "1.0.0"
+}

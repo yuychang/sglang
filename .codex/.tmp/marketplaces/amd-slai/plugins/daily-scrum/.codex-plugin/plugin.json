@@ -1,0 +1,5 @@
+{
+  "name": "daily-scrum",
+  "description": "Generate a daily scrum report from team activity across Perforce, GitHub,",
+  "version": "1.0.5"
+}

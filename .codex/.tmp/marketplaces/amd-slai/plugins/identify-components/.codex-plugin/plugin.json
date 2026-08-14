@@ -1,0 +1,5 @@
+{
+  "name": "identify-components",
+  "description": "Identify Gradle components impacted by changed source file paths using",
+  "version": "1.0.0"
+}

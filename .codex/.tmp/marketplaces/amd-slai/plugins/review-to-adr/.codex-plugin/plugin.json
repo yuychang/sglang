@@ -1,0 +1,5 @@
+{
+  "name": "review-to-adr",
+  "description": "Distill a finished engineering review document into a forward-looking Architecture Decision Record (ADR). Use this skill whenever a REVIEW_*.md (or...",
+  "version": "1.0.0"
+}

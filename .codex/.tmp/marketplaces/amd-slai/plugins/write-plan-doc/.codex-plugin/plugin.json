@@ -1,0 +1,5 @@
+{
+  "name": "write-plan-doc",
+  "description": "Produce a structured implementation plan before writing code for any non-trivial change. Use this skill whenever a task has 3+ steps, touches multi...",
+  "version": "1.0.0"
+}

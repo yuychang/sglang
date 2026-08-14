@@ -1,0 +1,5 @@
+{
+  "name": "teams-notify",
+  "description": "Send notifications to Microsoft Teams. If TEAMS_WEBHOOK_URL is not set,",
+  "version": "1.0.1"
+}

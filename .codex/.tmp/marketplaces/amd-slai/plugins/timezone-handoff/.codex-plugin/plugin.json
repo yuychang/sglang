@@ -1,0 +1,5 @@
+{
+  "name": "timezone-handoff",
+  "description": "Persist and load timezone handoff notes for a shared agent session. Use when the user asks for handoff login, handoff logout, timezone handoff, cro...",
+  "version": "1.0.1"
+}

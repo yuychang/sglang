@@ -1,0 +1,5 @@
+{
+  "name": "slai-tokenops-usage",
+  "description": "Query the AMD SLAI TokenOps dashboard (llm.amd.com/dashboard/tokenops)",
+  "version": "1.0.10"
+}

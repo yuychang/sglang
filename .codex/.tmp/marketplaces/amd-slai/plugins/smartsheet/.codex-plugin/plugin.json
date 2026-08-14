@@ -1,0 +1,5 @@
+{
+  "name": "smartsheet",
+  "description": "Access Smartsheet sheets, workspaces, and data using the Smartsheet",
+  "version": "1.0.2"
+}

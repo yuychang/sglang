@@ -1,0 +1,5 @@
+{
+  "name": "amd-pptx-planner",
+  "description": "Plan an AMD-styled PowerPoint (.pptx) before it is built. Creates a deck project folder (plan, research, images, build output) and a collaborative,...",
+  "version": "1.0.0"
+}

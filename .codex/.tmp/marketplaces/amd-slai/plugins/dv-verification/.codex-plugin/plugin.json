@@ -1,0 +1,5 @@
+{
+  "name": "dv-verification",
+  "description": "Use when building or modifying UVM testbench components, writing UVM tests or sequences,",
+  "version": "1.0.3"
+}

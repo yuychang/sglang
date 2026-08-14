@@ -1,0 +1,5 @@
+{
+  "name": "log-analysis",
+  "description": "Autonomous agent that parses TileBuilder .log.gz files in parallel, extracts",
+  "version": "1.0.3"
+}

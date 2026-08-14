@@ -1,0 +1,5 @@
+{
+  "name": "rt-run-lec",
+  "description": "Use when running Formality LEC (Logic Equivalence Checking) on an RTS",
+  "version": "1.0.6"
+}

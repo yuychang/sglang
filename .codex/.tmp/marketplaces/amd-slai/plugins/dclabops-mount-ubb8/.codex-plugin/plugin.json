@@ -1,0 +1,5 @@
+{
+  "name": "dclabops-mount-ubb8",
+  "description": "Create a DCLABOPS Jira ticket to mount, unmount, or swap an OAM or UBB8 board on a target lab system. Use when the user asks to mount/install/remov...",
+  "version": "2.3.0"
+}

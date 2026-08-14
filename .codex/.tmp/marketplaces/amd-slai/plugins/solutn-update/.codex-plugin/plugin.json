@@ -1,0 +1,5 @@
+{
+  "name": "solutn-update",
+  "description": "Interactive Jira task manager for SOLUTN tickets. Auto-discovers open tasks assigned to the current user, shows a dashboard with status and days si...",
+  "version": "3.3.0"
+}

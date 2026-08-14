@@ -1,0 +1,5 @@
+{
+  "name": "synopsys-remote",
+  "description": "Control Synopsys EDA tools (Fusion Compiler, IC Compiler 2, PrimeTime)",
+  "version": "1.0.14"
+}

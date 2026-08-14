@@ -1,0 +1,5 @@
+{
+  "name": "sn-jiralinker",
+  "description": "Creates a scoping/implementation Jira based on the template in the reference.",
+  "version": "1.0.3"
+}

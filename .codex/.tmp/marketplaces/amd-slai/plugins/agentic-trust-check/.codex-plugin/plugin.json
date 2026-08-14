@@ -1,0 +1,5 @@
+{
+  "name": "agentic-trust-check",
+  "description": "Evaluates any AI/agentic-engineering claim, artifact, or vendor pitch (an article, PR, internal agent's output, PPA/verification result) for eviden...",
+  "version": "1.0.4"
+}

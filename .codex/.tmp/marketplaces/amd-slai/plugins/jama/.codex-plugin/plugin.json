@@ -1,0 +1,5 @@
+{
+  "name": "jama",
+  "description": "Access Jama Connect (jama.amd.com) via direct REST API calls. Use when",
+  "version": "1.0.1"
+}

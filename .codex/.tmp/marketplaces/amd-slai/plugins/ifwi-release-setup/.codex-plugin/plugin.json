@@ -1,0 +1,5 @@
+{
+  "name": "ifwi-release-setup",
+  "description": "Sets up the initial Confluence page and Jira ticket for an IFWI release.",
+  "version": "1.0.2"
+}

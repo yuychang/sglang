@@ -1,0 +1,5 @@
+{
+  "name": "clang-frontend-expert",
+  "description": "Expert assistant for Clang AST, Sema, diagnostics, and -cc1 testing",
+  "version": "1.0.1"
+}

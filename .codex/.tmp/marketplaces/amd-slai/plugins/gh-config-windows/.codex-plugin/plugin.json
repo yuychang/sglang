@@ -1,0 +1,5 @@
+{
+  "name": "gh-config-windows",
+  "description": "Automated GitHub EMU setup for Windows — generates SSH keys, authenticates",
+  "version": "1.0.4"
+}

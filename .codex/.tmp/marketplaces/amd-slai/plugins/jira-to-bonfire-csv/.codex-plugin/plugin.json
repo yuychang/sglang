@@ -1,0 +1,5 @@
+{
+  "name": "jira-to-bonfire-csv",
+  "description": "Export a Jira saved filter's issues into the bonfire burnup chart's",
+  "version": "1.0.7"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "systest-kiso",
+  "description": "Automate AMD board farm boards from Python using the systest-kiso library.",
+  "version": "2.0.3"
+}

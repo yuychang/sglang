@@ -1,0 +1,5 @@
+{
+  "name": "gfx-tutor",
+  "description": "GFX architecture and AMDGPU LLVM backend teacher. Generates a daily",
+  "version": "1.0.20"
+}

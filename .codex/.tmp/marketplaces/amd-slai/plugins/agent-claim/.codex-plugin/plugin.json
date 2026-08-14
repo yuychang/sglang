@@ -1,0 +1,5 @@
+{
+  "name": "agent-claim",
+  "description": "Framework-agnostic claim convention for AI agents working JIRA tickets. Defines the `ai-claimed`",
+  "version": "1.0.1"
+}

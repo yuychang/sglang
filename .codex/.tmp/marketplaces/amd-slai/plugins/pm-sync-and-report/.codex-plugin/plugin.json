@@ -1,0 +1,5 @@
+{
+  "name": "pm-sync-and-report",
+  "description": "Refresh all project data caches and generate a full status report in",
+  "version": "1.0.0"
+}

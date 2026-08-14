@@ -1,0 +1,5 @@
+{
+  "name": "cb-rtl-workflow",
+  "description": "CB RTL change workflow -- DJ commands for building, testing, lint, and",
+  "version": "1.4.6"
+}

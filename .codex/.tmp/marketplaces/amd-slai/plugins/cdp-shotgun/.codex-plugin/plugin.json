@@ -1,0 +1,5 @@
+{
+  "name": "cdp-shotgun",
+  "description": "Browser automation over Chrome DevTools Protocol (CDP). Agent drives Chrome by default — screenshot, click, fill, navigate, eval JS — and the human...",
+  "version": "3.0.1"
+}

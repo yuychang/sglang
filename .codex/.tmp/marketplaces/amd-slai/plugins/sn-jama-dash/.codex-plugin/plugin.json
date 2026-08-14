@@ -1,0 +1,5 @@
+{
+  "name": "sn-jama-dash",
+  "description": "Fetch live SimNow requirements from Jama, classify them by state, and",
+  "version": "1.4.2"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "mi-fw-lead-reg-read",
+  "description": "Read GPU and CPU hardware registers from a live AMD Instinct system (MI450/MI455,",
+  "version": "1.0.1"
+}

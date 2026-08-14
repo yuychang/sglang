@@ -1,0 +1,5 @@
+{
+  "name": "compass-gather",
+  "description": "Run compassGather to compare Compass simulation results across configurations.",
+  "version": "1.0.1"
+}

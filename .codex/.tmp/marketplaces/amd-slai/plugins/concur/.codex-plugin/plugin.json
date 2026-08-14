@@ -1,0 +1,5 @@
+{
+  "name": "concur",
+  "description": "File expense reports in SAP Concur using Playwright browser automation.",
+  "version": "0.2.0"
+}

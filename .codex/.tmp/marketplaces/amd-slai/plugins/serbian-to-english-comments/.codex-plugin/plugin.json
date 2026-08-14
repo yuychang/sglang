@@ -1,0 +1,5 @@
+{
+  "name": "serbian-to-english-comments",
+  "description": "Translates inline Python comments from Serbian to English, replacing them in-place in the source file. Use when given a Python file that contains S...",
+  "version": "1.0.0"
+}

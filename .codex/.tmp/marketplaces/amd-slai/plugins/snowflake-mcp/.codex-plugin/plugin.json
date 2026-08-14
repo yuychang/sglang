@@ -1,0 +1,5 @@
+{
+  "name": "snowflake-mcp",
+  "description": "Connects Claude to Snowflake using AMD corporate SSO. Authenticates via",
+  "version": "2.0.21"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "rtfm-agent",
+  "description": "Searches EDA tool documentation to answer technical questions with citations",
+  "version": "1.0.45"
+}

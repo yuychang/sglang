@@ -1,0 +1,5 @@
+{
+  "name": "jira-ticket-creator",
+  "description": "Automatically create Jira tickets for CF integration failures from error",
+  "version": "1.0.1"
+}

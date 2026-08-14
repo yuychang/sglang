@@ -1,0 +1,5 @@
+{
+  "name": "sn-device-confluence-pagegen",
+  "description": "Creates a high-level summary of a simnow device using a markdown file",
+  "version": "1.0.0"
+}

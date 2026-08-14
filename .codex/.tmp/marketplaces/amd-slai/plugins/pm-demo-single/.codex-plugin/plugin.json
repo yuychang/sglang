@@ -1,0 +1,5 @@
+{
+  "name": "pm-demo-single",
+  "description": "Single-agent PM demo — reads a Teams meeting transcript (.docx) and extracts",
+  "version": "1.3.2"
+}

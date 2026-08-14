@@ -1,0 +1,5 @@
+{
+  "name": "jira-bug-prs",
+  "description": "Draft and implement pull requests for Jira bugs or tasks. Use when a",
+  "version": "1.0.1"
+}

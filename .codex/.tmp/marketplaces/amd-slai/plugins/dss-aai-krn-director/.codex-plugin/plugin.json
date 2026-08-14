@@ -1,0 +1,5 @@
+{
+  "name": "dss-aai-krn-director",
+  "description": "Generate a weekly director roll-up report: MY WORK + MY MANAGERS + ASKS.",
+  "version": "3.1.9"
+}

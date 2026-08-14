@@ -1,0 +1,5 @@
+{
+  "name": "drc-tracker",
+  "description": "Connect to the DRC Tracker MCP server with OAuth device flow, query DRC",
+  "version": "1.4.7"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "gfx-spec-sync",
+  "description": "Sync and convert AMD GFX hardware spec documents from Perforce ER server. Handles DOCX and PDF formats, maintains a local manifest of registered sp...",
+  "version": "6.1.3"
+}

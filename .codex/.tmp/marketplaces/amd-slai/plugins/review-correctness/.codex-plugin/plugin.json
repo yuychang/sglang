@@ -1,0 +1,5 @@
+{
+  "name": "review-correctness",
+  "description": "C++ correctness review - memory safety, control flow, format strings, buffer safety, ownership, and coding standards.",
+  "version": "1.0.0"
+}

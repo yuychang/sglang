@@ -1,0 +1,8560 @@
+{
+  "name": "amd-slai",
+  "interface": {
+    "displayName": "AMD SLAI"
+  },
+  "plugins": [
+    {
+      "name": "aac-failure-curation",
+      "source": {
+        "source": "local",
+        "path": "./plugins/aac-failure-curation"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "aatc-paper-sanitize",
+      "source": {
+        "source": "local",
+        "path": "./plugins/aatc-paper-sanitize"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "add-new-project",
+      "source": {
+        "source": "local",
+        "path": "./plugins/add-new-project"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "adlpv",
+      "source": {
+        "source": "local",
+        "path": "./plugins/adlpv"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ado",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ado"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "adra-bug-hunter",
+      "source": {
+        "source": "local",
+        "path": "./plugins/adra-bug-hunter"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "aecg-knowledge-work-auth",
+      "source": {
+        "source": "local",
+        "path": "./plugins/aecg-knowledge-work-auth"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "aecg-persona-creator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/aecg-persona-creator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "aecg-rtl-read-access",
+      "source": {
+        "source": "local",
+        "path": "./plugins/aecg-rtl-read-access"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "aecg-scoe-codecollab-comment",
+      "source": {
+        "source": "local",
+        "path": "./plugins/aecg-scoe-codecollab-comment"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "aecg-scoe-swg-deck",
+      "source": {
+        "source": "local",
+        "path": "./plugins/aecg-scoe-swg-deck"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "aecg-skill-creator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/aecg-skill-creator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "aecg-vibe",
+      "source": {
+        "source": "local",
+        "path": "./plugins/aecg-vibe"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "aecg-xart-acrobat-comment",
+      "source": {
+        "source": "local",
+        "path": "./plugins/aecg-xart-acrobat-comment"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "agenda-creator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agenda-creator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "agent-augmented-review-panel",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agent-augmented-review-panel"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "agent-claim",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agent-claim"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "agent-creator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agent-creator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "agent-cross-session-chat",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agent-cross-session-chat"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "agent-email",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agent-email"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "agent-exec-summary",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agent-exec-summary"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "agent-skill-starter",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agent-skill-starter"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "agent-team",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agent-team"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "agenthub-pull-claude",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agenthub-pull-claude"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "agenthub-pull-codex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agenthub-pull-codex"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "agenthub-push-claude",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agenthub-push-claude"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "agenthub-push-codex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agenthub-push-codex"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "agenthub-push-cursor",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agenthub-push-cursor"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "agentic-trust-check",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agentic-trust-check"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "agentmap",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agentmap"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "agents-audit",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agents-audit"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "agv",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agv"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ai-project-manager",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ai-project-manager"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ai-security-playbook",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ai-security-playbook"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ai-security-scan",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ai-security-scan"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ai-training-tracker",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ai-training-tracker"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ai-usage-metrics",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ai-usage-metrics"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "aibf-triage",
+      "source": {
+        "source": "local",
+        "path": "./plugins/aibf-triage"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "aifirst-debug-test",
+      "source": {
+        "source": "local",
+        "path": "./plugins/aifirst-debug-test"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "amd-brand-resources",
+      "source": {
+        "source": "local",
+        "path": "./plugins/amd-brand-resources"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "amd-connect",
+      "source": {
+        "source": "local",
+        "path": "./plugins/amd-connect"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "amd-etx-containers",
+      "source": {
+        "source": "local",
+        "path": "./plugins/amd-etx-containers"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "amd-image-gen",
+      "source": {
+        "source": "local",
+        "path": "./plugins/amd-image-gen"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "amd-onprem-llm",
+      "source": {
+        "source": "local",
+        "path": "./plugins/amd-onprem-llm"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "amd-org-search",
+      "source": {
+        "source": "local",
+        "path": "./plugins/amd-org-search"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "amd-peer-cards",
+      "source": {
+        "source": "local",
+        "path": "./plugins/amd-peer-cards"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "amd-pptx-builder",
+      "source": {
+        "source": "local",
+        "path": "./plugins/amd-pptx-builder"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "amd-pptx-planner",
+      "source": {
+        "source": "local",
+        "path": "./plugins/amd-pptx-planner"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "amd-pptx-planner-old",
+      "source": {
+        "source": "local",
+        "path": "./plugins/amd-pptx-planner-old"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "amd-pptx-template",
+      "source": {
+        "source": "local",
+        "path": "./plugins/amd-pptx-template"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "amd-tools-installer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/amd-tools-installer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "analyze-viper-result",
+      "source": {
+        "source": "local",
+        "path": "./plugins/analyze-viper-result"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "analyze-xoah-result",
+      "source": {
+        "source": "local",
+        "path": "./plugins/analyze-xoah-result"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "anc-triage",
+      "source": {
+        "source": "local",
+        "path": "./plugins/anc-triage"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "aocl-optimizer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/aocl-optimizer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "aperian",
+      "source": {
+        "source": "local",
+        "path": "./plugins/aperian"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "apptainer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/apptainer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "archiviz",
+      "source": {
+        "source": "local",
+        "path": "./plugins/archiviz"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "argus",
+      "source": {
+        "source": "local",
+        "path": "./plugins/argus"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ask-rapid",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ask-rapid"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "association-of-national-advertisers",
+      "source": {
+        "source": "local",
+        "path": "./plugins/association-of-national-advertisers"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "atlassian",
+      "source": {
+        "source": "local",
+        "path": "./plugins/atlassian"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "atlassian-id-lookup",
+      "source": {
+        "source": "local",
+        "path": "./plugins/atlassian-id-lookup"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "atpg-latency-tool",
+      "source": {
+        "source": "local",
+        "path": "./plugins/atpg-latency-tool"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "audit-claude-structure",
+      "source": {
+        "source": "local",
+        "path": "./plugins/audit-claude-structure"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "audit-compliance-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/audit-compliance-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "auto-work",
+      "source": {
+        "source": "local",
+        "path": "./plugins/auto-work"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "auto-work-db",
+      "source": {
+        "source": "local",
+        "path": "./plugins/auto-work-db"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "autometa-validator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/autometa-validator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "backout-service",
+      "source": {
+        "source": "local",
+        "path": "./plugins/backout-service"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "bct-bios-config",
+      "source": {
+        "source": "local",
+        "path": "./plugins/bct-bios-config"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "benevity",
+      "source": {
+        "source": "local",
+        "path": "./plugins/benevity"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "bia-ifrit",
+      "source": {
+        "source": "local",
+        "path": "./plugins/bia-ifrit"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "biweekly-status",
+      "source": {
+        "source": "local",
+        "path": "./plugins/biweekly-status"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "block-interface-diagram",
+      "source": {
+        "source": "local",
+        "path": "./plugins/block-interface-diagram"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "blueprint-curator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/blueprint-curator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "blueprint-wizard",
+      "source": {
+        "source": "local",
+        "path": "./plugins/blueprint-wizard"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "board-ops",
+      "source": {
+        "source": "local",
+        "path": "./plugins/board-ops"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "book-meeting-room",
+      "source": {
+        "source": "local",
+        "path": "./plugins/book-meeting-room"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "bootcode-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/bootcode-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "bootgen-pdi",
+      "source": {
+        "source": "local",
+        "path": "./plugins/bootgen-pdi"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "brainstorm-gfx",
+      "source": {
+        "source": "local",
+        "path": "./plugins/brainstorm-gfx"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "brainstorming",
+      "source": {
+        "source": "local",
+        "path": "./plugins/brainstorming"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "build-pipeline-triage",
+      "source": {
+        "source": "local",
+        "path": "./plugins/build-pipeline-triage"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "build-pytorch-rocm",
+      "source": {
+        "source": "local",
+        "path": "./plugins/build-pytorch-rocm"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "build-sram",
+      "source": {
+        "source": "local",
+        "path": "./plugins/build-sram"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "bus-port-highlight-offline",
+      "source": {
+        "source": "local",
+        "path": "./plugins/bus-port-highlight-offline"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "bvm-psp-replacement",
+      "source": {
+        "source": "local",
+        "path": "./plugins/bvm-psp-replacement"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "c-maki",
+      "source": {
+        "source": "local",
+        "path": "./plugins/c-maki"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "c-style-cast-fixer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/c-style-cast-fixer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "c4-plantuml",
+      "source": {
+        "source": "local",
+        "path": "./plugins/c4-plantuml"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "cadence-skill-writer-local",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cadence-skill-writer-local"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "cadence-support",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cadence-support"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "caveman",
+      "source": {
+        "source": "local",
+        "path": "./plugins/caveman"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "cb-rtl-workflow",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cb-rtl-workflow"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "cca-portfolio",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cca-portfolio"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ccm-hbto-buddy",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ccm-hbto-buddy"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ccms-agent",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ccms-agent"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ccx-baadcode-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ccx-baadcode-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "cdl-rubix-decoupling-converter",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cdl-rubix-decoupling-converter"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "cdo-scripting",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cdo-scripting"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "cdp-shotgun",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cdp-shotgun"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ceara",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ceara"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "cell-codex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cell-codex"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "cerberus",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cerberus"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "cex-analysis",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cex-analysis"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "changelog",
+      "source": {
+        "source": "local",
+        "path": "./plugins/changelog"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "channel-mb-summary",
+      "source": {
+        "source": "local",
+        "path": "./plugins/channel-mb-summary"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "channel-revenue-mastersheet",
+      "source": {
+        "source": "local",
+        "path": "./plugins/channel-revenue-mastersheet"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "chasing-the-sun",
+      "source": {
+        "source": "local",
+        "path": "./plugins/chasing-the-sun"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "checkin-grading",
+      "source": {
+        "source": "local",
+        "path": "./plugins/checkin-grading"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ci-build-dashboard",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ci-build-dashboard"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ci-simulator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ci-simulator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ci-vitals",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ci-vitals"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "clampsense",
+      "source": {
+        "source": "local",
+        "path": "./plugins/clampsense"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "claude-router",
+      "source": {
+        "source": "local",
+        "path": "./plugins/claude-router"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "claude-team-creator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/claude-team-creator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "clock-extractor",
+      "source": {
+        "source": "local",
+        "path": "./plugins/clock-extractor"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "code-reviewer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/code-reviewer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "codebase-readme",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codebase-readme"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "codecollab",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codecollab"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "codecollab-team-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codecollab-team-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "codeql-fp-verify",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codeql-fp-verify"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "codeql-implement",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codeql-implement"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "codex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "codex-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "coding-standards",
+      "source": {
+        "source": "local",
+        "path": "./plugins/coding-standards"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "compare-ifwi-stack-with-asic",
+      "source": {
+        "source": "local",
+        "path": "./plugins/compare-ifwi-stack-with-asic"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "compass-gather",
+      "source": {
+        "source": "local",
+        "path": "./plugins/compass-gather"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "compile-suite-metrics",
+      "source": {
+        "source": "local",
+        "path": "./plugins/compile-suite-metrics"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "component-excelbom-generator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/component-excelbom-generator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "computer-use",
+      "source": {
+        "source": "local",
+        "path": "./plugins/computer-use"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "concur",
+      "source": {
+        "source": "local",
+        "path": "./plugins/concur"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "conf-site-mgr",
+      "source": {
+        "source": "local",
+        "path": "./plugins/conf-site-mgr"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "confluence",
+      "source": {
+        "source": "local",
+        "path": "./plugins/confluence"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "confluence-adf-formatting",
+      "source": {
+        "source": "local",
+        "path": "./plugins/confluence-adf-formatting"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "confluence-cli",
+      "source": {
+        "source": "local",
+        "path": "./plugins/confluence-cli"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "confluence-drawio",
+      "source": {
+        "source": "local",
+        "path": "./plugins/confluence-drawio"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "confluence-scripting",
+      "source": {
+        "source": "local",
+        "path": "./plugins/confluence-scripting"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "confluence-teams-meeting",
+      "source": {
+        "source": "local",
+        "path": "./plugins/confluence-teams-meeting"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "cong-triage",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cong-triage"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "congestion-analysis",
+      "source": {
+        "source": "local",
+        "path": "./plugins/congestion-analysis"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "connex-sdk-guide",
+      "source": {
+        "source": "local",
+        "path": "./plugins/connex-sdk-guide"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "connexus",
+      "source": {
+        "source": "local",
+        "path": "./plugins/connexus"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "connix-adl",
+      "source": {
+        "source": "local",
+        "path": "./plugins/connix-adl"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "consensus-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/consensus-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "context-manager",
+      "source": {
+        "source": "local",
+        "path": "./plugins/context-manager"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "context7",
+      "source": {
+        "source": "local",
+        "path": "./plugins/context7"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "conventional-commit-crafter",
+      "source": {
+        "source": "local",
+        "path": "./plugins/conventional-commit-crafter"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "converge-doc",
+      "source": {
+        "source": "local",
+        "path": "./plugins/converge-doc"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "converge-mas",
+      "source": {
+        "source": "local",
+        "path": "./plugins/converge-mas"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "convert2adoc",
+      "source": {
+        "source": "local",
+        "path": "./plugins/convert2adoc"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "cortex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cortex"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "council-of-claudes",
+      "source": {
+        "source": "local",
+        "path": "./plugins/council-of-claudes"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "coverage-drift-cc",
+      "source": {
+        "source": "local",
+        "path": "./plugins/coverage-drift-cc"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "coverage-report",
+      "source": {
+        "source": "local",
+        "path": "./plugins/coverage-report"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "coverity-leftshift",
+      "source": {
+        "source": "local",
+        "path": "./plugins/coverity-leftshift"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "cp-queue-hang-tracker",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cp-queue-hang-tracker"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "cpp",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cpp"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "crdb-coverage-report",
+      "source": {
+        "source": "local",
+        "path": "./plugins/crdb-coverage-report"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "create-daily-news",
+      "source": {
+        "source": "local",
+        "path": "./plugins/create-daily-news"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "create-deck",
+      "source": {
+        "source": "local",
+        "path": "./plugins/create-deck"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "create-email",
+      "source": {
+        "source": "local",
+        "path": "./plugins/create-email"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "create-github-repo",
+      "source": {
+        "source": "local",
+        "path": "./plugins/create-github-repo"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "create-outline",
+      "source": {
+        "source": "local",
+        "path": "./plugins/create-outline"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "create-vault",
+      "source": {
+        "source": "local",
+        "path": "./plugins/create-vault"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "cross-family",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cross-family"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "custom-coverage",
+      "source": {
+        "source": "local",
+        "path": "./plugins/custom-coverage"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "cxl-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cxl-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "daily-scrum",
+      "source": {
+        "source": "local",
+        "path": "./plugins/daily-scrum"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dark-deck-html",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dark-deck-html"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dashboard-builder",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dashboard-builder"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "databricks-connector",
+      "source": {
+        "source": "local",
+        "path": "./plugins/databricks-connector"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dataiku-api-skill",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dataiku-api-skill"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dc-elab",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dc-elab"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dc-lol",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dc-lol"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dclabops-mount-ubb8",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dclabops-mount-ubb8"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ddrmc-ub-decode",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ddrmc-ub-decode"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ddrmc6a-perf-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ddrmc6a-perf-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "debit-copilot",
+      "source": {
+        "source": "local",
+        "path": "./plugins/debit-copilot"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "debug-dj-test",
+      "source": {
+        "source": "local",
+        "path": "./plugins/debug-dj-test"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "debug-hang",
+      "source": {
+        "source": "local",
+        "path": "./plugins/debug-hang"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "debug-panel",
+      "source": {
+        "source": "local",
+        "path": "./plugins/debug-panel"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "debug-test",
+      "source": {
+        "source": "local",
+        "path": "./plugins/debug-test"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "debug-waves",
+      "source": {
+        "source": "local",
+        "path": "./plugins/debug-waves"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "decision-council",
+      "source": {
+        "source": "local",
+        "path": "./plugins/decision-council"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "deck-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/deck-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "demand-dashboard",
+      "source": {
+        "source": "local",
+        "path": "./plugins/demand-dashboard"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "design-impl-checker",
+      "source": {
+        "source": "local",
+        "path": "./plugins/design-impl-checker"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "design-quality-analyzer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/design-quality-analyzer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "df-config-checker",
+      "source": {
+        "source": "local",
+        "path": "./plugins/df-config-checker"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "df-tcdx-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/df-tcdx-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dfm-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dfm-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "diagramx-ai",
+      "source": {
+        "source": "local",
+        "path": "./plugins/diagramx-ai"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dialectic-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dialectic-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "die-id-lookup",
+      "source": {
+        "source": "local",
+        "path": "./plugins/die-id-lookup"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dispatching-parallel-agents",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dispatching-parallel-agents"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dj-failure-analysis",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dj-failure-analysis"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dj-global-features-removal",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dj-global-features-removal"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dj-run-compare",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dj-run-compare"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "doc-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/doc-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "docker",
+      "source": {
+        "source": "local",
+        "path": "./plugins/docker"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "docx-to-pdf",
+      "source": {
+        "source": "local",
+        "path": "./plugins/docx-to-pdf"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dpl-templating",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dpl-templating"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dppm-report",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dppm-report"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dpv-closed-loop-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dpv-closed-loop-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dpv-spec-validator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dpv-spec-validator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "drac-variance-diagnostics",
+      "source": {
+        "source": "local",
+        "path": "./plugins/drac-variance-diagnostics"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "drc-diff",
+      "source": {
+        "source": "local",
+        "path": "./plugins/drc-diff"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "drc-tracker",
+      "source": {
+        "source": "local",
+        "path": "./plugins/drc-tracker"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "drc-visualizer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/drc-visualizer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "drop2cad-release-notes",
+      "source": {
+        "source": "local",
+        "path": "./plugins/drop2cad-release-notes"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "drs-yaml-expert",
+      "source": {
+        "source": "local",
+        "path": "./plugins/drs-yaml-expert"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ds-disk-request",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ds-disk-request"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dss-aai-krn-cqe",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dss-aai-krn-cqe"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dss-aai-krn-director",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dss-aai-krn-director"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dss-aai-krn-employee",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dss-aai-krn-employee"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dss-aai-krn-executive",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dss-aai-krn-executive"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dss-aai-krn-manager",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dss-aai-krn-manager"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dss-aai-krn-org-structure",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dss-aai-krn-org-structure"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dv-verification",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dv-verification"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dvt-mcp",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dvt-mcp"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "dxio-fsdb-analyzer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dxio-fsdb-analyzer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ears-requirements",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ears-requirements"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "eazybi-pptx",
+      "source": {
+        "source": "local",
+        "path": "./plugins/eazybi-pptx"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "eda-apptainer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/eda-apptainer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "eda-assistant",
+      "source": {
+        "source": "local",
+        "path": "./plugins/eda-assistant"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "eda-error-lookup",
+      "source": {
+        "source": "local",
+        "path": "./plugins/eda-error-lookup"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "eda-tmux",
+      "source": {
+        "source": "local",
+        "path": "./plugins/eda-tmux"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "eight-d-evaluator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/eight-d-evaluator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "email-wiki",
+      "source": {
+        "source": "local",
+        "path": "./plugins/email-wiki"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "error-tracer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/error-tracer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "es-operator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/es-operator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "esid-agent",
+      "source": {
+        "source": "local",
+        "path": "./plugins/esid-agent"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "etx",
+      "source": {
+        "source": "local",
+        "path": "./plugins/etx"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "everyonesocial",
+      "source": {
+        "source": "local",
+        "path": "./plugins/everyonesocial"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "everything-claude-code",
+      "source": {
+        "source": "local",
+        "path": "./plugins/everything-claude-code"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "excalidraw-diagrams",
+      "source": {
+        "source": "local",
+        "path": "./plugins/excalidraw-diagrams"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "execute-plan-gfx",
+      "source": {
+        "source": "local",
+        "path": "./plugins/execute-plan-gfx"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "executing-plans",
+      "source": {
+        "source": "local",
+        "path": "./plugins/executing-plans"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "executive-document-rubric-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/executive-document-rubric-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "explain-testcase",
+      "source": {
+        "source": "local",
+        "path": "./plugins/explain-testcase"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "explore-design",
+      "source": {
+        "source": "local",
+        "path": "./plugins/explore-design"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "extract-xoah-test-url",
+      "source": {
+        "source": "local",
+        "path": "./plugins/extract-xoah-test-url"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "fa-match",
+      "source": {
+        "source": "local",
+        "path": "./plugins/fa-match"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "fetch-atlassian",
+      "source": {
+        "source": "local",
+        "path": "./plugins/fetch-atlassian"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "file-mover",
+      "source": {
+        "source": "local",
+        "path": "./plugins/file-mover"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "file-timesheet",
+      "source": {
+        "source": "local",
+        "path": "./plugins/file-timesheet"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "fin-cust-details",
+      "source": {
+        "source": "local",
+        "path": "./plugins/fin-cust-details"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "fin-master-sheet",
+      "source": {
+        "source": "local",
+        "path": "./plugins/fin-master-sheet"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "fin-unsold-accrual-report",
+      "source": {
+        "source": "local",
+        "path": "./plugins/fin-unsold-accrual-report"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "finish-gfx",
+      "source": {
+        "source": "local",
+        "path": "./plugins/finish-gfx"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "finishing-a-development-branch",
+      "source": {
+        "source": "local",
+        "path": "./plugins/finishing-a-development-branch"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "floorplan-tools",
+      "source": {
+        "source": "local",
+        "path": "./plugins/floorplan-tools"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "formal-dj-flow",
+      "source": {
+        "source": "local",
+        "path": "./plugins/formal-dj-flow"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "formal-gui",
+      "source": {
+        "source": "local",
+        "path": "./plugins/formal-gui"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "formal-intake",
+      "source": {
+        "source": "local",
+        "path": "./plugins/formal-intake"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "formal-orchestrator-skill",
+      "source": {
+        "source": "local",
+        "path": "./plugins/formal-orchestrator-skill"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "formal-plan-auditor",
+      "source": {
+        "source": "local",
+        "path": "./plugins/formal-plan-auditor"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "formal-report",
+      "source": {
+        "source": "local",
+        "path": "./plugins/formal-report"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "formal-resources",
+      "source": {
+        "source": "local",
+        "path": "./plugins/formal-resources"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "formal-run",
+      "source": {
+        "source": "local",
+        "path": "./plugins/formal-run"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "formal-scoreboard-skill",
+      "source": {
+        "source": "local",
+        "path": "./plugins/formal-scoreboard-skill"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "formal-spec-checker",
+      "source": {
+        "source": "local",
+        "path": "./plugins/formal-spec-checker"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "formal-tools",
+      "source": {
+        "source": "local",
+        "path": "./plugins/formal-tools"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "fpga-case-list",
+      "source": {
+        "source": "local",
+        "path": "./plugins/fpga-case-list"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "fpga-crp-creator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/fpga-crp-creator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "fpga-health",
+      "source": {
+        "source": "local",
+        "path": "./plugins/fpga-health"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "fpga-trace",
+      "source": {
+        "source": "local",
+        "path": "./plugins/fpga-trace"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "fsdb",
+      "source": {
+        "source": "local",
+        "path": "./plugins/fsdb"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "fsdb-dump-scope",
+      "source": {
+        "source": "local",
+        "path": "./plugins/fsdb-dump-scope"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "fw-boot-visualization",
+      "source": {
+        "source": "local",
+        "path": "./plugins/fw-boot-visualization"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gap-ticket-automation",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gap-ticket-automation"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gartner",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gartner"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gbuild",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gbuild"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gce-hub-content-editor",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gce-hub-content-editor"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gdb",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gdb"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gen-fml-flow",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gen-fml-flow"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gen-rtl-hier",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gen-rtl-hier"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gen-scopefile",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gen-scopefile"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "general-skill-depricated",
+      "source": {
+        "source": "local",
+        "path": "./plugins/general-skill-depricated"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "generate-doc",
+      "source": {
+        "source": "local",
+        "path": "./plugins/generate-doc"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "genie-from-teams",
+      "source": {
+        "source": "local",
+        "path": "./plugins/genie-from-teams"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "genie-in-a-bottle",
+      "source": {
+        "source": "local",
+        "path": "./plugins/genie-in-a-bottle"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "getabstract",
+      "source": {
+        "source": "local",
+        "path": "./plugins/getabstract"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-ai-first",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-ai-first"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-debug-waves",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-debug-waves"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-dj",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-dj"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-doctor",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-doctor"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-hw-init",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-hw-init"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-jg",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-jg"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-jira",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-jira"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-mcp-debug-tracker",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-mcp-debug-tracker"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-mcp-fsdb-waveform",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-mcp-fsdb-waveform"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-mcp-gdb",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-mcp-gdb"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-mcp-pipeline-bisect",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-mcp-pipeline-bisect"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-mcp-preqorsor",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-mcp-preqorsor"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-mcp-tcl-shell",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-mcp-tcl-shell"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-p4",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-p4"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-skill-scorecard",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-skill-scorecard"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-spec-oracle",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-spec-oracle"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-spec-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-spec-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-spec-sync",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-spec-sync"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-tasktree-lib",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-tasktree-lib"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-tracr",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-tracr"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gfx-tutor",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gfx-tutor"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gh-check",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gh-check"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gh-config",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gh-config"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gh-config-powershell",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gh-config-powershell"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gh-config-windows",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gh-config-windows"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "git-p4-commands",
+      "source": {
+        "source": "local",
+        "path": "./plugins/git-p4-commands"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "github-org-digest",
+      "source": {
+        "source": "local",
+        "path": "./plugins/github-org-digest"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gls-bringup-agent",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gls-bringup-agent"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "google-chat",
+      "source": {
+        "source": "local",
+        "path": "./plugins/google-chat"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "goon-squad-hq",
+      "source": {
+        "source": "local",
+        "path": "./plugins/goon-squad-hq"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gpu-hang-mempath-tracer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gpu-hang-mempath-tracer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gradle-build-debugger",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gradle-build-debugger"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gradle-monitoring",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gradle-monitoring"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "gtac",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gtac"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "guided-ai-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/guided-ai-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "handoff",
+      "source": {
+        "source": "local",
+        "path": "./plugins/handoff"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "harness-creator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/harness-creator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "helios-mi450-ifoe-diagnostic",
+      "source": {
+        "source": "local",
+        "path": "./plugins/helios-mi450-ifoe-diagnostic"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "help-citrix",
+      "source": {
+        "source": "local",
+        "path": "./plugins/help-citrix"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "herdr",
+      "source": {
+        "source": "local",
+        "path": "./plugins/herdr"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "herdr-teams",
+      "source": {
+        "source": "local",
+        "path": "./plugins/herdr-teams"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "host-validator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/host-validator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "hoteling",
+      "source": {
+        "source": "local",
+        "path": "./plugins/hoteling"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "hotpot-check",
+      "source": {
+        "source": "local",
+        "path": "./plugins/hotpot-check"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "hstdm-timing-compare",
+      "source": {
+        "source": "local",
+        "path": "./plugins/hstdm-timing-compare"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "html-artifacts",
+      "source": {
+        "source": "local",
+        "path": "./plugins/html-artifacts"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "icims-job-postings",
+      "source": {
+        "source": "local",
+        "path": "./plugins/icims-job-postings"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ideaforge",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ideaforge"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "identify-components",
+      "source": {
+        "source": "local",
+        "path": "./plugins/identify-components"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ieee-xplore",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ieee-xplore"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ifwi-builder-release-analysis",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ifwi-builder-release-analysis"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ifwi-error-analysis",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ifwi-error-analysis"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ifwi-release-setup",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ifwi-release-setup"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ifwi-triage-tools",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ifwi-triage-tools"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "implement-feature",
+      "source": {
+        "source": "local",
+        "path": "./plugins/implement-feature"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "implement-mas",
+      "source": {
+        "source": "local",
+        "path": "./plugins/implement-mas"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "implement-spec",
+      "source": {
+        "source": "local",
+        "path": "./plugins/implement-spec"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "infosec-intake",
+      "source": {
+        "source": "local",
+        "path": "./plugins/infosec-intake"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "infosec-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/infosec-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ingestion-cli",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ingestion-cli"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "install-perfxpert",
+      "source": {
+        "source": "local",
+        "path": "./plugins/install-perfxpert"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "instinct-design",
+      "source": {
+        "source": "local",
+        "path": "./plugins/instinct-design"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "iproute2-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/iproute2-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ipsoc-kb-manager",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ipsoc-kb-manager"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ironclad-nda",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ironclad-nda"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jama",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jama"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jamanomaly",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jamanomaly"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jamanomoly",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jamanomoly"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jenkins",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jenkins"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jianwa1-general-assistant",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jianwa1-general-assistant"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jira",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jira"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jira-bug-prs",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jira-bug-prs"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jira-bulk-edit",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jira-bulk-edit"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jira-cli",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jira-cli"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jira-cloud-batch-edit",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jira-cloud-batch-edit"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jira-culprit-history",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jira-culprit-history"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jira-dependency-report",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jira-dependency-report"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jira-individual-report",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jira-individual-report"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jira-offsite-slides",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jira-offsite-slides"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jira-pro-status-update",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jira-pro-status-update"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jira-recat",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jira-recat"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jira-scripting",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jira-scripting"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jira-ticket-creator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jira-ticket-creator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jira-ticket-summary",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jira-ticket-summary"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jira-to-bonfire-csv",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jira-to-bonfire-csv"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jira-writer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jira-writer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jiramonk",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jiramonk"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "job-sankey",
+      "source": {
+        "source": "local",
+        "path": "./plugins/job-sankey"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "jumpgate",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jumpgate"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "kerberos-ticket-helper",
+      "source": {
+        "source": "local",
+        "path": "./plugins/kerberos-ticket-helper"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "lec-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/lec-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ledger",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ledger"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "linkedin-learning",
+      "source": {
+        "source": "local",
+        "path": "./plugins/linkedin-learning"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "linux-kernel-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/linux-kernel-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "linux-nabu-connector",
+      "source": {
+        "source": "local",
+        "path": "./plugins/linux-nabu-connector"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "linux-tfa-uboot-build",
+      "source": {
+        "source": "local",
+        "path": "./plugins/linux-tfa-uboot-build"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "llm-gateway",
+      "source": {
+        "source": "local",
+        "path": "./plugins/llm-gateway"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "llm-gateway-stats",
+      "source": {
+        "source": "local",
+        "path": "./plugins/llm-gateway-stats"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "local-rag",
+      "source": {
+        "source": "local",
+        "path": "./plugins/local-rag"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "log-verbosity-analyzer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/log-verbosity-analyzer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "lookup-register",
+      "source": {
+        "source": "local",
+        "path": "./plugins/lookup-register"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "lsamd",
+      "source": {
+        "source": "local",
+        "path": "./plugins/lsamd"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "lsf-interactive",
+      "source": {
+        "source": "local",
+        "path": "./plugins/lsf-interactive"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "lsf-triage",
+      "source": {
+        "source": "local",
+        "path": "./plugins/lsf-triage"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "m365-calendar",
+      "source": {
+        "source": "local",
+        "path": "./plugins/m365-calendar"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "m365-contacts",
+      "source": {
+        "source": "local",
+        "path": "./plugins/m365-contacts"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "m365-email",
+      "source": {
+        "source": "local",
+        "path": "./plugins/m365-email"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "m365-engage",
+      "source": {
+        "source": "local",
+        "path": "./plugins/m365-engage"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "m365-meeting-transcript",
+      "source": {
+        "source": "local",
+        "path": "./plugins/m365-meeting-transcript"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "m365-onedrive",
+      "source": {
+        "source": "local",
+        "path": "./plugins/m365-onedrive"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "m365-onenote",
+      "source": {
+        "source": "local",
+        "path": "./plugins/m365-onenote"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "m365-people",
+      "source": {
+        "source": "local",
+        "path": "./plugins/m365-people"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "m365-planner",
+      "source": {
+        "source": "local",
+        "path": "./plugins/m365-planner"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "m365-protected-docs",
+      "source": {
+        "source": "local",
+        "path": "./plugins/m365-protected-docs"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "m365-sharepoint",
+      "source": {
+        "source": "local",
+        "path": "./plugins/m365-sharepoint"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "m365-teams",
+      "source": {
+        "source": "local",
+        "path": "./plugins/m365-teams"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "macro-tile-interface-sanity",
+      "source": {
+        "source": "local",
+        "path": "./plugins/macro-tile-interface-sanity"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "make-instinct-wiki",
+      "source": {
+        "source": "local",
+        "path": "./plugins/make-instinct-wiki"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "markitdown",
+      "source": {
+        "source": "local",
+        "path": "./plugins/markitdown"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mars",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mars"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mars-synth-register",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mars-synth-register"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mars-user-synthetic",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mars-user-synthetic"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mcp-auth-copy",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mcp-auth-copy"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mcp-bridge",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mcp-bridge"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mcp-cli",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mcp-cli"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mcp-creator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mcp-creator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "md-to-gh-html",
+      "source": {
+        "source": "local",
+        "path": "./plugins/md-to-gh-html"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "md-to-mermaid",
+      "source": {
+        "source": "local",
+        "path": "./plugins/md-to-mermaid"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mdview",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mdview"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "media-ip-fw-security-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/media-ip-fw-security-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "meeting-actions",
+      "source": {
+        "source": "local",
+        "path": "./plugins/meeting-actions"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "meeting-notes-formatter",
+      "source": {
+        "source": "local",
+        "path": "./plugins/meeting-notes-formatter"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "meeting-recap",
+      "source": {
+        "source": "local",
+        "path": "./plugins/meeting-recap"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mentoring",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mentoring"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "merge-bot-point-release-config",
+      "source": {
+        "source": "local",
+        "path": "./plugins/merge-bot-point-release-config"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "metricsofai-access-request",
+      "source": {
+        "source": "local",
+        "path": "./plugins/metricsofai-access-request"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mhdc-hackathon-git-helper",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mhdc-hackathon-git-helper"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mhdc-hackathon-rubric",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mhdc-hackathon-rubric"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mi-fw-lead-ifwi-patch",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mi-fw-lead-ifwi-patch"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mi-fw-lead-ifwi-release-report",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mi-fw-lead-ifwi-release-report"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mi-fw-lead-pldm-bundle",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mi-fw-lead-pldm-bundle"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mi-fw-lead-prerelease-notes",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mi-fw-lead-prerelease-notes"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mi-fw-lead-reg-read",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mi-fw-lead-reg-read"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mi-fw-lead-releases-tracker",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mi-fw-lead-releases-tracker"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mi-fw-lead-setup",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mi-fw-lead-setup"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "migrate-dv",
+      "source": {
+        "source": "local",
+        "path": "./plugins/migrate-dv"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "migrate-perforce-to-github",
+      "source": {
+        "source": "local",
+        "path": "./plugins/migrate-perforce-to-github"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "milestone-failure-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/milestone-failure-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mini-me",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mini-me"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "minio",
+      "source": {
+        "source": "local",
+        "path": "./plugins/minio"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mit-sloan-management-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mit-sloan-management-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mit-technology-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mit-technology-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mmaksimo-skill",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mmaksimo-skill"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "module-assistant",
+      "source": {
+        "source": "local",
+        "path": "./plugins/module-assistant"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "monitor-teams-pp-requests",
+      "source": {
+        "source": "local",
+        "path": "./plugins/monitor-teams-pp-requests"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "monitor-test",
+      "source": {
+        "source": "local",
+        "path": "./plugins/monitor-test"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "msft-docs-preview",
+      "source": {
+        "source": "local",
+        "path": "./plugins/msft-docs-preview"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "multi-seed-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/multi-seed-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "multi-user-application-testing",
+      "source": {
+        "source": "local",
+        "path": "./plugins/multi-user-application-testing"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "multiagent-context-manager",
+      "source": {
+        "source": "local",
+        "path": "./plugins/multiagent-context-manager"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mygroups",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mygroups"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "mywave",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mywave"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "nabu",
+      "source": {
+        "source": "local",
+        "path": "./plugins/nabu"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "nabu-interface-mentor",
+      "source": {
+        "source": "local",
+        "path": "./plugins/nabu-interface-mentor"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "nanotime-eco-bridge",
+      "source": {
+        "source": "local",
+        "path": "./plugins/nanotime-eco-bridge"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "nanotime-ls-topology-maker",
+      "source": {
+        "source": "local",
+        "path": "./plugins/nanotime-ls-topology-maker"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "nanotime-tcl-assistant",
+      "source": {
+        "source": "local",
+        "path": "./plugins/nanotime-tcl-assistant"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "nanotime-timing-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/nanotime-timing-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "nanotime-timing-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/nanotime-timing-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "new-test-bringup",
+      "source": {
+        "source": "local",
+        "path": "./plugins/new-test-bringup"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "nextgen-deploy-container",
+      "source": {
+        "source": "local",
+        "path": "./plugins/nextgen-deploy-container"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "nextgen-generate-collateral",
+      "source": {
+        "source": "local",
+        "path": "./plugins/nextgen-generate-collateral"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "nextgen-get-parts",
+      "source": {
+        "source": "local",
+        "path": "./plugins/nextgen-get-parts"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "nextgen-installer-agent",
+      "source": {
+        "source": "local",
+        "path": "./plugins/nextgen-installer-agent"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "nextgen-installer-config",
+      "source": {
+        "source": "local",
+        "path": "./plugins/nextgen-installer-config"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "nextgen-integration-test",
+      "source": {
+        "source": "local",
+        "path": "./plugins/nextgen-integration-test"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "nextgen-list-containers",
+      "source": {
+        "source": "local",
+        "path": "./plugins/nextgen-list-containers"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "nightly-regression-debugger",
+      "source": {
+        "source": "local",
+        "path": "./plugins/nightly-regression-debugger"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "nocgen-ai",
+      "source": {
+        "source": "local",
+        "path": "./plugins/nocgen-ai"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "npatanch-skill",
+      "source": {
+        "source": "local",
+        "path": "./plugins/npatanch-skill"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "npi-error-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/npi-error-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "npibox",
+      "source": {
+        "source": "local",
+        "path": "./plugins/npibox"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ntid-lookup",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ntid-lookup"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "office-days-tracker",
+      "source": {
+        "source": "local",
+        "path": "./plugins/office-days-tracker"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ogmatic",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ogmatic"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ogmatic-dashboards-powerbi",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ogmatic-dashboards-powerbi"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ogmatic-dedc",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ogmatic-dedc"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ogmatic-views",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ogmatic-views"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "okta-reg",
+      "source": {
+        "source": "local",
+        "path": "./plugins/okta-reg"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "onboarding",
+      "source": {
+        "source": "local",
+        "path": "./plugins/onboarding"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "onboarding-agent",
+      "source": {
+        "source": "local",
+        "path": "./plugins/onboarding-agent"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ontrack-jira",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ontrack-jira"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "open-knowledge-format",
+      "source": {
+        "source": "local",
+        "path": "./plugins/open-knowledge-format"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "opentelemetry",
+      "source": {
+        "source": "local",
+        "path": "./plugins/opentelemetry"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "orca",
+      "source": {
+        "source": "local",
+        "path": "./plugins/orca"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "outlook",
+      "source": {
+        "source": "local",
+        "path": "./plugins/outlook"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "p4-branch-create",
+      "source": {
+        "source": "local",
+        "path": "./plugins/p4-branch-create"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "p4-cdb-permissions",
+      "source": {
+        "source": "local",
+        "path": "./plugins/p4-cdb-permissions"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "p4-cl-summary",
+      "source": {
+        "source": "local",
+        "path": "./plugins/p4-cl-summary"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "p4-cli",
+      "source": {
+        "source": "local",
+        "path": "./plugins/p4-cli"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "p4-digest",
+      "source": {
+        "source": "local",
+        "path": "./plugins/p4-digest"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "p4-ipcache",
+      "source": {
+        "source": "local",
+        "path": "./plugins/p4-ipcache"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "p4-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/p4-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "p4-search",
+      "source": {
+        "source": "local",
+        "path": "./plugins/p4-search"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "p4-shelf-cleanup",
+      "source": {
+        "source": "local",
+        "path": "./plugins/p4-shelf-cleanup"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "p4-submit-guard",
+      "source": {
+        "source": "local",
+        "path": "./plugins/p4-submit-guard"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "p4-to-jira-comment",
+      "source": {
+        "source": "local",
+        "path": "./plugins/p4-to-jira-comment"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "palma-block-init",
+      "source": {
+        "source": "local",
+        "path": "./plugins/palma-block-init"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "palma-gen-rtl",
+      "source": {
+        "source": "local",
+        "path": "./plugins/palma-gen-rtl"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "palma-gen-tb",
+      "source": {
+        "source": "local",
+        "path": "./plugins/palma-gen-tb"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "palma-monitor-regression",
+      "source": {
+        "source": "local",
+        "path": "./plugins/palma-monitor-regression"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "palma-new-repo",
+      "source": {
+        "source": "local",
+        "path": "./plugins/palma-new-repo"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "palma-new-test",
+      "source": {
+        "source": "local",
+        "path": "./plugins/palma-new-test"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "palma-references",
+      "source": {
+        "source": "local",
+        "path": "./plugins/palma-references"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "palma-runtest",
+      "source": {
+        "source": "local",
+        "path": "./plugins/palma-runtest"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "palma-triage",
+      "source": {
+        "source": "local",
+        "path": "./plugins/palma-triage"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "panel-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/panel-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "panel-devils-advocate",
+      "source": {
+        "source": "local",
+        "path": "./plugins/panel-devils-advocate"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "panel-dialectic",
+      "source": {
+        "source": "local",
+        "path": "./plugins/panel-dialectic"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "panel-senior",
+      "source": {
+        "source": "local",
+        "path": "./plugins/panel-senior"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "papi2-docs",
+      "source": {
+        "source": "local",
+        "path": "./plugins/papi2-docs"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "patchwork",
+      "source": {
+        "source": "local",
+        "path": "./plugins/patchwork"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "patrchen-starter-skill",
+      "source": {
+        "source": "local",
+        "path": "./plugins/patrchen-starter-skill"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pattern-pilot",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pattern-pilot"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pd-block-diagram",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pd-block-diagram"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pd-cac-delta-debug-assistant",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pd-cac-delta-debug-assistant"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pdfkb",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pdfkb"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pdk-reg",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pdk-reg"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "perfcounter-tb-gen-agv",
+      "source": {
+        "source": "local",
+        "path": "./plugins/perfcounter-tb-gen-agv"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "perforce-cumulative-patch",
+      "source": {
+        "source": "local",
+        "path": "./plugins/perforce-cumulative-patch"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "perforce-dev-tools",
+      "source": {
+        "source": "local",
+        "path": "./plugins/perforce-dev-tools"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "perl-gen-rtl",
+      "source": {
+        "source": "local",
+        "path": "./plugins/perl-gen-rtl"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "persona-creator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/persona-creator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "perview",
+      "source": {
+        "source": "local",
+        "path": "./plugins/perview"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "perview-adoption-metrics",
+      "source": {
+        "source": "local",
+        "path": "./plugins/perview-adoption-metrics"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "plan-ahead",
+      "source": {
+        "source": "local",
+        "path": "./plugins/plan-ahead"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "playwright-cli",
+      "source": {
+        "source": "local",
+        "path": "./plugins/playwright-cli"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "plex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/plex"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "plm-build",
+      "source": {
+        "source": "local",
+        "path": "./plugins/plm-build"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "plst-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/plst-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "plugin-creator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/plugin-creator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pm-ai-usage-report",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pm-ai-usage-report"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pm-apps-testing",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pm-apps-testing"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pm-daily-digest",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pm-daily-digest"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pm-decision-log",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pm-decision-log"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pm-demo-single",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pm-demo-single"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pm-executive-briefing",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pm-executive-briefing"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pm-jira-dependency-map",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pm-jira-dependency-map"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pm-meeting-to-action",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pm-meeting-to-action"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pm-portfolio-rollup",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pm-portfolio-rollup"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pm-project-kickoff",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pm-project-kickoff"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pm-release-wrap",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pm-release-wrap"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pm-replan-assist",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pm-replan-assist"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pm-risk-radar",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pm-risk-radar"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pm-roadmap-builder",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pm-roadmap-builder"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pm-sprint-planner",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pm-sprint-planner"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pm-sync-and-report",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pm-sync-and-report"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pm-teams-notify",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pm-teams-notify"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pm-use-case-intake",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pm-use-case-intake"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pm-weekly-report-to-confluence",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pm-weekly-report-to-confluence"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pmca-cptra-spec",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pmca-cptra-spec"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pmfw-offbox-build",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pmfw-offbox-build"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pnr-metric-analysis",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pnr-metric-analysis"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pnr-qor-newsletter",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pnr-qor-newsletter"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pnr-runtime-comparison",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pnr-runtime-comparison"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pnr-stage-gantt",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pnr-stage-gantt"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "po-backlog-health",
+      "source": {
+        "source": "local",
+        "path": "./plugins/po-backlog-health"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "po-release-readiness",
+      "source": {
+        "source": "local",
+        "path": "./plugins/po-release-readiness"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "po-standup-report",
+      "source": {
+        "source": "local",
+        "path": "./plugins/po-standup-report"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "po-voc-to-sprint",
+      "source": {
+        "source": "local",
+        "path": "./plugins/po-voc-to-sprint"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "podcast-creator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/podcast-creator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "podman-rootless-etx",
+      "source": {
+        "source": "local",
+        "path": "./plugins/podman-rootless-etx"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "power-ai",
+      "source": {
+        "source": "local",
+        "path": "./plugins/power-ai"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "powerbi-browser",
+      "source": {
+        "source": "local",
+        "path": "./plugins/powerbi-browser"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "powerbi-manager-dashboard",
+      "source": {
+        "source": "local",
+        "path": "./plugins/powerbi-manager-dashboard"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "powerbi-mgmt",
+      "source": {
+        "source": "local",
+        "path": "./plugins/powerbi-mgmt"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "powermind",
+      "source": {
+        "source": "local",
+        "path": "./plugins/powermind"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "powerpoint-generator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/powerpoint-generator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ppa-fc-placed-pt-power",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ppa-fc-placed-pt-power"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ppa-fc-signoff",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ppa-fc-signoff"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ppa-ieee-754",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ppa-ieee-754"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ppa-lec-graph-rag",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ppa-lec-graph-rag"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ppa-opt-patterns",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ppa-opt-patterns"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ppa-rtl-cg-opt",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ppa-rtl-cg-opt"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ppa-rtl-jasper-eq",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ppa-rtl-jasper-eq"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ppa-stratus-hls",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ppa-stratus-hls"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ppa-sv-coding-standards",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ppa-sv-coding-standards"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ppa-systemverilog-1800-2023",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ppa-systemverilog-1800-2023"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ppin-convert",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ppin-convert"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pptx-generation",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pptx-generation"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pr-submit",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pr-submit"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "prag",
+      "source": {
+        "source": "local",
+        "path": "./plugins/prag"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pre-include",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pre-include"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "preinclude-cleanup",
+      "source": {
+        "source": "local",
+        "path": "./plugins/preinclude-cleanup"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "presentation-tips",
+      "source": {
+        "source": "local",
+        "path": "./plugins/presentation-tips"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "problem-statement-to-tasks",
+      "source": {
+        "source": "local",
+        "path": "./plugins/problem-statement-to-tasks"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pt-doc-search",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pt-doc-search"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pt-session-connect",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pt-session-connect"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "pvds-extractor",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pvds-extractor"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "python-packages-at-amd",
+      "source": {
+        "source": "local",
+        "path": "./plugins/python-packages-at-amd"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "qrm-analyzer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/qrm-analyzer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "qsc-conductor-worker",
+      "source": {
+        "source": "local",
+        "path": "./plugins/qsc-conductor-worker"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "qsc-platypi-worker",
+      "source": {
+        "source": "local",
+        "path": "./plugins/qsc-platypi-worker"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "qtest",
+      "source": {
+        "source": "local",
+        "path": "./plugins/qtest"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "quality-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/quality-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "quill",
+      "source": {
+        "source": "local",
+        "path": "./plugins/quill"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "raid-perf-report-generation",
+      "source": {
+        "source": "local",
+        "path": "./plugins/raid-perf-report-generation"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ralph-wiggum-loop",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ralph-wiggum-loop"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rat-regression-analysis-tool",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rat-regression-analysis-tool"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rdl",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rdl"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "receiving-code-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/receiving-code-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "receiving-code-review-gfx",
+      "source": {
+        "source": "local",
+        "path": "./plugins/receiving-code-review-gfx"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "reg-initialization-drifts",
+      "source": {
+        "source": "local",
+        "path": "./plugins/reg-initialization-drifts"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "register-business-application",
+      "source": {
+        "source": "local",
+        "path": "./plugins/register-business-application"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "regnow-secip-run",
+      "source": {
+        "source": "local",
+        "path": "./plugins/regnow-secip-run"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "regression-failure-analysis",
+      "source": {
+        "source": "local",
+        "path": "./plugins/regression-failure-analysis"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "regression-triage",
+      "source": {
+        "source": "local",
+        "path": "./plugins/regression-triage"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "regspec",
+      "source": {
+        "source": "local",
+        "path": "./plugins/regspec"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "release-notes",
+      "source": {
+        "source": "local",
+        "path": "./plugins/release-notes"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "repeater-report",
+      "source": {
+        "source": "local",
+        "path": "./plugins/repeater-report"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "repo-quest",
+      "source": {
+        "source": "local",
+        "path": "./plugins/repo-quest"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "requesting-code-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/requesting-code-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "requesting-code-review-gfx",
+      "source": {
+        "source": "local",
+        "path": "./plugins/requesting-code-review-gfx"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "required-training-companion",
+      "source": {
+        "source": "local",
+        "path": "./plugins/required-training-companion"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "resume-handoff",
+      "source": {
+        "source": "local",
+        "path": "./plugins/resume-handoff"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "review-arch",
+      "source": {
+        "source": "local",
+        "path": "./plugins/review-arch"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "review-change",
+      "source": {
+        "source": "local",
+        "path": "./plugins/review-change"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "review-concurrency",
+      "source": {
+        "source": "local",
+        "path": "./plugins/review-concurrency"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "review-correctness",
+      "source": {
+        "source": "local",
+        "path": "./plugins/review-correctness"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "review-cross-doc-consistency",
+      "source": {
+        "source": "local",
+        "path": "./plugins/review-cross-doc-consistency"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "review-doc",
+      "source": {
+        "source": "local",
+        "path": "./plugins/review-doc"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "review-logging",
+      "source": {
+        "source": "local",
+        "path": "./plugins/review-logging"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "review-mas",
+      "source": {
+        "source": "local",
+        "path": "./plugins/review-mas"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "review-panel",
+      "source": {
+        "source": "local",
+        "path": "./plugins/review-panel"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "review-perf",
+      "source": {
+        "source": "local",
+        "path": "./plugins/review-perf"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "review-requirements",
+      "source": {
+        "source": "local",
+        "path": "./plugins/review-requirements"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "review-security",
+      "source": {
+        "source": "local",
+        "path": "./plugins/review-security"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "review-spec-results",
+      "source": {
+        "source": "local",
+        "path": "./plugins/review-spec-results"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "review-tech-debt",
+      "source": {
+        "source": "local",
+        "path": "./plugins/review-tech-debt"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "review-to-adr",
+      "source": {
+        "source": "local",
+        "path": "./plugins/review-to-adr"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "revise-guidelines",
+      "source": {
+        "source": "local",
+        "path": "./plugins/revise-guidelines"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "revise-with-codstd",
+      "source": {
+        "source": "local",
+        "path": "./plugins/revise-with-codstd"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rhsc-grid-powermap",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rhsc-grid-powermap"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rie-fpv-add-checker",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rie-fpv-add-checker"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rie-fpv-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rie-fpv-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rocm-docs-reviewer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rocm-docs-reviewer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rocm-tct-code-reviewer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rocm-tct-code-reviewer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rovodev",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rovodev"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rsmu-user-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rsmu-user-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rt-rie-fp-convert",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rt-rie-fp-convert"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rt-run-lec",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rt-run-lec"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rt-rwm-fpv-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rt-rwm-fpv-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rtl-audit-flat",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rtl-audit-flat"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rtl-coding-standards",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rtl-coding-standards"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rtl-comparison",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rtl-comparison"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rtl-design-audit",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rtl-design-audit"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rtl-explorer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rtl-explorer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rtl-power-playbook",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rtl-power-playbook"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rtl-ppa-collect",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rtl-ppa-collect"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rtl-ppa-fix",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rtl-ppa-fix"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rtl-ppa-lookup",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rtl-ppa-lookup"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rtl-ppa-optimizer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rtl-ppa-optimizer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rtl-rewrite",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rtl-rewrite"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rtl-source-mapper",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rtl-source-mapper"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rtl-submit-readiness",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rtl-submit-readiness"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rtl-validation-workflow",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rtl-validation-workflow"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rubber-duck",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rubber-duck"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "rubix-to-api-convert",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rubix-to-api-convert"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "run-lec",
+      "source": {
+        "source": "local",
+        "path": "./plugins/run-lec"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ryayokum-skill",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ryayokum-skill"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sachatla-general-skill",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sachatla-general-skill"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sachatla-skill",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sachatla-skill"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sage-ingest",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sage-ingest"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sailpoint",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sailpoint"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sap-je-upload",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sap-je-upload"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sauber-coverage-extractor",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sauber-coverage-extractor"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sauber-testcase-enhancement-jarvis",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sauber-testcase-enhancement-jarvis"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sca-questionnaire-validator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sca-questionnaire-validator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "scanview-mcp",
+      "source": {
+        "source": "local",
+        "path": "./plugins/scanview-mcp"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "scanview-sdk-probe",
+      "source": {
+        "source": "local",
+        "path": "./plugins/scanview-sdk-probe"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "screen-highlight",
+      "source": {
+        "source": "local",
+        "path": "./plugins/screen-highlight"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "screen-record",
+      "source": {
+        "source": "local",
+        "path": "./plugins/screen-record"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "screenshot-to-jira",
+      "source": {
+        "source": "local",
+        "path": "./plugins/screenshot-to-jira"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sd-card-flash",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sd-card-flash"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sdpguru",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sdpguru"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sdt-lopper-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sdt-lopper-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "secretspec",
+      "source": {
+        "source": "local",
+        "path": "./plugins/secretspec"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "security-cr-playbook",
+      "source": {
+        "source": "local",
+        "path": "./plugins/security-cr-playbook"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "security-cr-workflow",
+      "source": {
+        "source": "local",
+        "path": "./plugins/security-cr-workflow"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "serbian-to-english-comments",
+      "source": {
+        "source": "local",
+        "path": "./plugins/serbian-to-english-comments"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "servicenow",
+      "source": {
+        "source": "local",
+        "path": "./plugins/servicenow"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "setup-email",
+      "source": {
+        "source": "local",
+        "path": "./plugins/setup-email"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "setup-tng-build-host",
+      "source": {
+        "source": "local",
+        "path": "./plugins/setup-tng-build-host"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "silimate",
+      "source": {
+        "source": "local",
+        "path": "./plugins/silimate"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "siloti",
+      "source": {
+        "source": "local",
+        "path": "./plugins/siloti"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "single-fail-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/single-fail-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "skill-auto-selector",
+      "source": {
+        "source": "local",
+        "path": "./plugins/skill-auto-selector"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "skill-creator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/skill-creator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "skill-finder",
+      "source": {
+        "source": "local",
+        "path": "./plugins/skill-finder"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "skill-improve",
+      "source": {
+        "source": "local",
+        "path": "./plugins/skill-improve"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "skill-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/skill-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "skill-similarity-check",
+      "source": {
+        "source": "local",
+        "path": "./plugins/skill-similarity-check"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "skill-standard",
+      "source": {
+        "source": "local",
+        "path": "./plugins/skill-standard"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slack-cli",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slack-cli"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slai-app-creator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slai-app-creator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slai-artifactory-releaser",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slai-artifactory-releaser"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slai-atlassian",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slai-atlassian"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slai-calendar",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slai-calendar"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slai-catalog",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slai-catalog"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slai-codex-plugin-cc",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slai-codex-plugin-cc"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slai-compliance-audit",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slai-compliance-audit"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slai-email",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slai-email"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slai-jama",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slai-jama"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slai-marketplace-ui",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slai-marketplace-ui"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slai-production-key-agent",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slai-production-key-agent"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slai-registry-connector",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slai-registry-connector"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slai-teams",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slai-teams"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slai-tokenops-usage",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slai-tokenops-usage"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slai-workflow",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slai-workflow"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slide-creator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slide-creator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slides-html",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slides-html"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slt-hw-commonality",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slt-hw-commonality"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slt-hw-commonality-extract",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slt-hw-commonality-extract"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slt-hw-commonality-parse",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slt-hw-commonality-parse"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slt-hw-commonality-pipeline",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slt-hw-commonality-pipeline"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slt-hw-commonality-summarize",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slt-hw-commonality-summarize"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "slurm",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slurm"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "smart-blamefinder",
+      "source": {
+        "source": "local",
+        "path": "./plugins/smart-blamefinder"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "smart-cdc",
+      "source": {
+        "source": "local",
+        "path": "./plugins/smart-cdc"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "smartsheet",
+      "source": {
+        "source": "local",
+        "path": "./plugins/smartsheet"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "smn-callout-analyzer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/smn-callout-analyzer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "smn-tracer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/smn-tracer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-add-mp-to-model",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-add-mp-to-model"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-add-new-mp",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-add-new-mp"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-add-worktree",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-add-worktree"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-ai-team-reporter",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-ai-team-reporter"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-analyze-jira",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-analyze-jira"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-atforge",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-atforge"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-bag-it-ship-it",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-bag-it-ship-it"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-bag-it-tag-it",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-bag-it-tag-it"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-blade",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-blade"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-blueprint",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-blueprint"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-bsg-validator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-bsg-validator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-build",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-build"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-ccp-engine",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-ccp-engine"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-coco",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-coco"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-code-walkthrough",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-code-walkthrough"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-commit-hunt",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-commit-hunt"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-covai",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-covai"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-coverage-gather",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-coverage-gather"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-cpu-utest",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-cpu-utest"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-db-artifactory-update",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-db-artifactory-update"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-debug-riscof-tests",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-debug-riscof-tests"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-deep-scrub",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-deep-scrub"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-deployment-hotpot",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-deployment-hotpot"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-device-confluence-pagegen",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-device-confluence-pagegen"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-dicta",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-dicta"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-dicta-setup",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-dicta-setup"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-die-autotest",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-die-autotest"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-doc-ingest",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-doc-ingest"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-dtest-hardcode-analyzer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-dtest-hardcode-analyzer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-eval-harvest",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-eval-harvest"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-faber-plan-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-faber-plan-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-faber-setup",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-faber-setup"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-feas-pack",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-feas-pack"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-fides2-run",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-fides2-run"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-gh-track",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-gh-track"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-gopher-create",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-gopher-create"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-grex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-grex"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-hat",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-hat"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-imagex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-imagex"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-jama-dash",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-jama-dash"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-jira-ingest",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-jira-ingest"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-jiralinker",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-jiralinker"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-mp-model-common",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-mp-model-common"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-nbioconfig-gen",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-nbioconfig-gen"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-parse-clk-json",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-parse-clk-json"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-ppgen",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-ppgen"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-ppgen-html",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-ppgen-html"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-ppr-reg-query",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-ppr-reg-query"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-ppr-toolkit",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-ppr-toolkit"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-pr-breakdown",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-pr-breakdown"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-pr-merge",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-pr-merge"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-pr-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-pr-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-proc-trace",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-proc-trace"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-project-setup",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-project-setup"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-regforce-builder",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-regforce-builder"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-release-notes",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-release-notes"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-riddle",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-riddle"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-run-reg-test",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-run-reg-test"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-setup-jira",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-setup-jira"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-sifive-spec2woesim-config",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-sifive-spec2woesim-config"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-skill-hackathon-scoring",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-skill-hackathon-scoring"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-skill-sync",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-skill-sync"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-smn-register-resolver",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-smn-register-resolver"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-spd-generator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-spd-generator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-teams-factcheck",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-teams-factcheck"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-textor-wizard",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-textor-wizard"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-findrelated",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-findrelated"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-invest",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-invest"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-invest-classify",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-invest-classify"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-invest-recreate",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-invest-recreate"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-invest-recreationreport",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-invest-recreationreport"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-invest-research",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-invest-research"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-invest-survey",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-invest-survey"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-invest-verifyclaims",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-invest-verifyclaims"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-repo-build",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-repo-build"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-repo-configure",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-repo-configure"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-repo-pull",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-repo-pull"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-repo-verify",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-repo-verify"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-reproduce",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-reproduce"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-reproduce-attempt",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-reproduce-attempt"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-reproduce-classify",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-reproduce-classify"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-reproduce-report",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-reproduce-report"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-reproduce-research",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-reproduce-research"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-reproduce-survey",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-reproduce-survey"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-reproduce-verifyclaims",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-reproduce-verifyclaims"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-screen",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-screen"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-screen-interpretsearch",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-screen-interpretsearch"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-screen-stage",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-screen-stage"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-walle-screen-verifycollateral",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-walle-screen-verifycollateral"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-winpath",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-winpath"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-woesim-trace",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-woesim-trace"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-word-wash",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-word-wash"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sn-workspace-snapshot",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sn-workspace-snapshot"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "snowflake-admin",
+      "source": {
+        "source": "local",
+        "path": "./plugins/snowflake-admin"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "snowflake-mcp",
+      "source": {
+        "source": "local",
+        "path": "./plugins/snowflake-mcp"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "solutn-update",
+      "source": {
+        "source": "local",
+        "path": "./plugins/solutn-update"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "solvnet-to-jira",
+      "source": {
+        "source": "local",
+        "path": "./plugins/solvnet-to-jira"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sp3",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sp3"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "spark-auto-branch-creation",
+      "source": {
+        "source": "local",
+        "path": "./plugins/spark-auto-branch-creation"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "spec-first-workflow",
+      "source": {
+        "source": "local",
+        "path": "./plugins/spec-first-workflow"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "spec-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/spec-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "spectra-map1",
+      "source": {
+        "source": "local",
+        "path": "./plugins/spectra-map1"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "spgdft-analysis",
+      "source": {
+        "source": "local",
+        "path": "./plugins/spgdft-analysis"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sphinx",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sphinx"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "spray-bottle",
+      "source": {
+        "source": "local",
+        "path": "./plugins/spray-bottle"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sps-culprit-history",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sps-culprit-history"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ssl-cert",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ssl-cert"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "staging-to-gating",
+      "source": {
+        "source": "local",
+        "path": "./plugins/staging-to-gating"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "stdcell-builder",
+      "source": {
+        "source": "local",
+        "path": "./plugins/stdcell-builder"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "stdcell-release-audit",
+      "source": {
+        "source": "local",
+        "path": "./plugins/stdcell-release-audit"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "stpd-team-directory",
+      "source": {
+        "source": "local",
+        "path": "./plugins/stpd-team-directory"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "structured-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/structured-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "structurizr",
+      "source": {
+        "source": "local",
+        "path": "./plugins/structurizr"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "stuck-recovery",
+      "source": {
+        "source": "local",
+        "path": "./plugins/stuck-recovery"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "subagent-driven-development",
+      "source": {
+        "source": "local",
+        "path": "./plugins/subagent-driven-development"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "subagent-team",
+      "source": {
+        "source": "local",
+        "path": "./plugins/subagent-team"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "submit-and-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/submit-and-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "submit-pr",
+      "source": {
+        "source": "local",
+        "path": "./plugins/submit-pr"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "suite-details",
+      "source": {
+        "source": "local",
+        "path": "./plugins/suite-details"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "summarize-changelist",
+      "source": {
+        "source": "local",
+        "path": "./plugins/summarize-changelist"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "summon",
+      "source": {
+        "source": "local",
+        "path": "./plugins/summon"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "super-plan",
+      "source": {
+        "source": "local",
+        "path": "./plugins/super-plan"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sv-training-admin",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sv-training-admin"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sva-auditor",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sva-auditor"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sva-author-skill",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sva-author-skill"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sva-rtl-assertion-guideline",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sva-rtl-assertion-guideline"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "swarmlite",
+      "source": {
+        "source": "local",
+        "path": "./plugins/swarmlite"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sync-master",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sync-master"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "synopsys-remote",
+      "source": {
+        "source": "local",
+        "path": "./plugins/synopsys-remote"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "synopsys-solvnetplus",
+      "source": {
+        "source": "local",
+        "path": "./plugins/synopsys-solvnetplus"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "sysmon-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sysmon-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "systematic-debugging",
+      "source": {
+        "source": "local",
+        "path": "./plugins/systematic-debugging"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "systemc-coding-standard",
+      "source": {
+        "source": "local",
+        "path": "./plugins/systemc-coding-standard"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "systemd-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/systemd-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "systest",
+      "source": {
+        "source": "local",
+        "path": "./plugins/systest"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "systest-cmd",
+      "source": {
+        "source": "local",
+        "path": "./plugins/systest-cmd"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "systest-connect",
+      "source": {
+        "source": "local",
+        "path": "./plugins/systest-connect"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "systest-kiso",
+      "source": {
+        "source": "local",
+        "path": "./plugins/systest-kiso"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ta-digest",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ta-digest"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "talentconnect",
+      "source": {
+        "source": "local",
+        "path": "./plugins/talentconnect"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tasktree-bootstrap",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tasktree-bootstrap"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tasktree-claim",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tasktree-claim"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tasktree-pm",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tasktree-pm"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tasktree-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tasktree-review"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tasktree-shared",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tasktree-shared"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tasktree-worker",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tasktree-worker"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tb-where-are-they",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tb-where-are-they"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tcl-shell",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tcl-shell"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tdd",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tdd"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tdl-prepub",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tdl-prepub"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "team-jiras",
+      "source": {
+        "source": "local",
+        "path": "./plugins/team-jiras"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "team-slider",
+      "source": {
+        "source": "local",
+        "path": "./plugins/team-slider"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "teams-action-listener",
+      "source": {
+        "source": "local",
+        "path": "./plugins/teams-action-listener"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "teams-messages",
+      "source": {
+        "source": "local",
+        "path": "./plugins/teams-messages"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "teams-notify",
+      "source": {
+        "source": "local",
+        "path": "./plugins/teams-notify"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "teams-transcript-windows",
+      "source": {
+        "source": "local",
+        "path": "./plugins/teams-transcript-windows"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "technical-instruction-writer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/technical-instruction-writer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "techprotect-access",
+      "source": {
+        "source": "local",
+        "path": "./plugins/techprotect-access"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "techprotect-approvals",
+      "source": {
+        "source": "local",
+        "path": "./plugins/techprotect-approvals"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "techprotect-demo",
+      "source": {
+        "source": "local",
+        "path": "./plugins/techprotect-demo"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "terminal-email",
+      "source": {
+        "source": "local",
+        "path": "./plugins/terminal-email"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "test-analysis",
+      "source": {
+        "source": "local",
+        "path": "./plugins/test-analysis"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "test-auto-fix",
+      "source": {
+        "source": "local",
+        "path": "./plugins/test-auto-fix"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "test-driven-development",
+      "source": {
+        "source": "local",
+        "path": "./plugins/test-driven-development"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "testplan-author",
+      "source": {
+        "source": "local",
+        "path": "./plugins/testplan-author"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "testplan-per-spec-workflow",
+      "source": {
+        "source": "local",
+        "path": "./plugins/testplan-per-spec-workflow"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tile-area-analyzer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tile-area-analyzer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tile-area-trends",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tile-area-trends"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tile-port-placement",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tile-port-placement"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tile-power-delta",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tile-power-delta"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tilescope",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tilescope"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "timeout-analyzer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/timeout-analyzer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "timezone-handoff",
+      "source": {
+        "source": "local",
+        "path": "./plugins/timezone-handoff"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "timing-analysis-synth-constraints",
+      "source": {
+        "source": "local",
+        "path": "./plugins/timing-analysis-synth-constraints"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "timing-compare",
+      "source": {
+        "source": "local",
+        "path": "./plugins/timing-compare"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "timing-path-diagram",
+      "source": {
+        "source": "local",
+        "path": "./plugins/timing-path-diagram"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tip-secure-group",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tip-secure-group"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tmux-interactive",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tmux-interactive"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tmux-teams",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tmux-teams"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "token-ops",
+      "source": {
+        "source": "local",
+        "path": "./plugins/token-ops"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "token-optimizer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/token-optimizer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "token-query",
+      "source": {
+        "source": "local",
+        "path": "./plugins/token-query"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "token-trim",
+      "source": {
+        "source": "local",
+        "path": "./plugins/token-trim"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tpn-generator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tpn-generator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "trello-board-report",
+      "source": {
+        "source": "local",
+        "path": "./plugins/trello-board-report"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "trello-individual-report",
+      "source": {
+        "source": "local",
+        "path": "./plugins/trello-individual-report"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "trs-missed-tests",
+      "source": {
+        "source": "local",
+        "path": "./plugins/trs-missed-tests"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tsm-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tsm-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "tsm-rerun-failures",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tsm-rerun-failures"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "twiki-reader",
+      "source": {
+        "source": "local",
+        "path": "./plugins/twiki-reader"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "txt2img-footer-beautify",
+      "source": {
+        "source": "local",
+        "path": "./plugins/txt2img-footer-beautify"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "ue-triage",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ue-triage"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "uipc-triage",
+      "source": {
+        "source": "local",
+        "path": "./plugins/uipc-triage"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "unit-graph-builder",
+      "source": {
+        "source": "local",
+        "path": "./plugins/unit-graph-builder"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "unittest-generator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/unittest-generator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "update-my-jira",
+      "source": {
+        "source": "local",
+        "path": "./plugins/update-my-jira"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "updot",
+      "source": {
+        "source": "local",
+        "path": "./plugins/updot"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "urg-sauber-compare",
+      "source": {
+        "source": "local",
+        "path": "./plugins/urg-sauber-compare"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "urg-test-grading",
+      "source": {
+        "source": "local",
+        "path": "./plugins/urg-test-grading"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "urg-text-parser",
+      "source": {
+        "source": "local",
+        "path": "./plugins/urg-text-parser"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "usi-palamida-matcher",
+      "source": {
+        "source": "local",
+        "path": "./plugins/usi-palamida-matcher"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "using-git-worktrees",
+      "source": {
+        "source": "local",
+        "path": "./plugins/using-git-worktrees"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "using-superpowers",
+      "source": {
+        "source": "local",
+        "path": "./plugins/using-superpowers"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "variant-analysis",
+      "source": {
+        "source": "local",
+        "path": "./plugins/variant-analysis"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "vbu-emulation-resources",
+      "source": {
+        "source": "local",
+        "path": "./plugins/vbu-emulation-resources"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "vcs-run-test-extractor",
+      "source": {
+        "source": "local",
+        "path": "./plugins/vcs-run-test-extractor"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "vdb-coverage-analyzer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/vdb-coverage-analyzer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "veda-serverpmo",
+      "source": {
+        "source": "local",
+        "path": "./plugins/veda-serverpmo"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "veda-supervisor",
+      "source": {
+        "source": "local",
+        "path": "./plugins/veda-supervisor"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "veloce-vtl-pcie-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/veloce-vtl-pcie-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "verdi-files",
+      "source": {
+        "source": "local",
+        "path": "./plugins/verdi-files"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "verible",
+      "source": {
+        "source": "local",
+        "path": "./plugins/verible"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "verific",
+      "source": {
+        "source": "local",
+        "path": "./plugins/verific"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "verification-before-completion",
+      "source": {
+        "source": "local",
+        "path": "./plugins/verification-before-completion"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "versal-dfx",
+      "source": {
+        "source": "local",
+        "path": "./plugins/versal-dfx"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "vibe2agentic-prompt",
+      "source": {
+        "source": "local",
+        "path": "./plugins/vibe2agentic-prompt"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "viper",
+      "source": {
+        "source": "local",
+        "path": "./plugins/viper"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "visa-release-note-generator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/visa-release-note-generator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "visa-spec-explain",
+      "source": {
+        "source": "local",
+        "path": "./plugins/visa-spec-explain"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "visa-spec-mindmap",
+      "source": {
+        "source": "local",
+        "path": "./plugins/visa-spec-mindmap"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "visa-spec-query",
+      "source": {
+        "source": "local",
+        "path": "./plugins/visa-spec-query"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "visio-generator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/visio-generator"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "vivado-design-metrics",
+      "source": {
+        "source": "local",
+        "path": "./plugins/vivado-design-metrics"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "vivado-run-monitor",
+      "source": {
+        "source": "local",
+        "path": "./plugins/vivado-run-monitor"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "vmt-jenkins-debugger",
+      "source": {
+        "source": "local",
+        "path": "./plugins/vmt-jenkins-debugger"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "vmt-kb-manager",
+      "source": {
+        "source": "local",
+        "path": "./plugins/vmt-kb-manager"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "vmw-silicon-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/vmw-silicon-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "voc-pm-workflow",
+      "source": {
+        "source": "local",
+        "path": "./plugins/voc-pm-workflow"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "voc-to-backlog",
+      "source": {
+        "source": "local",
+        "path": "./plugins/voc-to-backlog"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "vuln-component-analysis",
+      "source": {
+        "source": "local",
+        "path": "./plugins/vuln-component-analysis"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "vulnerability-aiscrum",
+      "source": {
+        "source": "local",
+        "path": "./plugins/vulnerability-aiscrum"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "vulnerability-status-tracking",
+      "source": {
+        "source": "local",
+        "path": "./plugins/vulnerability-status-tracking"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "wafer-map-builder",
+      "source": {
+        "source": "local",
+        "path": "./plugins/wafer-map-builder"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "wall-analysis",
+      "source": {
+        "source": "local",
+        "path": "./plugins/wall-analysis"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "wavedrom",
+      "source": {
+        "source": "local",
+        "path": "./plugins/wavedrom"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "wavesniffer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/wavesniffer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "web-automation",
+      "source": {
+        "source": "local",
+        "path": "./plugins/web-automation"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "webwright",
+      "source": {
+        "source": "local",
+        "path": "./plugins/webwright"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "whats-wrong",
+      "source": {
+        "source": "local",
+        "path": "./plugins/whats-wrong"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "wiki-init",
+      "source": {
+        "source": "local",
+        "path": "./plugins/wiki-init"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "windbg-setup",
+      "source": {
+        "source": "local",
+        "path": "./plugins/windbg-setup"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "workshop-assistant",
+      "source": {
+        "source": "local",
+        "path": "./plugins/workshop-assistant"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "write-arc42-spec",
+      "source": {
+        "source": "local",
+        "path": "./plugins/write-arc42-spec"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "write-design-doc",
+      "source": {
+        "source": "local",
+        "path": "./plugins/write-design-doc"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "write-doc",
+      "source": {
+        "source": "local",
+        "path": "./plugins/write-doc"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "write-mas",
+      "source": {
+        "source": "local",
+        "path": "./plugins/write-mas"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "write-plan-doc",
+      "source": {
+        "source": "local",
+        "path": "./plugins/write-plan-doc"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "write-plan-gfx",
+      "source": {
+        "source": "local",
+        "path": "./plugins/write-plan-gfx"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "write-testplan",
+      "source": {
+        "source": "local",
+        "path": "./plugins/write-testplan"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "write-vas",
+      "source": {
+        "source": "local",
+        "path": "./plugins/write-vas"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "writing-amdgpu-tests",
+      "source": {
+        "source": "local",
+        "path": "./plugins/writing-amdgpu-tests"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "writing-llvm-pass",
+      "source": {
+        "source": "local",
+        "path": "./plugins/writing-llvm-pass"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "writing-plans",
+      "source": {
+        "source": "local",
+        "path": "./plugins/writing-plans"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "writing-skills",
+      "source": {
+        "source": "local",
+        "path": "./plugins/writing-skills"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "xlx-quick-calibre-drc",
+      "source": {
+        "source": "local",
+        "path": "./plugins/xlx-quick-calibre-drc"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "xoah-cli",
+      "source": {
+        "source": "local",
+        "path": "./plugins/xoah-cli"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "xoah-data-access",
+      "source": {
+        "source": "local",
+        "path": "./plugins/xoah-data-access"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "xoah-host-analysis",
+      "source": {
+        "source": "local",
+        "path": "./plugins/xoah-host-analysis"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "xoah-host-analysis-cli",
+      "source": {
+        "source": "local",
+        "path": "./plugins/xoah-host-analysis-cli"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "xoah-query",
+      "source": {
+        "source": "local",
+        "path": "./plugins/xoah-query"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "xoah-relconv-exec-summary",
+      "source": {
+        "source": "local",
+        "path": "./plugins/xoah-relconv-exec-summary"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "xoah-relconv-ue-summary",
+      "source": {
+        "source": "local",
+        "path": "./plugins/xoah-relconv-ue-summary"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "xprop-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/xprop-debug"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "xsdb-workflow",
+      "source": {
+        "source": "local",
+        "path": "./plugins/xsdb-workflow"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "xti-debugger",
+      "source": {
+        "source": "local",
+        "path": "./plugins/xti-debugger"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "xti-docker-compatible",
+      "source": {
+        "source": "local",
+        "path": "./plugins/xti-docker-compatible"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "xti-migrate",
+      "source": {
+        "source": "local",
+        "path": "./plugins/xti-migrate"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "xti-regression-help",
+      "source": {
+        "source": "local",
+        "path": "./plugins/xti-regression-help"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "xti-tql",
+      "source": {
+        "source": "local",
+        "path": "./plugins/xti-tql"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "xti-tsm",
+      "source": {
+        "source": "local",
+        "path": "./plugins/xti-tsm"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "yocto-build",
+      "source": {
+        "source": "local",
+        "path": "./plugins/yocto-build"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "youtube-summarizer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/youtube-summarizer"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "yrs-query",
+      "source": {
+        "source": "local",
+        "path": "./plugins/yrs-query"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "yrs-query-enhanced",
+      "source": {
+        "source": "local",
+        "path": "./plugins/yrs-query-enhanced"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "zephyr",
+      "source": {
+        "source": "local",
+        "path": "./plugins/zephyr"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "zoom-hub",
+      "source": {
+        "source": "local",
+        "path": "./plugins/zoom-hub"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "zpr-clock-check",
+      "source": {
+        "source": "local",
+        "path": "./plugins/zpr-clock-check"
+      },
+      "category": "skill"
+    },
+    {
+      "name": "amd-codeql-agent",
+      "source": {
+        "source": "local",
+        "path": "./plugins/amd-codeql-agent"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "amdgpu-backend-developer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/amdgpu-backend-developer"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "arch-knowledge-graph-dv",
+      "source": {
+        "source": "local",
+        "path": "./plugins/arch-knowledge-graph-dv"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "aria",
+      "source": {
+        "source": "local",
+        "path": "./plugins/aria"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "arteris-noc",
+      "source": {
+        "source": "local",
+        "path": "./plugins/arteris-noc"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "ceara",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ceara"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "ceara-soc",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ceara-soc"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "cex-debug",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cex-debug"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "charge",
+      "source": {
+        "source": "local",
+        "path": "./plugins/charge"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "clang-frontend-expert",
+      "source": {
+        "source": "local",
+        "path": "./plugins/clang-frontend-expert"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "code-reviewer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/code-reviewer"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "compiler-rt-developer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/compiler-rt-developer"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "coverage-jarvis",
+      "source": {
+        "source": "local",
+        "path": "./plugins/coverage-jarvis"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "covx",
+      "source": {
+        "source": "local",
+        "path": "./plugins/covx"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "doc-authoring",
+      "source": {
+        "source": "local",
+        "path": "./plugins/doc-authoring"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "dv-clk-rst-flushmanager",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dv-clk-rst-flushmanager"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "dvcov",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dvcov"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "dvdoc",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dvdoc"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "dxio-register-cleanup-agent",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dxio-register-cleanup-agent"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "formal-fixer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/formal-fixer"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "formal-orchestrator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/formal-orchestrator"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "formal-planner",
+      "source": {
+        "source": "local",
+        "path": "./plugins/formal-planner"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "formal-setup",
+      "source": {
+        "source": "local",
+        "path": "./plugins/formal-setup"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "gcdv-regression-repro",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gcdv-regression-repro"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "hld-perf-area",
+      "source": {
+        "source": "local",
+        "path": "./plugins/hld-perf-area"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "interface-logger",
+      "source": {
+        "source": "local",
+        "path": "./plugins/interface-logger"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "jira-monitor",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jira-monitor"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "libcxx-developer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/libcxx-developer"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "llvm-backend-developer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/llvm-backend-developer"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "llvm-code-reviewer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/llvm-code-reviewer"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "llvm-pass-author",
+      "source": {
+        "source": "local",
+        "path": "./plugins/llvm-pass-author"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "llvm-pr-author",
+      "source": {
+        "source": "local",
+        "path": "./plugins/llvm-pr-author"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "llvm-test-author",
+      "source": {
+        "source": "local",
+        "path": "./plugins/llvm-test-author"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "log-analysis",
+      "source": {
+        "source": "local",
+        "path": "./plugins/log-analysis"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "lsf-agent",
+      "source": {
+        "source": "local",
+        "path": "./plugins/lsf-agent"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "mi-fw-lead",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mi-fw-lead"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "ntsg-intr-uvc-codegen",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ntsg-intr-uvc-codegen"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "palladium",
+      "source": {
+        "source": "local",
+        "path": "./plugins/palladium"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "palma-dev",
+      "source": {
+        "source": "local",
+        "path": "./plugins/palma-dev"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "pcfixeco-fix-rate-analyzer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pcfixeco-fix-rate-analyzer"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "powermind-agent",
+      "source": {
+        "source": "local",
+        "path": "./plugins/powermind-agent"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "preincludes-report",
+      "source": {
+        "source": "local",
+        "path": "./plugins/preincludes-report"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "psv-emu-triage-agent",
+      "source": {
+        "source": "local",
+        "path": "./plugins/psv-emu-triage-agent"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "rtfm-agent",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rtfm-agent"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "sauber-cat",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sauber-cat"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "seras-agent",
+      "source": {
+        "source": "local",
+        "path": "./plugins/seras-agent"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "sim-log-analyzer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sim-log-analyzer"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "slai-marketplace-ui",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slai-marketplace-ui"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "splat-agent-workspace",
+      "source": {
+        "source": "local",
+        "path": "./plugins/splat-agent-workspace"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "sv-code-reviewer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sv-code-reviewer"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "sva-author",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sva-author"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "tb-documentation-generator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tb-documentation-generator"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "tdl-agent",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tdl-agent"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "tile-area-trends",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tile-area-trends"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "timing-pattern-analyzer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/timing-pattern-analyzer"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "timing-reports-analyzer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/timing-reports-analyzer"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "timing-rtl-tracer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/timing-rtl-tracer"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "uvm-txn-logger",
+      "source": {
+        "source": "local",
+        "path": "./plugins/uvm-txn-logger"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "veloce-buildfrequency-optimizer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/veloce-buildfrequency-optimizer"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "veloce-emul-regr-pipeline",
+      "source": {
+        "source": "local",
+        "path": "./plugins/veloce-emul-regr-pipeline"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "weekly-report-system",
+      "source": {
+        "source": "local",
+        "path": "./plugins/weekly-report-system"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "workspace-jarvis",
+      "source": {
+        "source": "local",
+        "path": "./plugins/workspace-jarvis"
+      },
+      "category": "agent"
+    },
+    {
+      "name": "aecg-knowledge-work",
+      "source": {
+        "source": "local",
+        "path": "./plugins/aecg-knowledge-work"
+      },
+      "category": "persona"
+    },
+    {
+      "name": "ai-dev",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ai-dev"
+      },
+      "category": "persona"
+    },
+    {
+      "name": "clampsense-ai",
+      "source": {
+        "source": "local",
+        "path": "./plugins/clampsense-ai"
+      },
+      "category": "persona"
+    },
+    {
+      "name": "design-verification-jarvis",
+      "source": {
+        "source": "local",
+        "path": "./plugins/design-verification-jarvis"
+      },
+      "category": "persona"
+    },
+    {
+      "name": "eda-rtfm",
+      "source": {
+        "source": "local",
+        "path": "./plugins/eda-rtfm"
+      },
+      "category": "persona"
+    },
+    {
+      "name": "llvm-developer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/llvm-developer"
+      },
+      "category": "persona"
+    },
+    {
+      "name": "ppa-optimizer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ppa-optimizer"
+      },
+      "category": "persona"
+    },
+    {
+      "name": "scanview-analyzer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/scanview-analyzer"
+      },
+      "category": "persona"
+    },
+    {
+      "name": "tdl",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tdl"
+      },
+      "category": "persona"
+    },
+    {
+      "name": "vivado-debug-triage",
+      "source": {
+        "source": "local",
+        "path": "./plugins/vivado-debug-triage"
+      },
+      "category": "persona"
+    },
+    {
+      "name": "vivado-sw-developer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/vivado-sw-developer"
+      },
+      "category": "persona"
+    },
+    {
+      "name": "xti-toolkit",
+      "source": {
+        "source": "local",
+        "path": "./plugins/xti-toolkit"
+      },
+      "category": "persona"
+    }
+  ]
+}

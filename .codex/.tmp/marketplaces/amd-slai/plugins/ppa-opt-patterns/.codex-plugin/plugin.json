@@ -1,0 +1,5 @@
+{
+  "name": "ppa-opt-patterns",
+  "description": "Empirical RTL PPA optimization patterns mined from DEGFX11/12/13 Jira",
+  "version": "1.0.3"
+}

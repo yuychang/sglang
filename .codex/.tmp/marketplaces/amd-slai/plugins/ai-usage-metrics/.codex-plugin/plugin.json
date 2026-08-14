@@ -1,0 +1,5 @@
+{
+  "name": "ai-usage-metrics",
+  "description": "Collect AI usage and efficiency-gain metrics from Claude Code session",
+  "version": "1.0.2"
+}

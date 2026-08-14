@@ -1,0 +1,5 @@
+{
+  "name": "pm-release-wrap",
+  "description": "Formally close a release -- generate release notes from JIRA, GitHub",
+  "version": "2.0.2"
+}

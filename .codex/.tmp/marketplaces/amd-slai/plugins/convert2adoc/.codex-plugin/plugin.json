@@ -1,0 +1,5 @@
+{
+  "name": "convert2adoc",
+  "description": "Convert a legacy binary specification document (.docx/.doc/.pdf/.xlsx)",
+  "version": "0.1.28"
+}

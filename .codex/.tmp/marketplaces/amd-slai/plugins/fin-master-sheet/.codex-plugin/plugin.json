@@ -1,0 +1,5 @@
+{
+  "name": "fin-master-sheet",
+  "description": "Query PKG_FINANCE.dbo.Fact_Master_Sheet_Current on ATLEIMSOXDBP1 SQL Server with natural language questions",
+  "version": "1.0.0"
+}

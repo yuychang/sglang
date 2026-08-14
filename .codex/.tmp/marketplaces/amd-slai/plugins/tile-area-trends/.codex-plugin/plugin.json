@@ -1,0 +1,5 @@
+{
+  "name": "tile-area-trends",
+  "description": "Analyze area trends across PD runs. Compares arbitrary area CSV reports,",
+  "version": "2.3.1"
+}

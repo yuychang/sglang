@@ -1,0 +1,5 @@
+{
+  "name": "uvm-txn-logger",
+  "description": "Use when generating TxnTracker-based transaction logging for UVM monitors.",
+  "version": "1.0.1"
+}

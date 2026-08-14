@@ -1,0 +1,5 @@
+{
+  "name": "sn-walle-reproduce-attempt",
+  "description": "Reproduce a Jira issue against ONE SimNow build — create and run a reproduction",
+  "version": "1.2.1"
+}

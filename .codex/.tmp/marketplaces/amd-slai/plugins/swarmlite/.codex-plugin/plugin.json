@@ -1,0 +1,5 @@
+{
+  "name": "swarmlite",
+  "description": "Swarm-style Perforce code review web app for AMD/Xilinx (AECG) sites",
+  "version": "0.1.1"
+}

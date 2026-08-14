@@ -1,0 +1,5 @@
+{
+  "name": "structured-debug",
+  "description": "Use when the user says \"root-cause\", \"Root-cause this regression failure\", \"find the root",
+  "version": "1.0.6"
+}

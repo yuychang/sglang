@@ -1,0 +1,5 @@
+{
+  "name": "sn-debug-riscof-tests",
+  "description": "Debug failing RISCOF (RISC-V Compatibility Framework) tests in SimNow.",
+  "version": "1.0.1"
+}

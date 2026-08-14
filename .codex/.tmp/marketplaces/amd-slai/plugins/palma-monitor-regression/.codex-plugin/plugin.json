@@ -1,0 +1,5 @@
+{
+  "name": "palma-monitor-regression",
+  "description": "Monitor Palma regression(s) on LSF. Three modes: (1) 'start' — auto-discovers ALL running regressions for the current user by scanning bjobs (prima...",
+  "version": "1.11.2"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "sn-coverage-gather",
+  "description": "Gather SimNow gcov/lcov coverage for Python regression tests or a platform",
+  "version": "1.0.6"
+}

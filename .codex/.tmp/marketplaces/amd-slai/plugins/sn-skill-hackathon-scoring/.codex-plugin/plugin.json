@@ -1,0 +1,5 @@
+{
+  "name": "sn-skill-hackathon-scoring",
+  "description": "Evaluates Claude Code skills submitted to a SimNow hackathon. Reads PPTX",
+  "version": "1.0.1"
+}

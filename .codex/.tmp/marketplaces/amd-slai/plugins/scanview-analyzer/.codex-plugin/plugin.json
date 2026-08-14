@@ -1,0 +1,5 @@
+{
+  "name": "scanview-analyzer",
+  "description": "Bundle live ScanView probing, memory-path hang analysis, and CP-front-end hang analysis for ScanView-backed PSV triage.",
+  "version": "1.2.0"
+}

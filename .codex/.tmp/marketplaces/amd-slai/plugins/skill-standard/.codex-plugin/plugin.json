@@ -1,0 +1,5 @@
+{
+  "name": "skill-standard",
+  "description": "A drop-in standard for authoring Agent Skills. Defines what a well-formed",
+  "version": "1.0.5"
+}

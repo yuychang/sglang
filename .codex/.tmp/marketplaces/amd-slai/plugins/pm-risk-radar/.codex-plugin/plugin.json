@@ -1,0 +1,5 @@
+{
+  "name": "pm-risk-radar",
+  "description": "Scan one or all projects for blockers, stale issues, milestone drift,",
+  "version": "2.0.1"
+}

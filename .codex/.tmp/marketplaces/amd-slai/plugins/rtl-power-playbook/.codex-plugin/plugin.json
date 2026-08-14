@@ -1,0 +1,5 @@
+{
+  "name": "rtl-power-playbook",
+  "description": "AMD RTL power analysis & optimization playbook for power leads and RTL",
+  "version": "1.0.7"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "sn-db-artifactory-update",
+  "description": "Regenerate, package, and publish the SimNow KnownDevices device database",
+  "version": "1.0.14"
+}

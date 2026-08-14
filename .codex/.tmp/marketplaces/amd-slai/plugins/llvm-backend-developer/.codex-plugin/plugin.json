@@ -1,0 +1,5 @@
+{
+  "name": "llvm-backend-developer",
+  "description": "Expert assistant for LLVM backends — TableGen, ISel, MIR, calling conventions,",
+  "version": "1.0.1"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "palladium",
+  "description": "Autonomous multi-agent build system for AMD Palladium Z3 IXCOM emulation with intelligent error classification, auto-fix engine, Claude LLM escalat...",
+  "version": "2.1.10"
+}

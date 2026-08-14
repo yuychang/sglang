@@ -1,0 +1,5 @@
+{
+  "name": "docx-to-pdf",
+  "description": "Convert Microsoft Word .docx files to PDF using docx2pdf. Works on Windows,",
+  "version": "1.0.3"
+}

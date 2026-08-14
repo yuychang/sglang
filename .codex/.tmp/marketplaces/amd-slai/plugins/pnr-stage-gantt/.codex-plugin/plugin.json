@@ -1,0 +1,5 @@
+{
+  "name": "pnr-stage-gantt",
+  "description": "Generate an interactive HTML Gantt chart of all PnR stages from a TileBuilder",
+  "version": "2.2.2"
+}

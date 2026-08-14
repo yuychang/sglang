@@ -1,0 +1,5 @@
+{
+  "name": "pnr-qor-newsletter",
+  "description": "Generate daily PnR QoR newsletter for any project. Parameterized agent",
+  "version": "2.0.6"
+}

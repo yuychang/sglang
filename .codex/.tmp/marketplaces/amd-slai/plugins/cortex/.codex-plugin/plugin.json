@@ -1,0 +1,5 @@
+{
+  "name": "cortex",
+  "description": "Multi-agent coordination framework for concurrent Claude Code engineering. Task queue, file locks, agent registry, tmux swarm launch. Prevents file...",
+  "version": "1.0.0"
+}

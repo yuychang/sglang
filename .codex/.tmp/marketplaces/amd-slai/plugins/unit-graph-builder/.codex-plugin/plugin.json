@@ -1,0 +1,5 @@
+{
+  "name": "unit-graph-builder",
+  "description": "Build interactive unit relationship graphs from raw unit history data",
+  "version": "1.0.2"
+}

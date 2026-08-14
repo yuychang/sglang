@@ -1,0 +1,5 @@
+{
+  "name": "autometa-validator",
+  "description": "Automate AutoMeta checklist validation by comparing against reference",
+  "version": "1.0.1"
+}

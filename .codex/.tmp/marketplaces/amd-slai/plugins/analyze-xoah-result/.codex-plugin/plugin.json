@@ -1,0 +1,5 @@
+{
+  "name": "analyze-xoah-result",
+  "description": "Primary analysis skill for test/regression results from XOAH automation runs. Performs initial assessment and routes to specialized playbooks based...",
+  "version": "2.3.4"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "scanview-mcp",
+  "description": "Route ScanView MCP requests (AMD silicon scans, scan groups, signals,",
+  "version": "1.0.4"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "agent-email",
+  "description": "Use when an agent needs to email the user, send email updates or progress reports, email",
+  "version": "2.1.1"
+}

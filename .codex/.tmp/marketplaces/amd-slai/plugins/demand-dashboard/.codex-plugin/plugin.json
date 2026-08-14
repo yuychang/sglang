@@ -1,0 +1,5 @@
+{
+  "name": "demand-dashboard",
+  "description": "Build a self-contained interactive HTML demand dashboard from an Excel",
+  "version": "1.0.3"
+}

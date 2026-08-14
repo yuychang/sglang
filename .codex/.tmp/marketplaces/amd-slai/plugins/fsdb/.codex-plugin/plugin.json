@@ -1,0 +1,5 @@
+{
+  "name": "fsdb",
+  "description": "Inspect Synopsys `.fsdb` waveforms from Claude Code via the AMD-internal",
+  "version": "1.0.4"
+}

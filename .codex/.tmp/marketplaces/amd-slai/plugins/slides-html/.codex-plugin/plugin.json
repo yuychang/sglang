@@ -1,0 +1,5 @@
+{
+  "name": "slides-html",
+  "description": "Generate a complete interactive Reveal.js HTML presentation from a Markdown outline file. AMD dark theme, circuit-board animation, terminal demos, ...",
+  "version": "1.0.0"
+}

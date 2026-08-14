@@ -1,0 +1,5 @@
+{
+  "name": "systest",
+  "description": "Top-level entry point for AMD board farm automation via systest. Use",
+  "version": "2.2.1"
+}

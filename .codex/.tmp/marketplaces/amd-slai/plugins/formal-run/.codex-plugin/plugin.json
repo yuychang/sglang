@@ -1,0 +1,5 @@
+{
+  "name": "formal-run",
+  "description": "Execute formal verification jobs: submit to LSF or run interactively, poll until complete, collect results, run vacuity check. Use in Phase 3 of th...",
+  "version": "1.0.9"
+}

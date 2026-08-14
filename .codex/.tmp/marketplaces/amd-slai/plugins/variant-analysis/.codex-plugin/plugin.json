@@ -1,0 +1,5 @@
+{
+  "name": "variant-analysis",
+  "description": "Find similar bugs across a codebase after fixing one - pattern characterization, regex search, triage, batch fix.",
+  "version": "1.0.0"
+}

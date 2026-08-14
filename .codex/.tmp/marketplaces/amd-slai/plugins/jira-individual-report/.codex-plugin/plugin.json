@@ -1,0 +1,5 @@
+{
+  "name": "jira-individual-report",
+  "description": "Generate individualized HTML email reports of stale and overdue JIRA",
+  "version": "1.0.2"
+}

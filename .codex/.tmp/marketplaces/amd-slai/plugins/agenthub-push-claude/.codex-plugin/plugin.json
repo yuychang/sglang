@@ -1,0 +1,5 @@
+{
+  "name": "agenthub-push-claude",
+  "description": "Push the current Claude Code conversation to an AMD AgentHub cloud agent. Use when you want to hand off a task or continue a conversation in AgentH...",
+  "version": "1.0.0"
+}

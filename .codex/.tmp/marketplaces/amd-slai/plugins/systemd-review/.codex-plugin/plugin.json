@@ -1,0 +1,5 @@
+{
+  "name": "systemd-review",
+  "description": "systemd patch review protocol: regression analysis, coding conventions, cleanup patterns, error handling, memory safety, threading rules, and false...",
+  "version": "1.0.0"
+}

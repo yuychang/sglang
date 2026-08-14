@@ -1,0 +1,5 @@
+{
+  "name": "m365-onedrive",
+  "description": "Browse, download, upload, search, and share OneDrive files using Microsoft Graph API, and hand off Microsoft-protected / sensitivity-labeled / RMS-...",
+  "version": "2.4.0"
+}

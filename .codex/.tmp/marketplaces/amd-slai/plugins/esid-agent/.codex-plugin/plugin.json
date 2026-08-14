@@ -1,0 +1,5 @@
+{
+  "name": "esid-agent",
+  "description": "Route a firmware bug report to MI450 ESID component specialist agents (GMEM, DF, SMU, FCH, GmcFw, Memory, NBIO, GFX, Drivers, APCB_APOB, HUB) and s...",
+  "version": "5.0.9"
+}

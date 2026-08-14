@@ -1,0 +1,5 @@
+{
+  "name": "slai-codex-plugin-cc",
+  "description": "Use SLAI Codex from Claude Code to review code or delegate development",
+  "version": "1.0.8"
+}

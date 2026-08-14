@@ -1,0 +1,5 @@
+{
+  "name": "llm-gateway",
+  "description": "Conversational AI skill for AMD's LLM Gateway - answers 'How do I use",
+  "version": "1.0.8"
+}

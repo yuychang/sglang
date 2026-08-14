@@ -1,0 +1,5 @@
+{
+  "name": "review-spec-results",
+  "description": "Review SPEC CPU benchmark result packages. Use when the user says \"review",
+  "version": "1.0.2"
+}

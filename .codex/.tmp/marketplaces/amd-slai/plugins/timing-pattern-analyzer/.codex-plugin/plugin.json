@@ -1,0 +1,5 @@
+{
+  "name": "timing-pattern-analyzer",
+  "description": "Cluster and RTL-enrich Cat2/Cat3 timing violation patterns from raw synthesis",
+  "version": "1.0.1"
+}

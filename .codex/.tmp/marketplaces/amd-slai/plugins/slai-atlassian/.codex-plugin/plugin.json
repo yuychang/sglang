@@ -1,0 +1,5 @@
+{
+  "name": "slai-atlassian",
+  "description": "Read and write Jira and Confluence Cloud — issues, JQL search, workflow",
+  "version": "1.1.0"
+}

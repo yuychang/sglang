@@ -1,0 +1,5 @@
+{
+  "name": "codeql-fp-verify",
+  "description": "Verify developer claims about CodeQL false positive alerts by analyzing code flow and alert details",
+  "version": "1.0.1"
+}

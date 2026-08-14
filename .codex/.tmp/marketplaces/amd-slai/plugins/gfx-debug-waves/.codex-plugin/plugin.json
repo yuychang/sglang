@@ -1,0 +1,5 @@
+{
+  "name": "gfx-debug-waves",
+  "description": "Use when about to call any fsdb_* MCP tool (fsdb_open, fsdb_get_value_at, fsdb_search_signal,",
+  "version": "1.0.5"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "review-security",
+  "description": "C++ security vulnerability audit - memory corruption, buffer overflow, use-after-free, integer overflow, format strings, race conditions.",
+  "version": "1.0.0"
+}

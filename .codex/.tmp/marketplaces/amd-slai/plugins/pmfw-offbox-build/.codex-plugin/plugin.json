@@ -1,0 +1,5 @@
+{
+  "name": "pmfw-offbox-build",
+  "description": "Build and (optionally) sign AMD SoC PMFW firmware (Soundwave, Magnus,",
+  "version": "1.0.3"
+}

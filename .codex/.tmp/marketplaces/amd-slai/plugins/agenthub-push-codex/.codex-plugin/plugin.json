@@ -1,0 +1,5 @@
+{
+  "name": "agenthub-push-codex",
+  "description": "Push the current Codex CLI conversation to AgentHub when the user hands it off. Use this skill to delegate tasks or continue conversations on AMD A...",
+  "version": "1.0.0"
+}

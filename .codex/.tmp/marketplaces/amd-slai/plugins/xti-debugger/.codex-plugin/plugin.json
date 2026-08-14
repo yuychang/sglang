@@ -1,0 +1,5 @@
+{
+  "name": "xti-debugger",
+  "description": "XTI/RDI test failure debugging — find logs, decode status codes, reproduce from a UE JIRA ticket or XOAH URL, drop into manual-testing shells, and ...",
+  "version": "2.0.0"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "llvm-pass-author",
+  "description": "Expert assistant for authoring LLVM New Pass Manager passes, analyses,",
+  "version": "1.0.1"
+}

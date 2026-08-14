@@ -1,0 +1,5 @@
+{
+  "name": "p4-shelf-cleanup",
+  "description": "Multi-agent workflow to list, review, and delete Perforce shelved changelists",
+  "version": "1.0.9"
+}

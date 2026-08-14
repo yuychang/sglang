@@ -1,0 +1,5 @@
+{
+  "name": "fpga-crp-creator",
+  "description": "Generates an AMD AECG CRP PowerPoint end-to-end: searches case emails,",
+  "version": "1.0.54"
+}

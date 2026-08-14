@@ -1,0 +1,5 @@
+{
+  "name": "sn-walle",
+  "description": "Manage the Jira-Walle AI triage pipeline. Usage: /sn-walle [start|stop|status]",
+  "version": "1.0.28"
+}

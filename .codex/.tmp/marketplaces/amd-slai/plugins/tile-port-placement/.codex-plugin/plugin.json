@@ -1,0 +1,5 @@
+{
+  "name": "tile-port-placement",
+  "description": "Generate connectivity-verified, catch-wrapped port_placement.tcl scripts",
+  "version": "1.0.18"
+}

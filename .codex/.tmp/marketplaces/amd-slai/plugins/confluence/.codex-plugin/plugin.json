@@ -1,0 +1,5 @@
+{
+  "name": "confluence",
+  "description": "Use the atlassian CLI to interact with Confluence Cloud. Use when creating,",
+  "version": "1.0.4"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "sage-ingest",
+  "description": "Migrate or synchronize user-provided knowledge into Sage through source-first",
+  "version": "1.0.0"
+}

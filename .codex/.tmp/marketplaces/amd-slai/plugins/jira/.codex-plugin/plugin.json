@@ -1,0 +1,5 @@
+{
+  "name": "jira",
+  "description": "Use the atlassian CLI to interact with Jira Cloud. Use when creating,",
+  "version": "1.0.4"
+}

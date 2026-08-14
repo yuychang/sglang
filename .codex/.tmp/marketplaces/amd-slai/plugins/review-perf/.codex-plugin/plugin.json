@@ -1,0 +1,5 @@
+{
+  "name": "review-perf",
+  "description": "Performance and efficiency review for C++ - algorithmic complexity, hot path analysis, unnecessary copies, lock contention, cache behavior.",
+  "version": "1.0.0"
+}

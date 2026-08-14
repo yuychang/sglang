@@ -1,0 +1,5 @@
+{
+  "name": "wiki-init",
+  "description": "Scaffold a Karpathy-style LLM wiki in any folder. Asks context questions to",
+  "version": "1.0.1"
+}

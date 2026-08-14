@@ -1,0 +1,5 @@
+{
+  "name": "youtube-summarizer",
+  "description": "Extract transcripts from YouTube videos and create intelligent summaries. Use when the user provides a YouTube URL or video ID and asks to summariz...",
+  "version": "1.1.0"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "scanview-sdk-probe",
+  "description": "Use the local ScanviewInterface SDK against live ScanView to probe raw",
+  "version": "1.3.0"
+}

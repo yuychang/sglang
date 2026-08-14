@@ -1,0 +1,5 @@
+{
+  "name": "explain-testcase",
+  "description": "Analyze AMD GPU SoC simulation testcases from TDL definitions. Follows",
+  "version": "1.0.2"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "sn-walle-invest-verifyclaims",
+  "description": "Verify factual claims in Survey.md and the Jira issue against spec documents",
+  "version": "1.0.1"
+}

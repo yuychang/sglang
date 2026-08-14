@@ -1,0 +1,5 @@
+{
+  "name": "slt-hw-commonality-pipeline",
+  "description": "Runs the full SLT hardware commonality reporting pipeline end-to-end",
+  "version": "1.0.2"
+}

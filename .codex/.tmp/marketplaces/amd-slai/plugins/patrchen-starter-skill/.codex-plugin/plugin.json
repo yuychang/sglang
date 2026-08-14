@@ -1,0 +1,5 @@
+{
+  "name": "patrchen-starter-skill",
+  "description": "A general-purpose starter skill for the AMD marketplace. Use this skill as a foundation when building new agent capabilities from scratch.",
+  "version": "1.0.0"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "block-interface-diagram",
+  "description": "Produce a polished, reproducible top-level interface / sub-block diagram",
+  "version": "1.2.10"
+}

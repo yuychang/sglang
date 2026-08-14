@@ -1,0 +1,5 @@
+{
+  "name": "nanotime-eco-bridge",
+  "description": "Drive live Synopsys NanoTime (nt_shell) sessions over a file-drop bridge",
+  "version": "1.0.0"
+}

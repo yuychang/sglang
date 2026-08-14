@@ -1,0 +1,5 @@
+{
+  "name": "sysmon-debug",
+  "description": "Debug SysMon power rail measurements on Versal/Versal2 devices. Covers register database queries, PDI parsing, voltage conversion, and MEASURE_CONF...",
+  "version": "1.0.0"
+}

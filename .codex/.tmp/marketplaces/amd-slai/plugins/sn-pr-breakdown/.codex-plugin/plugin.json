@@ -1,0 +1,5 @@
+{
+  "name": "sn-pr-breakdown",
+  "description": "Split any large PR into smaller reviewable sub-PRs with full traceability.",
+  "version": "1.15.1"
+}

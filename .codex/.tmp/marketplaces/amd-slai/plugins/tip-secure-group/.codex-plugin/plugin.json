@@ -1,0 +1,5 @@
+{
+  "name": "tip-secure-group",
+  "description": "Add a TIP secure group to one or more docs.amd.com documents — use when someone asks you to add or publish to a secure group in TIP.",
+  "version": "1.0.0"
+}

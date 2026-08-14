@@ -1,0 +1,5 @@
+{
+  "name": "module-assistant",
+  "description": "Use when the user asks about Environment Modules, module commands (module avail, module load, module list, module show), finding EDA tools via modu...",
+  "version": "1.0.44"
+}

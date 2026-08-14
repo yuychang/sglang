@@ -1,0 +1,5 @@
+{
+  "name": "fetch-atlassian",
+  "description": "Authentication-aware fetcher for AMD Confluence pages and JIRA issues.",
+  "version": "1.0.2"
+}

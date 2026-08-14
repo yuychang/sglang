@@ -1,0 +1,5 @@
+{
+  "name": "ntid-lookup",
+  "description": "Look up AMD NT IDs (userids) from email addresses using LDAP search.",
+  "version": "1.0.2"
+}

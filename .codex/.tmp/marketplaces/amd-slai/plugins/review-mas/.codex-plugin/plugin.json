@@ -1,0 +1,5 @@
+{
+  "name": "review-mas",
+  "description": "Front door for reviewing a MAS (microarchitecture spec): lint gate,",
+  "version": "0.3.11"
+}

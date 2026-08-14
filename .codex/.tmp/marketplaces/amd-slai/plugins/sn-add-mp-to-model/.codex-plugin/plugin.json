@@ -1,0 +1,5 @@
+{
+  "name": "sn-add-mp-to-model",
+  "description": "Add an MP that SimNow already supports in C++ to a model or SoC, or author",
+  "version": "1.0.1"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "screenshot-to-jira",
+  "description": "Convert a schedule screenshot into fully configured JIRA tickets. Extracts",
+  "version": "1.0.1"
+}

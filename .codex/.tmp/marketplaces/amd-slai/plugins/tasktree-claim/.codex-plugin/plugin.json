@@ -1,0 +1,5 @@
+{
+  "name": "tasktree-claim",
+  "description": "Use when about to start work on a JIRA that may be picked up concurrently by other workers",
+  "version": "2.1.0"
+}

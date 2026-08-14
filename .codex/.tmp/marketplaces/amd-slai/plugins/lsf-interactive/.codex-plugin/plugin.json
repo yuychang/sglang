@@ -1,0 +1,5 @@
+{
+  "name": "lsf-interactive",
+  "description": "Submit and manage LSF (Load Sharing Facility) interactive jobs using",
+  "version": "1.0.0"
+}

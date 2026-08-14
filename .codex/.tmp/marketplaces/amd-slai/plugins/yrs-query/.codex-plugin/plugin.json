@@ -1,0 +1,5 @@
+{
+  "name": "yrs-query",
+  "description": "Query YRS (Yield Reporting System) wafer-level data from AMDMAP with",
+  "version": "1.0.2"
+}

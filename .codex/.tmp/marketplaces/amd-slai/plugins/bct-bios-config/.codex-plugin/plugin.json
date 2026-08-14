@@ -1,0 +1,5 @@
+{
+  "name": "bct-bios-config",
+  "description": "SSH-driven wrapper around AMD's BIOS Config Tool (BCT). Installs Ruby+BCT",
+  "version": "1.0.7"
+}

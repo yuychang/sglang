@@ -1,0 +1,5 @@
+{
+  "name": "timing-rtl-tracer",
+  "description": "Trace timing-violation paths through RTL hierarchy and build the interactive",
+  "version": "1.0.1"
+}

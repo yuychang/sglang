@@ -1,0 +1,5 @@
+{
+  "name": "rovodev",
+  "description": "Run Atlassian Rovo Dev, the agentic AI coding assistant, from the command line via acli. This is the one Atlassian Rovo surface that returns genuin...",
+  "version": "1.0.0"
+}

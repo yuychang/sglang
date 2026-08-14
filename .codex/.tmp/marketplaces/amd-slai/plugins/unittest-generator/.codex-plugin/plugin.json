@@ -1,0 +1,5 @@
+{
+  "name": "unittest-generator",
+  "description": "Generate GoogleTest unit tests for C++ classes and functions. Use when",
+  "version": "1.0.0"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "pm-weekly-report-to-confluence",
+  "description": "Generate a structured weekly PM status report from live JIRA or GitHub",
+  "version": "1.0.4"
+}

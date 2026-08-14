@@ -1,0 +1,5 @@
+{
+  "name": "po-backlog-health",
+  "description": "Score and stack-rank backlog items using RICE (Reach, Impact, Confidence,",
+  "version": "1.0.0"
+}

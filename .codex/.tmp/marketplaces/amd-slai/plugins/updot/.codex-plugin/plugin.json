@@ -1,0 +1,5 @@
+{
+  "name": "updot",
+  "description": "AMD dotfiles health check, diagnostics. Triggers: updot, dotfiles (.cshrc/.login/.bashrc/.bash_profile),",
+  "version": "1.0.0"
+}

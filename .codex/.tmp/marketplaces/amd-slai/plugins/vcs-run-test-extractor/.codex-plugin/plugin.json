@@ -1,0 +1,5 @@
+{
+  "name": "vcs-run-test-extractor",
+  "description": "Extract per-test runtime info (UVM test class, plusarg knobs, pass/fail)",
+  "version": "0.2.10"
+}

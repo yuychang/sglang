@@ -1,0 +1,5 @@
+{
+  "name": "sn-ppr-reg-query",
+  "description": "Look up PPR / mini-PPR register information - names, bitfields, namespaces,",
+  "version": "1.0.2"
+}

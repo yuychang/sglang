@@ -1,0 +1,5 @@
+{
+  "name": "formal-intake",
+  "description": "Start formal verification on a new block. Use for formal intake, new block formal setup, starting formal, or collecting inputs for SVA authoring an...",
+  "version": "1.0.11"
+}

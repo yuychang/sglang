@@ -1,0 +1,5 @@
+{
+  "name": "teams-action-listener",
+  "description": "Bidirectional Teams command bridge for Genie sessions. Polls a Teams",
+  "version": "3.0.6"
+}

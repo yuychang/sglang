@@ -1,0 +1,5 @@
+{
+  "name": "p4-ipcache",
+  "description": "Diagnose and manage AMD IPCache behavior for p4_mkwa and p4w workspaces.",
+  "version": "1.6.1"
+}

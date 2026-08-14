@@ -1,0 +1,5 @@
+{
+  "name": "veloce-buildfrequency-optimizer",
+  "description": "Autonomous RL-based Veloce emulation build optimizer that maximizes velgs scheduling frequency using Gaussian Process surrogate, iterative critical...",
+  "version": "1.0.1"
+}

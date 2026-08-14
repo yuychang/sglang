@@ -1,0 +1,5 @@
+{
+  "name": "palma-gen-rtl",
+  "description": "Invoke gen_rtl to regenerate Palma TB / RTL files from .pp Jinja2 templates. Knows the manifest.pf vs manifest.gpf rule by directory, the right fla...",
+  "version": "1.0.3"
+}

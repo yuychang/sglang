@@ -1,0 +1,5 @@
+{
+  "name": "agent-exec-summary",
+  "description": "Use when an AFK or long-running agent must send progress emails AND when",
+  "version": "1.2.2"
+}

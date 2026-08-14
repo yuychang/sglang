@@ -1,0 +1,5 @@
+{
+  "name": "quality-review",
+  "description": "Use when reviewing completed work for production readiness, inspecting P4 shelves before",
+  "version": "1.0.6"
+}

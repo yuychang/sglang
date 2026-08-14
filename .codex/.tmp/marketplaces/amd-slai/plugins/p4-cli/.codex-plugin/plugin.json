@@ -1,0 +1,5 @@
+{
+  "name": "p4-cli",
+  "description": "Use the p4 CLI to interact with AMD Perforce servers (atlp4s08, atlp4s04,",
+  "version": "1.0.1"
+}

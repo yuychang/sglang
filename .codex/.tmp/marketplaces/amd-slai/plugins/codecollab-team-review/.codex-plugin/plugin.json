@@ -1,0 +1,5 @@
+{
+  "name": "codecollab-team-review",
+  "description": "Multi-model team code review for CodeCollab reviews. Spawns agent teams",
+  "version": "1.3.0"
+}

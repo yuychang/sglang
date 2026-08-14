@@ -1,0 +1,5 @@
+{
+  "name": "sn-imagex",
+  "description": "Extracts images from Office files (.docx, .pptx, .xlsx), names each one",
+  "version": "1.0.1"
+}

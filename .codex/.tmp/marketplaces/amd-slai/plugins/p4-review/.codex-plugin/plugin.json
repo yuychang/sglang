@@ -1,0 +1,5 @@
+{
+  "name": "p4-review",
+  "description": "Monitor Perforce depot paths for new code submissions, automatically",
+  "version": "1.2.0"
+}

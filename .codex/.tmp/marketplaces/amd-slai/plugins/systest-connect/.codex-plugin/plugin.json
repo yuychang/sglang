@@ -1,0 +1,5 @@
+{
+  "name": "systest-connect",
+  "description": "Acquire AMD board farm and PLDC/CACO datacenter targets from Python",
+  "version": "2.1.1"
+}

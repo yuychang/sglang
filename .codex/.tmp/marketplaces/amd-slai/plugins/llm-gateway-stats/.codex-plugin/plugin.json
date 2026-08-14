@@ -1,0 +1,5 @@
+{
+  "name": "llm-gateway-stats",
+  "description": "Query AMD LLM Gateway usage statistics, model catalog, deployment metadata,",
+  "version": "1.0.2"
+}

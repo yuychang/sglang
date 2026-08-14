@@ -1,0 +1,5 @@
+{
+  "name": "clampsense-ai",
+  "description": "ClampSenseAI power gating clamp verification persona bundling the ClampSense skill, ZPR clock quiescence check, and DXIO FSDB analyzer for DXIO har...",
+  "version": "1.1.1"
+}

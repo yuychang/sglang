@@ -1,0 +1,5 @@
+{
+  "name": "run-lec",
+  "description": "Use when RTL changes need LEC verification, after refactoring or optimization that should",
+  "version": "1.0.1"
+}

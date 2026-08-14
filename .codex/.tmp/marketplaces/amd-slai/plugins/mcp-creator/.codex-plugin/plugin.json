@@ -1,0 +1,5 @@
+{
+  "name": "mcp-creator",
+  "description": "Helps users add MCP (Model Context Protocol) servers to their applications",
+  "version": "2.0.3"
+}

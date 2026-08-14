@@ -1,0 +1,5 @@
+{
+  "name": "libcxx-developer",
+  "description": "Expert assistant for libc++ and libc++abi headers, ABI stability, configuration",
+  "version": "1.0.1"
+}

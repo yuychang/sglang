@@ -1,0 +1,5 @@
+{
+  "name": "rt-rie-fp-convert",
+  "description": "Bit-accurate converter between RIE floating-point formats (fp32/fp24/fp28/fp36)",
+  "version": "1.0.2"
+}

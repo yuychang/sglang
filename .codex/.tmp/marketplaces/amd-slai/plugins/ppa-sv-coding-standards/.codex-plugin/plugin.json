@@ -1,0 +1,5 @@
+{
+  "name": "ppa-sv-coding-standards",
+  "description": "This skill should be used when the user asks to review SystemVerilog",
+  "version": "2.2.2"
+}

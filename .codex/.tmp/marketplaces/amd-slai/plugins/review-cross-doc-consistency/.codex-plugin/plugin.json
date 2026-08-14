@@ -1,0 +1,5 @@
+{
+  "name": "review-cross-doc-consistency",
+  "description": "Generic two-document (and one-vs-N-document) consistency auditor.",
+  "version": "1.2.2"
+}

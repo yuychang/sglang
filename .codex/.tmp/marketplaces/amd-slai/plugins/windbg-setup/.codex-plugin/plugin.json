@@ -1,0 +1,5 @@
+{
+  "name": "windbg-setup",
+  "description": "Diagnoses and recovers from a failed WinDbg launch by detecting installation",
+  "version": "0.3.2"
+}

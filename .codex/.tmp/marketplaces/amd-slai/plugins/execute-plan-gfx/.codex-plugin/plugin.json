@@ -1,0 +1,5 @@
+{
+  "name": "execute-plan-gfx",
+  "description": "Use when executing an implementation plan (from write-plan-gfx or otherwise)",
+  "version": "1.0.1"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "cp-queue-hang-tracker",
+  "description": "Analyze AMD GPU CP-side queue and packet hang signatures from ScanView",
+  "version": "1.1.3"
+}

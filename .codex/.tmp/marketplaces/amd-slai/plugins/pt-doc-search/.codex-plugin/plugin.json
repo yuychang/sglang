@@ -1,0 +1,5 @@
+{
+  "name": "pt-doc-search",
+  "description": "Locate Prometheus microarchitecture and feature documentation using MAS",
+  "version": "1.0.2"
+}

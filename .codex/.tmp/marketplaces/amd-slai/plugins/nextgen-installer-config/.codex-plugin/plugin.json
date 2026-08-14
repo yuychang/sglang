@@ -1,0 +1,5 @@
+{
+  "name": "nextgen-installer-config",
+  "description": "Shared configuration and templates for the nextgen-installer-helper persona.",
+  "version": "1.0.0"
+}

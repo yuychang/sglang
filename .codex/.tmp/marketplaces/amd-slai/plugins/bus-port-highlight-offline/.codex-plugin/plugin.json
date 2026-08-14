@@ -1,0 +1,5 @@
+{
+  "name": "bus-port-highlight-offline",
+  "description": "Discover bus ports, classify them onto die edges, render a real macro-placement",
+  "version": "1.0.7"
+}

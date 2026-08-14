@@ -1,0 +1,5 @@
+{
+  "name": "gfx-mcp-pipeline-bisect",
+  "description": "Pipeline-stage bisect MCP for RTL-vs-CSIM / R2R divergence (bisect_start_session, bisect_record_stage,",
+  "version": "1.0.2"
+}

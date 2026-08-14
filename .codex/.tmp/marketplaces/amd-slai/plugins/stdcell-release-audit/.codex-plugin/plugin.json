@@ -1,0 +1,5 @@
+{
+  "name": "stdcell-release-audit",
+  "description": "Sanity-check a standard-cell / SRAM release area for missing or incomplete",
+  "version": "1.0.8"
+}

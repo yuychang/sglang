@@ -1,0 +1,5 @@
+{
+  "name": "tmux-teams",
+  "description": "Remote-control a live tmux-backed coding agent from a Teams private channel.",
+  "version": "0.0.37"
+}

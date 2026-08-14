@@ -1,0 +1,5 @@
+{
+  "name": "powermind",
+  "description": "AI-powered AMD RTL power analysis using the PowerMind MCP server.",
+  "version": "1.0.3"
+}

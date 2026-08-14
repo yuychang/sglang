@@ -1,0 +1,5 @@
+{
+  "name": "sn-fides2-run",
+  "description": "Run the FIDES 2.0 pipeline for a specific BSD to capture which hardware",
+  "version": "1.0.1"
+}

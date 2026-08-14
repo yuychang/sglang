@@ -1,0 +1,5 @@
+{
+  "name": "pre-include",
+  "description": "Facilitate the DXIO/PCIESS pre-include flow: override released/imported",
+  "version": "1.1.2"
+}

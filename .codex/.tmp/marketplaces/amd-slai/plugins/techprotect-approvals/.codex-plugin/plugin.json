@@ -1,0 +1,5 @@
+{
+  "name": "techprotect-approvals",
+  "description": "Read pending TechProtect access request emails, show a table with org/manager/justification,",
+  "version": "1.0.1"
+}

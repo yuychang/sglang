@@ -1,0 +1,5 @@
+{
+  "name": "github-org-digest",
+  "description": "Generate a daily, weekly, or monthly activity digest (commits, PRs, issues,",
+  "version": "0.1.4"
+}

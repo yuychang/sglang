@@ -1,0 +1,5 @@
+{
+  "name": "formal-fixer",
+  "description": "Apply fixes for failed/inconclusive properties: add assumptions, rewrite properties, bump bounds, add cutpoints. Runs closure quality gate. Invoked...",
+  "version": "1.0.12"
+}

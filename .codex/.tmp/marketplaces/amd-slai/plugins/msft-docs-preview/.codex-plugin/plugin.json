@@ -1,0 +1,5 @@
+{
+  "name": "msft-docs-preview",
+  "description": "Preview a Microsoft PowerPoint (.pptx / .ppt) or Word (.docx / .doc)",
+  "version": "0.1.0"
+}

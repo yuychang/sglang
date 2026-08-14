@@ -1,0 +1,5 @@
+{
+  "name": "file-timesheet",
+  "description": "File the user''s weekly TimeControl timesheet on amd.timecontrol.net.",
+  "version": "3.1.3"
+}

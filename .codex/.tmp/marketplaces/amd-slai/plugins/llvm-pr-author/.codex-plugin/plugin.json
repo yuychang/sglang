@@ -1,0 +1,5 @@
+{
+  "name": "llvm-pr-author",
+  "description": "Pull request author persona for LLVM — commit messages, stack splitting,",
+  "version": "1.0.1"
+}

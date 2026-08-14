@@ -1,0 +1,5 @@
+{
+  "name": "nextgen-generate-collateral",
+  "description": "Generate a stakeholder/marketing 1-pager for an AMD installer container.",
+  "version": "1.0.0"
+}

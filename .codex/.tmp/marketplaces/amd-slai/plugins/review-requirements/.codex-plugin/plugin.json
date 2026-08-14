@@ -1,0 +1,5 @@
+{
+  "name": "review-requirements",
+  "description": "Run an autonomous multi-persona requirements review. Eight specialist reviewers examine your requirements document in parallel and produce a struct...",
+  "version": "1.0.1"
+}

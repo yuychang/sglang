@@ -1,0 +1,5 @@
+{
+  "name": "pm-executive-briefing",
+  "description": "Generate a director/VP-ready executive briefing from live JIRA or GitHub",
+  "version": "1.0.0"
+}

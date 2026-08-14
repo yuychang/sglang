@@ -1,0 +1,5 @@
+{
+  "name": "confluence-adf-formatting",
+  "description": "Build and publish Confluence pages in ADF (Atlassian Document Format)",
+  "version": "0.1.2"
+}

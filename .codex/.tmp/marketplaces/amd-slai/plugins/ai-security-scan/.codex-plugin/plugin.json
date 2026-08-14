@@ -1,0 +1,5 @@
+{
+  "name": "ai-security-scan",
+  "description": "LLM-hardened security scanner for skills, agents, and MCP servers. Detects",
+  "version": "1.0.37"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "checkin-grading",
+  "description": "Use when setting up or re-evaluating a check-in regression for any block",
+  "version": "1.1.3"
+}

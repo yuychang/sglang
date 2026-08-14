@@ -1,0 +1,5 @@
+{
+  "name": "timing-compare",
+  "description": "Compare PrimeTime QoR timing between two TileBuilder run directories.",
+  "version": "3.0.0"
+}

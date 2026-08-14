@@ -1,0 +1,5 @@
+{
+  "name": "sn-nbioconfig-gen",
+  "description": "Generate nbio.config commands for SimNow IOD BSG files by analyzing SOC",
+  "version": "1.0.0"
+}

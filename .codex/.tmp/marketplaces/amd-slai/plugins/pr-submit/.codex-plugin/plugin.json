@@ -1,0 +1,5 @@
+{
+  "name": "pr-submit",
+  "description": "Use when submitting a PR or updating an existing one — handles branch creation, semantic commit, push, and PR body generation.",
+  "version": "1.0.3"
+}

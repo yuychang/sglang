@@ -1,0 +1,5 @@
+{
+  "name": "tmux-interactive",
+  "description": "Manage persistent tmux terminal sessions for interactive debugging.",
+  "version": "1.0.1"
+}

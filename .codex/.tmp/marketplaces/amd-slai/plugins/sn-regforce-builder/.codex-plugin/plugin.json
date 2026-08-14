@@ -1,0 +1,5 @@
+{
+  "name": "sn-regforce-builder",
+  "description": "Simnow register force command builder. Given a register name (--reg)",
+  "version": "1.0.2"
+}

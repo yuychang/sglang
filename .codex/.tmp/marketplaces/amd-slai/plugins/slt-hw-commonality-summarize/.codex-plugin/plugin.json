@@ -1,0 +1,5 @@
+{
+  "name": "slt-hw-commonality-summarize",
+  "description": "Takes the human-readable output of the slt-hw-commonality-parse skill",
+  "version": "1.0.2"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "ccx-baadcode-debug",
+  "description": "Debug ANY BAADCODE (test failure) at CCX/SOC DV level. Use when a simulation",
+  "version": "1.0.1"
+}

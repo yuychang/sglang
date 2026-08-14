@@ -1,0 +1,5 @@
+{
+  "name": "merge-bot-point-release-config",
+  "description": "Open a GitHub PR to add/update AMD merge-bot configuration (.github/merge-bot.yml)",
+  "version": "1.0.8"
+}

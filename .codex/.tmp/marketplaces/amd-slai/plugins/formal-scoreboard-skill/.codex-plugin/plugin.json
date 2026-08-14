@@ -1,0 +1,5 @@
+{
+  "name": "formal-scoreboard-skill",
+  "description": "Use when authoring formal scoreboards -- stateful end-to-end transaction",
+  "version": "0.1.6"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "xprop-debug",
+  "description": "Trace X-propagation failures by comparing a w_xprop FAIL run against a wo_xprop PASS run. Identifies the X-injection point and root cause across 6 ...",
+  "version": "1.0.2"
+}

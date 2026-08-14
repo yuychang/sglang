@@ -1,0 +1,5 @@
+{
+  "name": "po-release-readiness",
+  "description": "Run a structured release readiness check before shipping — verifies all",
+  "version": "1.0.0"
+}

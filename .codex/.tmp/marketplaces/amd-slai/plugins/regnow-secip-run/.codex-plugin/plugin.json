@@ -1,0 +1,5 @@
+{
+  "name": "regnow-secip-run",
+  "description": "RegNow SECIP extract workflow - gather collaterals and generate cldata",
+  "version": "1.0.3"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "nightly-regression-debugger",
+  "description": "Debug DSV tests from Nightly regression using GDB with a Vivado debug",
+  "version": "1.0.0"
+}

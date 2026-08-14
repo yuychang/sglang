@@ -1,0 +1,5 @@
+{
+  "name": "council-of-claudes",
+  "description": "Convene independent expert Claude subagents to solve a task, audit them",
+  "version": "1.4.3"
+}

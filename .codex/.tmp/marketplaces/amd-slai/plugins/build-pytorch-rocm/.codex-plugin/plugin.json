@@ -1,0 +1,5 @@
+{
+  "name": "build-pytorch-rocm",
+  "description": "Build PyTorch from source for AMD GPUs using ROCm (from TheRock or system installation). Use this skill whenever the user wants to compile PyTorch ...",
+  "version": "1.0.0"
+}

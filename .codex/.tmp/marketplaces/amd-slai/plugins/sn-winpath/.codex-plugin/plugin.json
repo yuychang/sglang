@@ -1,0 +1,5 @@
+{
+  "name": "sn-winpath",
+  "description": "Convert Linux paths to Windows network paths for AMD network drives.",
+  "version": "1.0.2"
+}

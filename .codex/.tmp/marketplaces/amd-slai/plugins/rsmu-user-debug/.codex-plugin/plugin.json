@@ -1,0 +1,5 @@
+{
+  "name": "rsmu-user-debug",
+  "description": "Add or refresh RSMU UVC debugging guidance in Grail simulation prompt files and use the bundled RSMU UVC user guide to diagnose RSMU-related failur...",
+  "version": "1.0.1"
+}

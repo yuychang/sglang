@@ -1,0 +1,5 @@
+{
+  "name": "regression-triage",
+  "description": "Use when the user says \"triage\", \"triage results\", \"triage failures\", or \"summarize failures\";",
+  "version": "1.0.2"
+}

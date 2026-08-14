@@ -1,0 +1,5 @@
+{
+  "name": "systest-cmd",
+  "description": "Write and run systest .cmd DSL scripts for AMD board farm automation.",
+  "version": "2.1.1"
+}

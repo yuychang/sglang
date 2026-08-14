@@ -1,0 +1,5 @@
+{
+  "name": "gfx-mcp-fsdb-waveform",
+  "description": "FSDB waveform-query MCP (fsdb_open, fsdb_get_value_at, fsdb_search_signal, fsdb_find_edges,",
+  "version": "1.0.2"
+}

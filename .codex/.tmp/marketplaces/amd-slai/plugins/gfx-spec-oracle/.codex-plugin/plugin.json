@@ -1,0 +1,5 @@
+{
+  "name": "gfx-spec-oracle",
+  "description": "GFX hardware spec retrieval and lookup for AMD CSIM engineers. Knows how to find, prioritize, and extract information from synced GFX spec document...",
+  "version": "1.2.2"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "jira-scripting",
+  "description": "Jira issue tracking CLI scripts for searching, creating, updating, linking, and transitioning issues. Uses shell scripts with PAT authentication.",
+  "version": "2.0.0"
+}

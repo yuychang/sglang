@@ -1,0 +1,5 @@
+{
+  "name": "dj-failure-analysis",
+  "description": "Analyze DJ build/test failure logs to identify root causes and suggest",
+  "version": "1.1.1"
+}

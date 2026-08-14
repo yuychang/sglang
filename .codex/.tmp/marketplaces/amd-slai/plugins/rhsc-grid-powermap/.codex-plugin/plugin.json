@@ -1,0 +1,5 @@
+{
+  "name": "rhsc-grid-powermap",
+  "description": "Generate a spatial power density grid map (CSV + heatmap) from any Redhawk",
+  "version": "1.0.8"
+}

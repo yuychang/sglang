@@ -1,0 +1,5 @@
+{
+  "name": "meeting-actions",
+  "description": "Post-meeting personal assistant. Parallel-fetches the Teams transcript,",
+  "version": "1.2.0"
+}

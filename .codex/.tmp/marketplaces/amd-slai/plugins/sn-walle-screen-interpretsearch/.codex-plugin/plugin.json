@@ -1,0 +1,5 @@
+{
+  "name": "sn-walle-screen-interpretsearch",
+  "description": "Reads all text sections of a Jira issue markdown and uses AI interpretation",
+  "version": "1.0.2"
+}

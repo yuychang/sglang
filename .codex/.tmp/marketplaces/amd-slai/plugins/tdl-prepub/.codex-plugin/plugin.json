@@ -1,0 +1,5 @@
+{
+  "name": "tdl-prepub",
+  "description": "Create Pre-Publication Request subtasks in the TDL Jira project at jira.xilinx.com.",
+  "version": "0.1.0"
+}

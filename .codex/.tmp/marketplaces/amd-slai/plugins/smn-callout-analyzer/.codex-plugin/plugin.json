@@ -1,0 +1,5 @@
+{
+  "name": "smn-callout-analyzer",
+  "description": "Analyzes SMN16 template callout Jiras against chip variant spec.json",
+  "version": "1.0.10"
+}

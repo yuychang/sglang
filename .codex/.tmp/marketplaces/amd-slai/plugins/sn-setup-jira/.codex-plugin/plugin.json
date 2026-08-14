@@ -1,0 +1,5 @@
+{
+  "name": "sn-setup-jira",
+  "description": "Set up a local Jira workspace — creates the directory structure, downloads",
+  "version": "1.0.0"
+}

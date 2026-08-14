@@ -1,0 +1,5 @@
+{
+  "name": "claude-team-creator",
+  "description": "Guided workflow for creating multi-agent Claude teams that run in tmux",
+  "version": "2.0.1"
+}

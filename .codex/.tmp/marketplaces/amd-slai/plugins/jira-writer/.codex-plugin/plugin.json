@@ -1,0 +1,5 @@
+{
+  "name": "jira-writer",
+  "description": "Apply a validated batch of Jira edits from a \"changes\" JSON file. Strictly",
+  "version": "0.1.2"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "review-tech-debt",
+  "description": "C++ technical debt scanner - raw pointers, manual locks, TODO/FIXME markers, code duplication, naming violations, deprecated patterns.",
+  "version": "1.0.0"
+}

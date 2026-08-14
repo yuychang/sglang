@@ -1,0 +1,5 @@
+{
+  "name": "writing-amdgpu-tests",
+  "description": "Checklist-driven workflow for authoring and reviewing LLVM AMDGPU tests",
+  "version": "1.0.7"
+}

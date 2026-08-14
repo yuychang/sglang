@@ -1,0 +1,5 @@
+{
+  "name": "snowflake-admin",
+  "description": "Manages Snowflake access control using AMD corporate SSO. Detects admin",
+  "version": "1.0.1"
+}

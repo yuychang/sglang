@@ -1,0 +1,5 @@
+{
+  "name": "jira-ticket-summary",
+  "description": "Fetches a Jira ticket by ID and produces a concise Markdown summary of its status, description, priority, assignee, and recent comments. Use when a...",
+  "version": "1.0.0"
+}

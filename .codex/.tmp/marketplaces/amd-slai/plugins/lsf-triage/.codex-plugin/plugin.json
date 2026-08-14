@@ -1,0 +1,5 @@
+{
+  "name": "lsf-triage",
+  "description": "Diagnose what's happening with an LSF job in ANY state — PENDING (what's blocking it), RUNNING (healthy / OOM risk / possible hang), DONE (succeede...",
+  "version": "1.0.0"
+}

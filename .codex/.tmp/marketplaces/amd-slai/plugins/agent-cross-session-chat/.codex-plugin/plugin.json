@@ -1,0 +1,5 @@
+{
+  "name": "agent-cross-session-chat",
+  "description": "Turn-taking chat between two or more live genie/Claude Code agent sessions",
+  "version": "1.0.6"
+}

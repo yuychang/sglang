@@ -1,0 +1,5 @@
+{
+  "name": "sdt-lopper-debug",
+  "description": "Debug utility for AMD System Device Tree (SDT) generation and Lopper transformation issues. Use when a user needs to generate an SDT from an XSA, r...",
+  "version": "1.0.0"
+}

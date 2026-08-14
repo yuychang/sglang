@@ -1,0 +1,5 @@
+{
+  "name": "dv-clk-rst-flushmanager",
+  "description": "Autonomous post-simulation CLK/RST/PWROK sanity agent for any AMD SoC",
+  "version": "1.0.1"
+}

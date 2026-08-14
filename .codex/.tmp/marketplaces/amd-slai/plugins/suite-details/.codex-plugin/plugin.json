@@ -1,0 +1,5 @@
+{
+  "name": "suite-details",
+  "description": "Look up suite ownership details from TSM config data. Use when users",
+  "version": "1.0.0"
+}

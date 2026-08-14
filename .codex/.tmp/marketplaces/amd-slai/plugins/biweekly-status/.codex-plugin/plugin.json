@@ -1,0 +1,5 @@
+{
+  "name": "biweekly-status",
+  "description": "Generate a director-ready bi-weekly PM status report by querying JIRA",
+  "version": "1.0.3"
+}

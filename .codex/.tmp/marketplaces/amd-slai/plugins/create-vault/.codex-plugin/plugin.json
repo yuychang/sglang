@@ -1,0 +1,5 @@
+{
+  "name": "create-vault",
+  "description": "Use when a user wants to set up their own personal Obsidian-style vault",
+  "version": "1.0.3"
+}

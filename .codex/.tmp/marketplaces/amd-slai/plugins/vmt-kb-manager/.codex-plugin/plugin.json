@@ -1,0 +1,5 @@
+{
+  "name": "vmt-kb-manager",
+  "description": "Manage and update the VMT Jenkins debug knowledge base with shared learnings",
+  "version": "1.0.1"
+}

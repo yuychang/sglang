@@ -1,0 +1,5 @@
+{
+  "name": "tasktree-pm",
+  "description": "PM (project manager) reconciler. Walks invalidations, computes per-neighbour cascade decisions",
+  "version": "1.1.0"
+}

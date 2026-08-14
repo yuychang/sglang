@@ -1,0 +1,5 @@
+{
+  "name": "die-id-lookup",
+  "description": "Universal AMD identifier lookup — auto-detects die ID, customer SN, lot ID, OPN (100-…), or RMA number and queries AVA + Hotpot accordingly. Return...",
+  "version": "2.1.1"
+}

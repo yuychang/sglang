@@ -1,0 +1,5 @@
+{
+  "name": "sn-blueprint",
+  "description": "Generate interactive SimNow SoC block diagrams — auto-discover IP blocks",
+  "version": "1.0.2"
+}

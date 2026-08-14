@@ -1,0 +1,5 @@
+{
+  "name": "dvcov",
+  "description": "Design Verification Coverage AI Agent. Analyzes Synopsys VCS/URG coverage",
+  "version": "0.3.19"
+}

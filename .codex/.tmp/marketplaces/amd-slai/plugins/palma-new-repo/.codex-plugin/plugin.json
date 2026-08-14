@@ -1,0 +1,5 @@
+{
+  "name": "palma-new-repo",
+  "description": "Set up a new Palma development workspace by cloning asic-palma into /proj/palma_src0_er/$USER/<name> and initializing all submodules. Asks the user...",
+  "version": "1.0.3"
+}

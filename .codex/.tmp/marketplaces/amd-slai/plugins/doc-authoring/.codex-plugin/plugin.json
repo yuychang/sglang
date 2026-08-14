@@ -1,0 +1,5 @@
+{
+  "name": "doc-authoring",
+  "description": "Use when creating, editing, building, or reviewing technical documentation: LaTeX authoring, dual PDF+DOCX builds via Pandoc, AMD-branded specs / E...",
+  "version": "1.1.1"
+}

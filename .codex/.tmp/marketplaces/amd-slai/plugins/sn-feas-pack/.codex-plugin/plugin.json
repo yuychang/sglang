@@ -1,0 +1,5 @@
+{
+  "name": "sn-feas-pack",
+  "description": "Package PMFW compiled firmware and test environment into a Windows-compatible",
+  "version": "1.0.2"
+}

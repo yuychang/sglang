@@ -1,0 +1,5 @@
+{
+  "name": "po-voc-to-sprint",
+  "description": "Transform raw customer feedback or Voice of Customer (VoC) transcripts",
+  "version": "1.0.0"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "powermind-agent",
+  "description": "Autonomous end-to-end RTL block power-triage agent that discovers PPRTL/PowerArtist reports, generates a block report (incl. SDPD combinational fan...",
+  "version": "1.0.2"
+}

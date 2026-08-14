@@ -1,0 +1,5 @@
+{
+  "name": "linux-tfa-uboot-build",
+  "description": "Build Linux kernel, TF-A (Arm Trusted Firmware), U-boot, and PLM for",
+  "version": "1.0.0"
+}

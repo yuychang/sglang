@@ -1,0 +1,5 @@
+{
+  "name": "verdi-files",
+  "description": "Generate Verdi/nWave artefacts that can be loaded back into the GUI without",
+  "version": "1.0.1"
+}

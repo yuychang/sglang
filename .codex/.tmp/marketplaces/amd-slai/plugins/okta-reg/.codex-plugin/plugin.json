@@ -1,0 +1,5 @@
+{
+  "name": "okta-reg",
+  "description": "Automate Okta application registration via the REST API. Supports creating",
+  "version": "1.0.3"
+}

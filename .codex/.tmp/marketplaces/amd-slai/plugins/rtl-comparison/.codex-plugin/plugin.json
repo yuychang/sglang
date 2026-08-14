@@ -1,0 +1,5 @@
+{
+  "name": "rtl-comparison",
+  "description": "Compare two RTL versions and generate interactive HTML report with port",
+  "version": "2.2.1"
+}

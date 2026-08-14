@@ -1,0 +1,5 @@
+{
+  "name": "palma-new-test",
+  "description": "Scaffold a new test in a Palma block. Adds a test= entry to the block's test.rgr.pp, optionally creates a matching .cfg (or .cfg.pp template) using...",
+  "version": "1.0.4"
+}

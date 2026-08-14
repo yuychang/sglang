@@ -1,0 +1,5 @@
+{
+  "name": "fpga-case-list",
+  "description": "FPGA case list builder — decodes top marking photos or reads serial",
+  "version": "0.5.11"
+}

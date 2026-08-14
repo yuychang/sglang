@@ -1,0 +1,5 @@
+{
+  "name": "crdb-coverage-report",
+  "description": "Generate a coverage status report (weekly pulse + detailed analysis)",
+  "version": "1.7.8"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "sn-walle-invest-recreate",
+  "description": "Reproduce a Jira issue in SimNow — create and run recreation scripts",
+  "version": "1.0.1"
+}

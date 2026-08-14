@@ -1,0 +1,5 @@
+{
+  "name": "mi-fw-lead",
+  "description": "Senior MI Firmware Lead agent for AMD Instinct GPU platforms (MI430/MI450/MI455/MI450MC).",
+  "version": "1.3.3"
+}

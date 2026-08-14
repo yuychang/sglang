@@ -1,0 +1,5 @@
+{
+  "name": "setup-tng-build-host",
+  "description": "Set up a new Linux host for TNG CCX builds — memory/disk preflight, toolchain verification, ER-access probe, clone diag_tng (+ diag_tng_ccx if ER a...",
+  "version": "1.0.1"
+}

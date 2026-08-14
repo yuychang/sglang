@@ -1,0 +1,5 @@
+{
+  "name": "mygroups",
+  "description": "Manage AMD distribution lists on MyGroups (mygroups.amd.com) using Playwright",
+  "version": "0.1.0"
+}

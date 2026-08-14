@@ -1,0 +1,5 @@
+{
+  "name": "md-to-mermaid",
+  "description": "Generate all applicable Mermaid diagrams from a Markdown file or a folder",
+  "version": "1.0.5"
+}

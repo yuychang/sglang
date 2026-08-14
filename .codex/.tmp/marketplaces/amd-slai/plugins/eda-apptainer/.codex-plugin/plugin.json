@@ -1,0 +1,5 @@
+{
+  "name": "eda-apptainer",
+  "description": "Run AMD genie / Claude Code inside a sandboxed apptainer container tuned",
+  "version": "0.3.0"
+}

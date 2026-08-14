@@ -1,0 +1,5 @@
+{
+  "name": "llvm-test-author",
+  "description": "Expert assistant for LLVM lit, FileCheck, update scripts, and test maintenance",
+  "version": "1.0.1"
+}

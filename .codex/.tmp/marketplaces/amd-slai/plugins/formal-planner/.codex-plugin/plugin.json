@@ -1,0 +1,5 @@
+{
+  "name": "formal-planner",
+  "description": "Use when planning formal verification strategy, creating proof plans, defining assume-guarantee partitions, selecting cutpoints and abstractions, s...",
+  "version": "1.0.22"
+}

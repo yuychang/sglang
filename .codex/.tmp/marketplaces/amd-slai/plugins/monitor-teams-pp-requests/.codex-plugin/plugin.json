@@ -1,0 +1,5 @@
+{
+  "name": "monitor-teams-pp-requests",
+  "description": "Monitors Microsoft Teams for P4 PP/passphrase requests, gates replies on DVCS summaries, and searches Outlook for matching passphrases before reply...",
+  "version": "1.0.0"
+}

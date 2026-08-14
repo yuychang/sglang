@@ -1,0 +1,5 @@
+{
+  "name": "interface-logger",
+  "description": "Use when generating SystemVerilog transaction logger modules for RTL",
+  "version": "1.1.4"
+}

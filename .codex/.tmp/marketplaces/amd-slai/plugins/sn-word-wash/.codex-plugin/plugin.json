@@ -1,0 +1,5 @@
+{
+  "name": "sn-word-wash",
+  "description": "Self-contained AMD Keyword Scanner (KWS) for SimNow NDA packages. Bootstraps",
+  "version": "2.0.5"
+}

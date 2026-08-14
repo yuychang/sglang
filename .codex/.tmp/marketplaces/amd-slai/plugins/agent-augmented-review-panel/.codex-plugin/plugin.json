@@ -1,0 +1,5 @@
+{
+  "name": "agent-augmented-review-panel",
+  "description": "RETIRED (v2.0.0) — split into `review-doc` (generic lenses + panel spawn/consolidate/model-effort mechanics + the gist-map duplication engine) and ...",
+  "version": "2.0.0"
+}

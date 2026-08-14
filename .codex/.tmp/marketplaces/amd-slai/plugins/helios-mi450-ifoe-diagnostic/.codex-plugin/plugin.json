@@ -1,0 +1,5 @@
+{
+  "name": "helios-mi450-ifoe-diagnostic",
+  "description": "Helios MI450 IFoE Diagnostic Tool. Rationalise MI450 IFoE firmware dumps",
+  "version": "1.1.1"
+}

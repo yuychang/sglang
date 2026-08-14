@@ -1,0 +1,5 @@
+{
+  "name": "lsamd",
+  "description": "General-purpose AMD LDAP directory lookup skill. Use the included Python",
+  "version": "1.0.3"
+}

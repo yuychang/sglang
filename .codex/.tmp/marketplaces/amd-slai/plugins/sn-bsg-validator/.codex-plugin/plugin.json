@@ -1,0 +1,5 @@
+{
+  "name": "sn-bsg-validator",
+  "description": "Validate BSG files by dynamically investigating device source code, connection",
+  "version": "1.0.0"
+}

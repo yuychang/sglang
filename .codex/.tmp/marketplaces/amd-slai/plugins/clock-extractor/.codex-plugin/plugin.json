@@ -1,0 +1,5 @@
+{
+  "name": "clock-extractor",
+  "description": "Analyze Verilog or SystemVerilog RTL hierarchies from a .f filelist to",
+  "version": "1.0.1"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "preincludes-report",
+  "description": "Generates an Excel report of active preincludes for a given SoC variant",
+  "version": "1.0.2"
+}

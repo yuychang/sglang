@@ -1,0 +1,5 @@
+{
+  "name": "md-to-gh-html",
+  "description": "Use this skill to render a Markdown file to a self-contained, GitHub-styled",
+  "version": "1.0.0"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "tcl-shell",
+  "description": "Use when spawning or driving a long-lived interactive TCL EDA tool — JasperGold (FPV), dc_shell (Design Compiler), pt_shell (PrimeTime), or any tcl...",
+  "version": "1.1.0"
+}

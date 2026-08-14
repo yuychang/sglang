@@ -1,0 +1,5 @@
+{
+  "name": "veloce-emul-regr-pipeline",
+  "description": "Autonomous end-to-end Veloce emulation regression pipeline for AMD SoC projects. Orchestrates SIM/EMUL checkout, sim config runs, SBS generation, V...",
+  "version": "1.0.1"
+}

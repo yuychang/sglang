@@ -1,0 +1,5 @@
+{
+  "name": "sdpguru",
+  "description": "SDP (Scalable Data Port) protocol expert that accesses SDP_Guru Nabu",
+  "version": "1.0.2"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "slai-catalog",
+  "description": "Manage SLAI Marketplace plugins — export full catalog to Excel with install-status highlights, recommend plugins from your Claude Code usage histor...",
+  "version": "1.0.7"
+}

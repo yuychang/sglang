@@ -1,0 +1,5 @@
+{
+  "name": "p4-branch-create",
+  "description": "Request and populate a new Perforce branch by emailing the P4 admin with branch creation details (source path, destination path, file count, size, ...",
+  "version": "1.0.0"
+}

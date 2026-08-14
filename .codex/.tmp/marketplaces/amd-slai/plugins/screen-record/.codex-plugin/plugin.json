@@ -1,0 +1,5 @@
+{
+  "name": "screen-record",
+  "description": "Record screen during UI testing and desktop sessions. Capture MP4 video, GIF, and PNG screenshots via ffmpeg x11grab. Stream live MJPEG over HTTP f...",
+  "version": "1.1.0"
+}

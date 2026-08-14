@@ -1,0 +1,5 @@
+{
+  "name": "sn-bag-it-ship-it",
+  "description": "Automated NDA packaging for SimNow — generates package XML, builds ship-ready",
+  "version": "1.0.1"
+}

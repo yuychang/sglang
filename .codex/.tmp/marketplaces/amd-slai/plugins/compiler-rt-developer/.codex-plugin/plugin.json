@@ -1,0 +1,5 @@
+{
+  "name": "compiler-rt-developer",
+  "description": "Expert assistant for compiler-rt builtins, sanitizers, interceptors,",
+  "version": "1.0.1"
+}

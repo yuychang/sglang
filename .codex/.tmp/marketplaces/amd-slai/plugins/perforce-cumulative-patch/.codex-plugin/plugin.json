@@ -1,0 +1,5 @@
+{
+  "name": "perforce-cumulative-patch",
+  "description": "Create cumulative patches in Perforce by cherry-picking multiple changelists.",
+  "version": "1.0.0"
+}

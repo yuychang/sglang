@@ -1,0 +1,5 @@
+{
+  "name": "sn-walle-repo-verify",
+  "description": "Verify the SimNow cmake build result. On success, writes build state",
+  "version": "1.0.2"
+}

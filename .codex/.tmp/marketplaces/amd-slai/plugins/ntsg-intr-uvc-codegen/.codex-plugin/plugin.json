@@ -1,0 +1,5 @@
+{
+  "name": "ntsg-intr-uvc-codegen",
+  "description": "Generate UVM SystemVerilog interrupt UVC files from Excel interrupt hierarchy specifications",
+  "version": "1.1.0"
+}

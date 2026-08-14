@@ -1,0 +1,5 @@
+{
+  "name": "sn-spd-generator",
+  "description": "Generate JEDEC-compliant Serial Presence Detect (SPD) binary files for",
+  "version": "1.0.1"
+}

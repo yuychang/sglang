@@ -1,0 +1,5 @@
+{
+  "name": "compile-suite-metrics",
+  "description": "Collects user-specified metrics from a vivado regression run result.",
+  "version": "0.9.1"
+}

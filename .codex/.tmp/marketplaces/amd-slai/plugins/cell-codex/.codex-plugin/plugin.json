@@ -1,0 +1,5 @@
+{
+  "name": "cell-codex",
+  "description": "Parse, analyze, and compare standard cells across the foundry technologies",
+  "version": "1.18.3"
+}

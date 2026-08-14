@@ -1,0 +1,5 @@
+{
+  "name": "sn-parse-clk-json",
+  "description": "Use when the user wants to parse, read, or display a clock configuration",
+  "version": "1.0.1"
+}

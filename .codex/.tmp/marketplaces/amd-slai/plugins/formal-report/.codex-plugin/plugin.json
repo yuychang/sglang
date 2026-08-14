@@ -1,0 +1,5 @@
+{
+  "name": "formal-report",
+  "description": "Generate formal verification report, send email and Teams notifications, update knowledge base. Use in Phase 6 of the formal-orchestrator loop.",
+  "version": "1.0.8"
+}

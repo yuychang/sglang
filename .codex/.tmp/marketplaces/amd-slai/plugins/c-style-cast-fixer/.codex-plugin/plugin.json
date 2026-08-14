@@ -1,0 +1,5 @@
+{
+  "name": "c-style-cast-fixer",
+  "description": "4-agent pipeline to fix C-style casts in SimNow and create draft PRs.",
+  "version": "1.0.3"
+}

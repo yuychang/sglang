@@ -1,0 +1,5 @@
+{
+  "name": "trello-individual-report",
+  "description": "Generate individualized HTML email reports from Trello boards, sending",
+  "version": "1.0.1"
+}

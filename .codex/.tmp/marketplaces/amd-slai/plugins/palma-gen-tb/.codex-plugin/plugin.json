@@ -1,0 +1,5 @@
+{
+  "name": "palma-gen-tb",
+  "description": "Run gen_tb.py to regenerate per-block TB checkpoint files (base/pal_ip_base_*.gsv, base/pal_ip_input.yaml, intfs/*) from the design pinlist and ver...",
+  "version": "1.0.4"
+}

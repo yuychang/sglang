@@ -1,0 +1,5 @@
+{
+  "name": "ddrmc-ub-decode",
+  "description": "Extract and decode DDRMC UB MicroBlaze firmware from Versal Gen2 PDI",
+  "version": "1.0.1"
+}

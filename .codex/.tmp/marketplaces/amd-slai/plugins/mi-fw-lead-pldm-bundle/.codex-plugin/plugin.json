@@ -1,0 +1,5 @@
+{
+  "name": "mi-fw-lead-pldm-bundle",
+  "description": "Generate a PLDM update bundle from a vendor full_build_dir baseline.",
+  "version": "1.0.8"
+}

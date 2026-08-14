@@ -1,0 +1,5 @@
+{
+  "name": "plm-build",
+  "description": "Build PLM firmware for Versal/Versal2 devices using sdt_plm_build.sh.",
+  "version": "2.1.1"
+}

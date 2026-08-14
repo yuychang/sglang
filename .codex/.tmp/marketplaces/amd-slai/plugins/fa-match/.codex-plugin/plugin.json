@@ -1,0 +1,5 @@
+{
+  "name": "fa-match",
+  "description": "Check AMD FA (Failure Analysis) pipeline status for serial numbers against weekly FA list files downloaded from SharePoint. Returns In Queue / Comp...",
+  "version": "1.0.7"
+}

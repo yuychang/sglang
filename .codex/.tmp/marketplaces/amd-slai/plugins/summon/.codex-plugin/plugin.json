@@ -1,0 +1,5 @@
+{
+  "name": "summon",
+  "description": "Dispatch a task to another AI model. Routes Claude models to the built-in Agent tool (full tool access) and non-Claude models (GPT, Codex, Gemini, ...",
+  "version": "1.0.0"
+}

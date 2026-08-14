@@ -1,0 +1,5 @@
+{
+  "name": "aac-failure-curation",
+  "description": "Investigate AAC release-gate failures across changelists and produce",
+  "version": "1.0.5"
+}

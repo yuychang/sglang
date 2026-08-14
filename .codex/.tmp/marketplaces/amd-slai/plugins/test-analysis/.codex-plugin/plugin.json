@@ -1,0 +1,5 @@
+{
+  "name": "test-analysis",
+  "description": "Comprehensive analysis of any testcase (passing or failing) using only 3 inputs. Auto-discovers test sources, waveforms, RTL/TB hierarchy, UVC comp...",
+  "version": "1.0.2"
+}

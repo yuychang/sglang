@@ -1,0 +1,5 @@
+{
+  "name": "slai-jama",
+  "description": "Securely access AMD Jama Connect through a deterministic direct REST client without Jama MCP. Use when users ask to inspect Jama projects, requirem...",
+  "version": "1.0.0"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "techprotect-demo",
+  "description": "Demonstrates how a skill can reference and access NDA-restricted data",
+  "version": "1.1.1"
+}

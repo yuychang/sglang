@@ -1,0 +1,5 @@
+{
+  "name": "sn-eval-harvest",
+  "description": "Opt-in harvest of SimNow question-and-answer pairs from your local genie/Claude",
+  "version": "0.4.2"
+}

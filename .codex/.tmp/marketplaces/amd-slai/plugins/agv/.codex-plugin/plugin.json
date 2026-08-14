@@ -1,0 +1,5 @@
+{
+  "name": "agv",
+  "description": "AMD GFX Verification (AGV), the AGV Framework (AGV-F), and the AGV (UVM)",
+  "version": "1.0.1"
+}

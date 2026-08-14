@@ -1,0 +1,5 @@
+{
+  "name": "agenthub-push-cursor",
+  "description": "Pushes the current Cursor IDE conversation to an AMD AgentHub cloud agent and pulls completed runs back as local context. Use it when you want to h...",
+  "version": "1.0.0"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "cross-family",
+  "description": "Recruit non-Anthropic LLMs as cross-family reviewer subagents inside",
+  "version": "1.0.1"
+}

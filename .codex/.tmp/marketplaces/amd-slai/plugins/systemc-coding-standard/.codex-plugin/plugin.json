@@ -1,0 +1,5 @@
+{
+  "name": "systemc-coding-standard",
+  "description": "SystemC coding standard and API reference derived from IEEE Std 1666-2023",
+  "version": "1.0.6"
+}

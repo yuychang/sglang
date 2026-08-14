@@ -1,0 +1,5 @@
+{
+  "name": "zpr-clock-check",
+  "description": "Verifies clock quiescence around save/restore clamp transitions for retention",
+  "version": "2.1.1"
+}

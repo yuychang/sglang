@@ -1,0 +1,5 @@
+{
+  "name": "sn-walle-reproduce",
+  "description": "Run the reproduction phase interactively from your own Claude session",
+  "version": "1.2.0"
+}

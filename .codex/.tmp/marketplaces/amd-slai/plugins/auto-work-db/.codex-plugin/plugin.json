@@ -1,0 +1,5 @@
+{
+  "name": "auto-work-db",
+  "description": "Use when auto-work has dispatched a DB-block JIRA. Executes the 5-step",
+  "version": "3.1.5"
+}

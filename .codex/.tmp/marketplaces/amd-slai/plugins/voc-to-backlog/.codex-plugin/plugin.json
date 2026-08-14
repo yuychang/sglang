@@ -1,0 +1,5 @@
+{
+  "name": "voc-to-backlog",
+  "description": "Converts a Voice of Customer (VoC) meeting transcript into a full JIRA backlog and Confluence requirements spec automatically. Use after any custom...",
+  "version": "1.1.0"
+}

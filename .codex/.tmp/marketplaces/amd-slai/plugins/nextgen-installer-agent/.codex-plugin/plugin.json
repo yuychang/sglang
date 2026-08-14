@@ -1,0 +1,5 @@
+{
+  "name": "nextgen-installer-agent",
+  "description": "AMD nextgen-installer-helper dispatcher — validates installer containers",
+  "version": "1.0.0"
+}

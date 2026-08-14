@@ -1,0 +1,5 @@
+{
+  "name": "ta-digest",
+  "description": "Query TA (daily build) digest information including CLs, products, components,",
+  "version": "1.0.0"
+}

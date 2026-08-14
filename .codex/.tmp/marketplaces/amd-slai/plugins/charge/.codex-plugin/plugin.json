@@ -1,0 +1,5 @@
+{
+  "name": "charge",
+  "description": "Use this agent to drive an end-to-end, config-driven, multi-agent chip-engineering",
+  "version": "1.0.0"
+}

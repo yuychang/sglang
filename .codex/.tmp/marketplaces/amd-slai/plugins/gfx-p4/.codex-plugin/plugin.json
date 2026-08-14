@@ -1,0 +1,5 @@
+{
+  "name": "gfx-p4",
+  "description": "Use before running p4 edit, p4 add, p4 delete, p4 move, p4 shelve, p4 unshelve, p4 revert,",
+  "version": "1.0.5"
+}

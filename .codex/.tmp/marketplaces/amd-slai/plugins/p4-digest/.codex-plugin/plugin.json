@@ -1,0 +1,5 @@
+{
+  "name": "p4-digest",
+  "description": "Generate a weekly, biweekly, monthly, quarterly, or yearly activity digest",
+  "version": "0.2.3"
+}

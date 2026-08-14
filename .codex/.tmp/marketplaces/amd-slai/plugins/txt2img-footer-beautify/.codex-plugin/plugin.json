@@ -1,0 +1,5 @@
+{
+  "name": "txt2img-footer-beautify",
+  "description": "Generate AI images via the txt2img MCP server and beautify the result",
+  "version": "0.1.3"
+}

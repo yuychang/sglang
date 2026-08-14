@@ -1,0 +1,5 @@
+{
+  "name": "cdl-rubix-decoupling-converter",
+  "description": "Convert CDL/Rubix IP from coupled to separated mode with automated pattern",
+  "version": "1.1.1"
+}

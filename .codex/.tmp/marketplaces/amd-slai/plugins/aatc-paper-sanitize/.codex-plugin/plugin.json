@@ -1,0 +1,5 @@
+{
+  "name": "aatc-paper-sanitize",
+  "description": "Analyze and validate AATC-2026 conference papers (PDF or DOCX) for formatting",
+  "version": "1.5.0"
+}

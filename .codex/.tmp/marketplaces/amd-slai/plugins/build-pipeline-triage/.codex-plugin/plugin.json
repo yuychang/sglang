@@ -1,0 +1,5 @@
+{
+  "name": "build-pipeline-triage",
+  "description": "Query PASS/FAIL and runtime data across Canary, SW Integration (IVT suites), and Vivado Product CI pipelines. Use for build health, failure triage,...",
+  "version": "1.2.0"
+}

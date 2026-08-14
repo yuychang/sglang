@@ -1,0 +1,5 @@
+{
+  "name": "secretspec",
+  "description": "Manage application secrets with SecretSpec across .env files, language",
+  "version": "1.0.12"
+}

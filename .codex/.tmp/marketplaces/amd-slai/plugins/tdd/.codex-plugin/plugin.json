@@ -1,0 +1,5 @@
+{
+  "name": "tdd",
+  "description": "Test-driven development with red-green-refactor loop. Use when user wants",
+  "version": "1.0.1"
+}

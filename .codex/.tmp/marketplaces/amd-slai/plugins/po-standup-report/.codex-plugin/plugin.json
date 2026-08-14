@@ -1,0 +1,5 @@
+{
+  "name": "po-standup-report",
+  "description": "Generate a daily or weekly standup report from JIRA sprint or GitHub",
+  "version": "1.0.0"
+}

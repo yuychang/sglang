@@ -1,0 +1,5 @@
+{
+  "name": "rtl-ppa-collect",
+  "description": "Drive the upstream tools that GENERATE PPA numbers and timing reports",
+  "version": "1.3.3"
+}

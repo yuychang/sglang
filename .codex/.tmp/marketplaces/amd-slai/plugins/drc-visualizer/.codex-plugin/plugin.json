@@ -1,0 +1,5 @@
+{
+  "name": "drc-visualizer",
+  "description": "Visualize DRC (Design Rule Check) violations for layout engineers. Use",
+  "version": "1.0.4"
+}

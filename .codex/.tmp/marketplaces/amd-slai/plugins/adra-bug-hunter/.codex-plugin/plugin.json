@@ -1,0 +1,5 @@
+{
+  "name": "adra-bug-hunter",
+  "description": "AI Static Bug Hunter (ADRA) — AI-driven static analysis that reads RTL/CSIM",
+  "version": "1.0.4"
+}

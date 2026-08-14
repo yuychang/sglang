@@ -1,0 +1,5 @@
+{
+  "name": "skill-similarity-check",
+  "description": "Check whether a proposed new skill or feature update overlaps with existing skills before implementation. Use this whenever creating a skill, addin...",
+  "version": "1.1.0"
+}

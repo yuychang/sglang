@@ -1,0 +1,5 @@
+{
+  "name": "test-auto-fix",
+  "description": "Monitor an AECG verification test run, auto-fix common SystemVerilog",
+  "version": "2.2.1"
+}

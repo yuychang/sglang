@@ -1,0 +1,5 @@
+{
+  "name": "agenthub-pull-claude",
+  "description": "Pull an AgentHub conversation back to local Claude Code. Triggers on \"pull from agenthub\", \"continue locally\", \"bring back to local\", \"import from ...",
+  "version": "1.0.0"
+}

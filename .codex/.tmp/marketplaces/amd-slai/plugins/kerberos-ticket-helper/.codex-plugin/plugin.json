@@ -1,0 +1,5 @@
+{
+  "name": "kerberos-ticket-helper",
+  "description": "Set up and validate user-owned MIT Kerberos keytabs, recover missing",
+  "version": "1.0.4"
+}

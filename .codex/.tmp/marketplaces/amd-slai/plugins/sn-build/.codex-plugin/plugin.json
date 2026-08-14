@@ -1,0 +1,5 @@
+{
+  "name": "sn-build",
+  "description": "Checkout, build, update, and manage SimNow workspaces. Modes — checkout",
+  "version": "1.0.1"
+}

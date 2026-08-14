@@ -1,0 +1,5 @@
+{
+  "name": "dxio-fsdb-analyzer",
+  "description": "FSDB waveform analysis skill for DXIO verification. Provides hierarchy",
+  "version": "1.1.8"
+}

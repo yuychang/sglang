@@ -1,0 +1,5 @@
+{
+  "name": "gfx-jira",
+  "description": "gfx-hw-specific Jira knowledge for amd.atlassian.net — the REQUIRED custom fields to create a DEGFX13 Defect or a GFXPP issue, plus the gfx convent...",
+  "version": "1.0.1"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "plex",
+  "description": "Generate PLEX Gantt chart project files from natural language descriptions.",
+  "version": "1.0.3"
+}

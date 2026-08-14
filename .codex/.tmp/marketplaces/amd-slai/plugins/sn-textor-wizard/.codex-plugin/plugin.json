@@ -1,0 +1,5 @@
+{
+  "name": "sn-textor-wizard",
+  "description": "SimNow program engineering onboarding wizard. Presents available workflows (BSG validation, PPR, NDA packaging, Jama dashboard, COCO, RIDDLE, etc.)...",
+  "version": "1.0.2"
+}

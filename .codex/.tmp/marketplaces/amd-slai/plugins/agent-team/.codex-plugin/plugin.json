@@ -1,0 +1,5 @@
+{
+  "name": "agent-team",
+  "description": "Use when the user wants to spin up a persistent multi-agent team from",
+  "version": "2.0.0"
+}

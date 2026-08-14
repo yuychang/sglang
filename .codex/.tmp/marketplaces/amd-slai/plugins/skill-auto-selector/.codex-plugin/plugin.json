@@ -1,0 +1,5 @@
+{
+  "name": "skill-auto-selector",
+  "description": "Route implicit, underspecified, or follow-up prompts to the most relevant",
+  "version": "1.1.1"
+}

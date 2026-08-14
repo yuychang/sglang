@@ -1,0 +1,5 @@
+{
+  "name": "office-days-tracker",
+  "description": "Track how many days you go to the AMD office. Detects in-office days",
+  "version": "1.0.1"
+}

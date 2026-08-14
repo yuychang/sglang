@@ -1,0 +1,5 @@
+{
+  "name": "mcp-auth-copy",
+  "description": "Copy a configured MCP server and its agent-owned OAuth credentials between",
+  "version": "1.0.0"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "sauber-cat",
+  "description": "Automated cross-project functional coverage comparison and waiver recommendation",
+  "version": "1.0.1"
+}

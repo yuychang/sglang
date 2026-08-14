@@ -1,0 +1,5 @@
+{
+  "name": "atlassian-id-lookup",
+  "description": "Look up Atlassian account IDs from email addresses using Jira API. Useful",
+  "version": "1.0.1"
+}

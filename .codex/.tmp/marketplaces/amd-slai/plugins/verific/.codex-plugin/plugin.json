@@ -1,0 +1,5 @@
+{
+  "name": "verific",
+  "description": "Assists with Verific parser API usage at AMD (verific_parser variant).",
+  "version": "1.0.1"
+}

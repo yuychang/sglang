@@ -1,0 +1,5 @@
+{
+  "name": "cex-debug",
+  "description": "Use when debugging counterexample (CEX) traces from formal property",
+  "version": "1.1.6"
+}

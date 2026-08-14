@@ -1,0 +1,5 @@
+{
+  "name": "rie-fpv-debug",
+  "description": "Use when any RIE (Ray Intersection Engine) FPV assertion fires, before",
+  "version": "1.0.1"
+}

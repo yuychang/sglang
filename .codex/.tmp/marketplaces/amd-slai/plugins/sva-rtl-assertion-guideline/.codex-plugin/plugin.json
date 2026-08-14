@@ -1,0 +1,5 @@
+{
+  "name": "sva-rtl-assertion-guideline",
+  "description": "Use when writing or reviewing SystemVerilog Assertions (SVA) in RTL,",
+  "version": "1.0.3"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "tile-area-analyzer",
+  "description": "Analyze gate area and floorplan breakdown for PD tiles with hierarchical",
+  "version": "2.6.2"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "cxl-debug",
+  "description": "Decode CPM6/CXL waveform signals into human-readable CXL semantics. Use",
+  "version": "0.1.1"
+}

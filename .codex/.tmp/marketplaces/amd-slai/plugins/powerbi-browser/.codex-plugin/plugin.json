@@ -1,0 +1,5 @@
+{
+  "name": "powerbi-browser",
+  "description": "Automate Microsoft Power BI (app.powerbi.com) via Playwright browser",
+  "version": "1.1.0"
+}

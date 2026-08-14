@@ -1,0 +1,5 @@
+{
+  "name": "codex-review",
+  "description": "Get a second opinion from the OpenAI Codex CLI on either an implementation plan before presenting it via ExitPlanMode, or a git diff before committ...",
+  "version": "1.0.0"
+}

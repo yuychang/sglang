@@ -1,0 +1,5 @@
+{
+  "name": "resume-handoff",
+  "description": "Read a HANDOFF.md left by a previous session, verify the repo state has",
+  "version": "1.0.0"
+}

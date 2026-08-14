@@ -1,0 +1,5 @@
+{
+  "name": "cong-triage",
+  "description": "Triage Vivado placement/routing congestion from a run's vivado.log (optionally",
+  "version": "1.2.0"
+}

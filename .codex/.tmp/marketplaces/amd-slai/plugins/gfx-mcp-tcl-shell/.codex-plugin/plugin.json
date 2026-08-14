@@ -1,0 +1,5 @@
+{
+  "name": "gfx-mcp-tcl-shell",
+  "description": "Interactive TCL shell MCP for JasperGold/dc_shell/pt_shell sessions (tcl_start_session,",
+  "version": "1.0.3"
+}

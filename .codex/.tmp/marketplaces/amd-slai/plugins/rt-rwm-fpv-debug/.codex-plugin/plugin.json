@@ -1,0 +1,5 @@
+{
+  "name": "rt-rwm-fpv-debug",
+  "description": "Entry point for debugging RWM (Ray Workload Manager) FPV assertion failures",
+  "version": "1.0.6"
+}

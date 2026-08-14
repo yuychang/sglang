@@ -1,0 +1,5 @@
+{
+  "name": "pcfixeco-fix-rate-analyzer",
+  "description": "Generates an HTML comparison report for PcFixEco fix rates by collecting",
+  "version": "1.0.1"
+}

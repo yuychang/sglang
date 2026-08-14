@@ -1,0 +1,5 @@
+{
+  "name": "uipc-triage",
+  "description": "Triage UIPC differences between two Compass simulation runs. Given a",
+  "version": "1.6.0"
+}

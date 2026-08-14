@@ -1,0 +1,5 @@
+{
+  "name": "tpn-generator",
+  "description": "Generate a Third-Party Notices (TPN) text file from an Excel spreadsheet listing Component Name, Version, License Name, and Homepage URL. Use when ...",
+  "version": "1.1.0"
+}

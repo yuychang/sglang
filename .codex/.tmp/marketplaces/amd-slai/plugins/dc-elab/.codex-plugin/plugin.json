@@ -1,0 +1,5 @@
+{
+  "name": "dc-elab",
+  "description": "Use when about to run dc_elab; when about to invoke `dj rt -s dc_elab` or any DJ command",
+  "version": "1.0.1"
+}

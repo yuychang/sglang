@@ -1,0 +1,5 @@
+{
+  "name": "slai-artifactory-releaser",
+  "description": "Guide for building, publishing, and releasing Python packages to SLAI",
+  "version": "1.0.0"
+}

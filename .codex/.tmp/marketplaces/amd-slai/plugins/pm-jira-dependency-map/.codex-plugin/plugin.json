@@ -1,0 +1,5 @@
+{
+  "name": "pm-jira-dependency-map",
+  "description": "Trace and visualize JIRA ticket blocking chains recursively -- find root",
+  "version": "1.0.3"
+}

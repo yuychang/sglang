@@ -1,0 +1,5 @@
+{
+  "name": "pdk-reg",
+  "description": "PDK Regression Kit for running HSPICE simulations (Ring Oscillator, Repeater, Model-QA) with automated config setup and seras workflow execution.",
+  "version": "1.0.0"
+}

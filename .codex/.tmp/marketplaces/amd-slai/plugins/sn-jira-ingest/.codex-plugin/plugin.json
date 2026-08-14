@@ -1,0 +1,5 @@
+{
+  "name": "sn-jira-ingest",
+  "description": "Ingest a Jira ticket — download issue data and attachments to ~/jira/<TICKET>/,",
+  "version": "1.0.1"
+}

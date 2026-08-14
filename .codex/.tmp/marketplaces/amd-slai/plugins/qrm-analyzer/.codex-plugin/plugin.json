@@ -1,0 +1,5 @@
+{
+  "name": "qrm-analyzer",
+  "description": "Deep analysis of QRM (Quality Report Metric) path profile reports generated",
+  "version": "1.7.1"
+}

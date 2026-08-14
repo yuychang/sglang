@@ -1,0 +1,5 @@
+{
+  "name": "sn-faber-setup",
+  "description": "Set up or update a FABER device generation workspace. Auto-detects whether",
+  "version": "1.0.1"
+}

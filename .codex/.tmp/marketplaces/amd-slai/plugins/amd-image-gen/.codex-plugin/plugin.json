@@ -1,0 +1,5 @@
+{
+  "name": "amd-image-gen",
+  "description": "Generate AI images using Gemini via the AMD LLM Gateway. No OAuth or browser login required — uses your existing AMD API key. Supports flash (fast)...",
+  "version": "1.0.4"
+}

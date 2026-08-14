@@ -1,0 +1,5 @@
+{
+  "name": "rtl-design-audit",
+  "description": "Use when asked to \"audit\", \"design review\", \"find bugs in\", or \"review for bugs and inconsistencies",
+  "version": "1.0.6"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "revise-with-codstd",
+  "description": "Use when about to invoke `revise` (the AMD AI code-review tool, loaded via `module load sip_infra/current`);",
+  "version": "1.0.4"
+}

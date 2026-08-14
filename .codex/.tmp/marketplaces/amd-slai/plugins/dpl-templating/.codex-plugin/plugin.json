@@ -1,0 +1,5 @@
+{
+  "name": "dpl-templating",
+  "description": "Guide for correctly writing DePeRL templates (.v.dpl, .sv.dpl files)",
+  "version": "1.0.1"
+}

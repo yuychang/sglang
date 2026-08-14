@@ -1,0 +1,5 @@
+{
+  "name": "aecg-rtl-read-access",
+  "description": "Read-only browsing, searching, and selective fetching of AMD AECG silicon",
+  "version": "1.0.0"
+}

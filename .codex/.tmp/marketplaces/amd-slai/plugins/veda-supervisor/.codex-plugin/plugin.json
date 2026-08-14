@@ -1,0 +1,5 @@
+{
+  "name": "veda-supervisor",
+  "description": "Controls the lifecycle of the Veda Supervisor background service — a",
+  "version": "1.0.0"
+}

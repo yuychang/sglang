@@ -1,0 +1,5 @@
+{
+  "name": "jenkins",
+  "description": "Interact with Jenkins CI servers — query build status, list jobs, trigger",
+  "version": "1.0.2"
+}

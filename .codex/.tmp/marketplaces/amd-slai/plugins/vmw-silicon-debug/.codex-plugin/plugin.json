@@ -1,0 +1,5 @@
+{
+  "name": "vmw-silicon-debug",
+  "description": "Silicon debug workflow: download scan/trace data from ScanView (scanview.amd.com:8081),",
+  "version": "1.0.0"
+}

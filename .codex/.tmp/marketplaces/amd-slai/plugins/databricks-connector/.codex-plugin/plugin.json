@@ -1,0 +1,5 @@
+{
+  "name": "databricks-connector",
+  "description": "Connects Claude to AMD Databricks workspaces using Entra ID (Azure AD)",
+  "version": "1.0.5"
+}

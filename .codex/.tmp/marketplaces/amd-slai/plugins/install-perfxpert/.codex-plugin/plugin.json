@@ -1,0 +1,5 @@
+{
+  "name": "install-perfxpert",
+  "description": "Install and verify ROCm PerfXpert from the ROCm monorepo using the official pip-install-from-git.sh wrapper, then activate perfxpert-code backends.",
+  "version": "1.0.0"
+}

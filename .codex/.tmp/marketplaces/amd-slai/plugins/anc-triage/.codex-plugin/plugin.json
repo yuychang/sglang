@@ -1,0 +1,5 @@
+{
+  "name": "anc-triage",
+  "description": "Triage ANC hardware-test log bundles or Jira tickets — parse errors.json/summary.json/journal.log,",
+  "version": "1.5.3"
+}

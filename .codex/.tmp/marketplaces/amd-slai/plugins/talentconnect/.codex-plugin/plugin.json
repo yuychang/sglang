@@ -1,0 +1,5 @@
+{
+  "name": "talentconnect",
+  "description": "Automate AMD TalentConnect (SAP SuccessFactors) via Playwright browser",
+  "version": "0.3.0"
+}

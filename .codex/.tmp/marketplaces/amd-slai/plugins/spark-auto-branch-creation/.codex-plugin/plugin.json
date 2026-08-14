@@ -1,0 +1,5 @@
+{
+  "name": "spark-auto-branch-creation",
+  "description": "Auto-create a SPARK point release branch from an Approved release request.",
+  "version": "1.0.3"
+}

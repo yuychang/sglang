@@ -1,0 +1,5 @@
+{
+  "name": "formal-spec-checker",
+  "description": "Pre-formal RTL-vs-spec static analysis. Given a spec document and RTL",
+  "version": "1.0.2"
+}

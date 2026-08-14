@@ -1,0 +1,5 @@
+{
+  "name": "token-optimizer",
+  "description": "Reduce LLM token usage by compressing prompts and outputs while preserving",
+  "version": "1.0.1"
+}

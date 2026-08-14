@@ -1,0 +1,5 @@
+{
+  "name": "gap-ticket-automation",
+  "description": "Automate GAP JIRA ticket test selection. Fetches failed tests from a ticket, XOAH URL, Jira filter, or JQL URL; scores by pass rate and runtime; an...",
+  "version": "1.15.0"
+}

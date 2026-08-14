@@ -1,0 +1,5 @@
+{
+  "name": "tilescope",
+  "description": "Generate interactive HTML dashboards from TileBuilder run directories,",
+  "version": "1.0.1"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "local-rag",
+  "description": "Build a local hybrid RAG system over PDFs in ./docs. Extracts text per",
+  "version": "2.0.1"
+}

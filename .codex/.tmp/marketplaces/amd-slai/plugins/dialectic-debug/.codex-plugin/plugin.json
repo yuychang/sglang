@@ -1,0 +1,5 @@
+{
+  "name": "dialectic-debug",
+  "description": "Use when your agent name contains \"reviewer\", \"critic\", or \"skeptic\"; when spawned by TeamCreate",
+  "version": "1.0.3"
+}

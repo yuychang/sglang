@@ -1,0 +1,5 @@
+{
+  "name": "xsdb-workflow",
+  "description": "Debug and program Versal boards via XSDB. Use when user needs to connect",
+  "version": "3.0.0"
+}

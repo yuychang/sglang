@@ -1,0 +1,5 @@
+{
+  "name": "receiving-code-review",
+  "description": "Use when receiving code review feedback, before implementing suggestions,",
+  "version": "1.0.0"
+}

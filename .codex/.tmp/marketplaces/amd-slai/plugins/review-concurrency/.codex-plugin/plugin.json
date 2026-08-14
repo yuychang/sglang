@@ -1,0 +1,5 @@
+{
+  "name": "review-concurrency",
+  "description": "Concurrency and thread-safety review for C++ - deadlock detection, data races, lock ordering, atomic correctness, condition variables.",
+  "version": "1.0.0"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "covx",
+  "description": "Coverage closure agent for UVM/SystemVerilog -- clusters VCS/URG holes",
+  "version": "1.5.14"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "gfx-jg",
+  "description": "Use before launching JasperGold (afi -jg, jg, jg_fpv); before running check_sec, check_prop,",
+  "version": "1.0.6"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "patchwork",
+  "description": "Fetch patches from AMD/Xilinx Patchwork server. Retrieve patch content",
+  "version": "1.0.1"
+}

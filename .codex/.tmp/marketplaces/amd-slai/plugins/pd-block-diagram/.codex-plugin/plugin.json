@@ -1,0 +1,5 @@
+{
+  "name": "pd-block-diagram",
+  "description": "Generate interactive HTML block diagrams for TileBuilder physical design",
+  "version": "1.0.6"
+}

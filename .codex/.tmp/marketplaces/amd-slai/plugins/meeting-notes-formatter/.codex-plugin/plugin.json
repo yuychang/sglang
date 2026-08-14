@@ -1,0 +1,5 @@
+{
+  "name": "meeting-notes-formatter",
+  "description": "Read a Teams or Zoom meeting transcript (.docx) and format it into structured,",
+  "version": "1.0.4"
+}

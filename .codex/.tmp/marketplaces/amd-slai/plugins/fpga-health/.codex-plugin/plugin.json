@@ -1,0 +1,5 @@
+{
+  "name": "fpga-health",
+  "description": "AMD internal FPGA device health analytics tool for the CQE team. Use",
+  "version": "1.0.16"
+}

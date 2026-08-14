@@ -1,0 +1,5 @@
+{
+  "name": "verible",
+  "description": "Parse, lint, and format SystemVerilog using the open-source ChipsAlliance",
+  "version": "0.1.3"
+}

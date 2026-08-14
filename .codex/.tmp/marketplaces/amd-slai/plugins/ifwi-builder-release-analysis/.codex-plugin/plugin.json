@@ -1,0 +1,5 @@
+{
+  "name": "ifwi-builder-release-analysis",
+  "description": "Retrieves and analyzes IFWI Builder data for a given ASIC to produce a structured release management report comparing firmware and key layouts betw...",
+  "version": "1.0.5"
+}

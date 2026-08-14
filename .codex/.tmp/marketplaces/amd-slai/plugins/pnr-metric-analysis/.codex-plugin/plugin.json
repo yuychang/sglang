@@ -1,0 +1,5 @@
+{
+  "name": "pnr-metric-analysis",
+  "description": "Analyze Place and Route metrics for a PnR run using the pd-guru MCP plugin.",
+  "version": "1.0.1"
+}

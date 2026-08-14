@@ -1,0 +1,5 @@
+{
+  "name": "sn-walle-findrelated",
+  "description": "Finds historical Jira issues similar to a given SimNow defect. Builds",
+  "version": "1.0.3"
+}

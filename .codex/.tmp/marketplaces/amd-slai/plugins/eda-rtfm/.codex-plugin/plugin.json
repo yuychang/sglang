@@ -1,0 +1,5 @@
+{
+  "name": "eda-rtfm",
+  "description": "Read The Full Manual - EDA tool documentation assistant for Claude Code. Auto-triggers on EDA tool questions, searches vendor documentation (Synops...",
+  "version": "1.0.45"
+}

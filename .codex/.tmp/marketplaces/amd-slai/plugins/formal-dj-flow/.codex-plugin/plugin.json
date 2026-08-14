@@ -1,0 +1,5 @@
+{
+  "name": "formal-dj-flow",
+  "description": "Generate DJ/AFI infrastructure files for formal verification runs on DJ-based projects. Creates .afi, .f, .tdl, album.dj, and commands files that c...",
+  "version": "1.0.2"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "token-trim",
+  "description": "Clean noisy terminal output (triage reports, build logs, Rich tables,",
+  "version": "1.0.2"
+}

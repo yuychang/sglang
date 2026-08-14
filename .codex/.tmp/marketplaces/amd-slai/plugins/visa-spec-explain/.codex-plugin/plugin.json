@@ -1,0 +1,5 @@
+{
+  "name": "visa-spec-explain",
+  "description": "Load a spec document (PDF/DOCX/PPTX), convert and cache it, then generate",
+  "version": "1.0.0"
+}

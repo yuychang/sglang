@@ -1,0 +1,5 @@
+{
+  "name": "formal-plan-auditor",
+  "description": "Audit a formal verification proof plan for checker description quality, spec coverage completeness, phase structure soundness, and assume-guarantee...",
+  "version": "1.0.6"
+}

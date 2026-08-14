@@ -1,0 +1,5 @@
+{
+  "name": "palma-triage",
+  "description": "Classify Palma regression failures into actionable buckets (pre-existing on master, expected err-injection, known documented issue, NEW needs triag...",
+  "version": "1.0.0"
+}

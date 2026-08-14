@@ -1,0 +1,5 @@
+{
+  "name": "xti-toolkit",
+  "description": "Complete XTI toolkit — regression help, TQL queries, TSM suite management, RDI migration, and test failure debugging",
+  "version": "1.0.0"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "atpg-latency-tool",
+  "description": "Generic, cross-project ATPG capture latency counter tool. Use when the",
+  "version": "2.2.7"
+}

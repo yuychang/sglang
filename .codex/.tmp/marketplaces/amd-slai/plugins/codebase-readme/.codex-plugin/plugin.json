@@ -1,0 +1,5 @@
+{
+  "name": "codebase-readme",
+  "description": "Generate or refresh a high-quality README for a code repository. Use when the user asks to \"write a README\", \"document this repo/project\", \"generat...",
+  "version": "1.0.0"
+}

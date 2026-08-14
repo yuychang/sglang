@@ -1,0 +1,5 @@
+{
+  "name": "qsc-platypi-worker",
+  "description": "[WIP / dev — not yet marketplace-validated] Collect SMC diagnostic logs, control power, read/update firmware, and query inventory on AMD platforms ...",
+  "version": "0.1.0"
+}

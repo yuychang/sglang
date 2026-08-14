@@ -1,0 +1,5 @@
+{
+  "name": "ifwi-error-analysis",
+  "description": "Analyze AMD IFWI / VBIOS build-failure logs. Given a build log, an error excerpt, or a failed build's terminal output, classify the failure into it...",
+  "version": "1.0.0"
+}

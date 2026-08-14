@@ -1,0 +1,5 @@
+{
+  "name": "timing-path-diagram",
+  "description": "Generate Graphviz block diagrams from PrimeTime timing reports, correlating",
+  "version": "2.0.1"
+}

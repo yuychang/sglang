@@ -1,0 +1,5 @@
+{
+  "name": "mcp-bridge",
+  "description": "Connect to any OAuth-protected MCP server, discover its tools, and call",
+  "version": "1.0.21"
+}

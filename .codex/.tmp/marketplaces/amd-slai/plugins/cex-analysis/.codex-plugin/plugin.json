@@ -1,0 +1,5 @@
+{
+  "name": "cex-analysis",
+  "description": "Debug counterexample (CEX) traces from formal verification runs. Use",
+  "version": "1.0.2"
+}

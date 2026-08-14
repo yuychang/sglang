@@ -1,0 +1,5 @@
+{
+  "name": "slt-hw-commonality-parse",
+  "description": "Decodes the aggregated post-code and MCA output of the slt-hw-commonality-extract",
+  "version": "1.0.2"
+}

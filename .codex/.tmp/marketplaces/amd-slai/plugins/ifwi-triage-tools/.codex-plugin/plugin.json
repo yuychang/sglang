@@ -1,0 +1,5 @@
+{
+  "name": "ifwi-triage-tools",
+  "description": "Diagnose an AMD IFWI build failure with evidence from the live IFWI triage MCP server. Given a failed build_id (and optionally its log URL), fetch ...",
+  "version": "1.0.0"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "review-change",
+  "description": "Diff and change review - blast radius analysis, regression risk, missing changes, logic correctness.",
+  "version": "1.0.0"
+}

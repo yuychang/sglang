@@ -1,0 +1,5 @@
+{
+  "name": "mi-fw-lead-releases-tracker",
+  "description": "Query MI450 BRP IFWI and BKC release data. Find firmware version for",
+  "version": "1.0.1"
+}

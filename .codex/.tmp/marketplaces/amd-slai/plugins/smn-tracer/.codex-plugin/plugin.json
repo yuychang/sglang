@@ -1,0 +1,5 @@
+{
+  "name": "smn-tracer",
+  "description": "Analyze ANY vcs_run.log to trace SMN (System Management Network) transactions from initiator to target. SMN writes occur in EVERY simulation — in i...",
+  "version": "1.0.0"
+}

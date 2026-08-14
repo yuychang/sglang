@@ -1,0 +1,5 @@
+{
+  "name": "fsdb-dump-scope",
+  "description": "Generate a Synopsys FSDB scope file (also called a predo file, dump scope",
+  "version": "1.4.0"
+}

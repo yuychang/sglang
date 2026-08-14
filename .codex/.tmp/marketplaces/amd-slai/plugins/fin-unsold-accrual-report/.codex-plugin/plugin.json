@@ -1,0 +1,5 @@
+{
+  "name": "fin-unsold-accrual-report",
+  "description": "Query UAR/UIR tables in PKG_FINANCE database on ATLEIMSOXDBP1 SQL Server with natural language questions. Analyze unearned revenue, inventory reser...",
+  "version": "2.0.0"
+}

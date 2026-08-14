@@ -1,0 +1,5 @@
+{
+  "name": "preinclude-cleanup",
+  "description": "Clean stale pre-include metadata (commented list entries, orphan original/replacement",
+  "version": "1.0.9"
+}

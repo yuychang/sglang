@@ -1,0 +1,5 @@
+{
+  "name": "df-tcdx-debug",
+  "description": "End-to-end TCDX simulation debug for AMD DF verification. Covers log",
+  "version": "1.0.0"
+}

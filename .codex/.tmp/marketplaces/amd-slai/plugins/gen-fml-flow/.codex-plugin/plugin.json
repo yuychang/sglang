@@ -1,0 +1,5 @@
+{
+  "name": "gen-fml-flow",
+  "description": "Wire up and run the JasperGold FPV gen_fml flow for any RTL block using the gen_fml tool. Accepts pre-existing drv/ckr .sv files from sva-author-sk...",
+  "version": "1.1.8"
+}

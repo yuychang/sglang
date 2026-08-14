@@ -1,0 +1,5 @@
+{
+  "name": "linux-kernel-review",
+  "description": "Linux kernel patch review protocol: regression analysis, technical patterns, callstack analysis, false positive elimination, and LKML-ready output ...",
+  "version": "1.0.2"
+}

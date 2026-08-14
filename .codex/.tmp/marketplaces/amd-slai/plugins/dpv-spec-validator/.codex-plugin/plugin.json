@@ -1,0 +1,5 @@
+{
+  "name": "dpv-spec-validator",
+  "description": "READ-ONLY audit of a DPV testbench (Hector C++/RTL equivalence) against",
+  "version": "1.0.1"
+}

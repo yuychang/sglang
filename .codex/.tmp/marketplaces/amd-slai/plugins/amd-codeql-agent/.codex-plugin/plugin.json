@@ -1,0 +1,5 @@
+{
+  "name": "amd-codeql-agent",
+  "description": "Multi-agent Claude Code workspace for working down a repo's CodeQL code-scanning",
+  "version": "1.0.4"
+}

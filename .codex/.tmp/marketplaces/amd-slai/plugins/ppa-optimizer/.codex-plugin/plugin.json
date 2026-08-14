@@ -1,0 +1,5 @@
+{
+  "name": "ppa-optimizer",
+  "description": "PPA optimization toolkit bundling SystemVerilog coding standards, RTL code review, clock gating optimization, AI-powered power analysis (PowerMind)...",
+  "version": "1.2.1"
+}

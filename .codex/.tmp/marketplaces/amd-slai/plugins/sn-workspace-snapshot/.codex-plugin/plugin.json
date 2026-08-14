@@ -1,0 +1,5 @@
+{
+  "name": "sn-workspace-snapshot",
+  "description": "Capture or restore an engineering workspace snapshot. Use 'capture' (default)",
+  "version": "0.3.2"
+}

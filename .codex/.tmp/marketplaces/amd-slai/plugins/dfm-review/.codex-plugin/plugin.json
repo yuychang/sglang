@@ -1,0 +1,5 @@
+{
+  "name": "dfm-review",
+  "description": "Review a TileBuilder workspace to check that DFM components are configured",
+  "version": "1.0.9"
+}

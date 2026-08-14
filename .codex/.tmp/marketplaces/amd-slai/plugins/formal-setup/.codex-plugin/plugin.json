@@ -1,0 +1,5 @@
+{
+  "name": "formal-setup",
+  "description": "Initialize a formal verification session: load env, parse launch.json, determine REVIEW_MODE, create directory structure, load knowledge base. Invo...",
+  "version": "1.0.11"
+}

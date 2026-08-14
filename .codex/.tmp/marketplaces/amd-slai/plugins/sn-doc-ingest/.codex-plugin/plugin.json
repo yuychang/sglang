@@ -1,0 +1,5 @@
+{
+  "name": "sn-doc-ingest",
+  "description": "Ingest one or more hardware documents (PDF/DOCX/text) and produce human-readable",
+  "version": "1.0.2"
+}

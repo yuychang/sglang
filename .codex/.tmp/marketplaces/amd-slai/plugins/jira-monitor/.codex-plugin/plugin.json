@@ -1,0 +1,5 @@
+{
+  "name": "jira-monitor",
+  "description": "Daily monitoring agent for JIRA tickets - alerts on overdue and stale",
+  "version": "1.0.2"
+}

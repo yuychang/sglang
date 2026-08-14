@@ -1,0 +1,5 @@
+{
+  "name": "visa-spec-mindmap",
+  "description": "Generate a structured markdown outline (mind-map) from a loaded spec",
+  "version": "1.0.0"
+}

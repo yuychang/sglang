@@ -1,0 +1,5 @@
+{
+  "name": "urg-text-parser",
+  "description": "Parse Synopsys VCS URG text coverage reports (a directory of .txt files)",
+  "version": "0.4.14"
+}

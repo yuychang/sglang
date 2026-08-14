@@ -1,0 +1,5 @@
+{
+  "name": "c4-plantuml",
+  "description": "Render and scaffold C4-PlantUML architecture diagrams (Context, Container,",
+  "version": "0.1.0"
+}

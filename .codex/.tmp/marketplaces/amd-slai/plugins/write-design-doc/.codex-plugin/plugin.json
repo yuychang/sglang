@@ -1,0 +1,5 @@
+{
+  "name": "write-design-doc",
+  "description": "Produce a Google/Stripe-style design doc (RFC, proposal) for a proposed change — new feature, refactor, system migration. Narrative-driven, decisio...",
+  "version": "1.0.0"
+}

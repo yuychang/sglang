@@ -1,0 +1,5 @@
+{
+  "name": "ci-build-dashboard",
+  "description": "Query runtime and PASS/FAIL data across all three CI build pipelines:",
+  "version": "1.0.0"
+}

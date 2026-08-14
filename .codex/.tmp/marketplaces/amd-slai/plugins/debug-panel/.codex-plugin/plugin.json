@@ -1,0 +1,5 @@
+{
+  "name": "debug-panel",
+  "description": "Skill the agent invokes after producing a green patch (passed must-pass tests + block-checkin",
+  "version": "2.0.2"
+}

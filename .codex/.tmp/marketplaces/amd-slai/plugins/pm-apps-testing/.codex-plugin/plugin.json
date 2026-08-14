@@ -1,0 +1,5 @@
+{
+  "name": "pm-apps-testing",
+  "description": "Build and run baremetal PM tests using the pm_apps/ROAST framework on",
+  "version": "1.0.1"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "hld-perf-area",
+  "description": "Scan an HLD feature tracker for POR features, read their arch-spec pages",
+  "version": "1.0.2"
+}

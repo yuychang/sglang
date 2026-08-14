@@ -1,0 +1,5 @@
+{
+  "name": "perfcounter-tb-gen-agv",
+  "description": "Auto-generates a complete performance-counter test suite for an AGV-testbench",
+  "version": "1.0.7"
+}

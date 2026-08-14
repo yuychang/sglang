@@ -1,0 +1,5 @@
+{
+  "name": "changelog",
+  "description": "Generate changelogs and release notes from git history - conventional commits, grouped by type/scope, breaking changes, contributor attribution.",
+  "version": "1.0.0"
+}

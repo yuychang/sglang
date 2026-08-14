@@ -1,0 +1,5 @@
+{
+  "name": "opentelemetry",
+  "description": "Add OpenTelemetry observability (traces, metrics, logs) to existing codebases",
+  "version": "1.0.7"
+}

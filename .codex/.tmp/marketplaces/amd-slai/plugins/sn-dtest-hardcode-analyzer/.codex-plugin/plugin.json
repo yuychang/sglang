@@ -1,0 +1,5 @@
+{
+  "name": "sn-dtest-hardcode-analyzer",
+  "description": "Analyzes SimNow directed test files for hardcoded values and suggests",
+  "version": "1.0.2"
+}

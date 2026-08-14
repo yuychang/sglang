@@ -1,0 +1,5 @@
+{
+  "name": "drac-variance-diagnostics",
+  "description": "Find the source of a variance in the AMD Channel Revenue DRAC (Deferred Revenue Accrual Consolidation) and hand the analyst a one-click fix. Use wh...",
+  "version": "1.0.0"
+}

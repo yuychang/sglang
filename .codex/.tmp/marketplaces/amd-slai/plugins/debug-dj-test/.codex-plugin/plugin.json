@@ -1,0 +1,5 @@
+{
+  "name": "debug-dj-test",
+  "description": "Use when needing to re-run a failing DJ test with -DDEBUG or -DGCLOG_ENABLE to get a debug",
+  "version": "1.0.1"
+}

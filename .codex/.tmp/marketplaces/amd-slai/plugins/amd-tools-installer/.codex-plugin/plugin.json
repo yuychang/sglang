@@ -1,0 +1,5 @@
+{
+  "name": "amd-tools-installer",
+  "description": "Interactively install and update AMD dc-tool-cage and its managed hardware",
+  "version": "1.0.0"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "slt-hw-commonality",
+  "description": "Scans SLT (System Level Test) manufacturing failure data in Snowflake",
+  "version": "1.0.1"
+}

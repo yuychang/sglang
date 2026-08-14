@@ -1,0 +1,5 @@
+{
+  "name": "update-my-jira",
+  "description": "Automates Jira ticket creation and updates by analyzing workspace session",
+  "version": "1.1.1"
+}

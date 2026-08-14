@@ -1,0 +1,5 @@
+{
+  "name": "dss-aai-krn-org-structure",
+  "description": "Pull a named executive's full reporting org from the Outlook/Microsoft",
+  "version": "2.2.5"
+}

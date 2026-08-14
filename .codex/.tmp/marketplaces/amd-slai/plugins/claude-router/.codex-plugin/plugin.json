@@ -1,0 +1,5 @@
+{
+  "name": "claude-router",
+  "description": "Install and manage the persistent claude-router hook",
+  "version": "2.0.1"
+}

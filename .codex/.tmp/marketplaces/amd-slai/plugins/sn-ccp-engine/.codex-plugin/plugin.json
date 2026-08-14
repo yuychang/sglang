@@ -1,0 +1,5 @@
+{
+  "name": "sn-ccp-engine",
+  "description": "CCP Fixed Function Engine expert -- implement new FFEs, debug validation/dispatch",
+  "version": "1.0.1"
+}

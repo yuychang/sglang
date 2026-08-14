@@ -1,0 +1,5 @@
+{
+  "name": "component-excelbom-generator",
+  "description": "Generate an Excel (.xlsx) file with Component Name, Version, License Name, and Homepage URL from a text file listing components. Use when the user ...",
+  "version": "1.1.0"
+}

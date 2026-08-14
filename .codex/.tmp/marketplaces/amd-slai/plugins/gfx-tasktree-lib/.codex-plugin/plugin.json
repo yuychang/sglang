@@ -1,0 +1,5 @@
+{
+  "name": "gfx-tasktree-lib",
+  "description": "Tasktree helper Python library (the `tasktree` package: cycle detection, JIRA comment schema,",
+  "version": "0.5.0"
+}

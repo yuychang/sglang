@@ -1,0 +1,5 @@
+{
+  "name": "playwright-cli",
+  "description": "Browser automation via Playwright Agent CLI for coding agents. Navigate,",
+  "version": "1.2.0"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "nocgen-ai",
+  "description": "AMD internal source-grounded assistant for Arteris FlexNoC/FlexGen NoC",
+  "version": "0.1.4"
+}

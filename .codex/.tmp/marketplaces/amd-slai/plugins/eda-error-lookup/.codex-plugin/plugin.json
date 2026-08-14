@@ -1,0 +1,5 @@
+{
+  "name": "eda-error-lookup",
+  "description": "Query Synopsys.ai Knowledge Assistant for error/warning messages from",
+  "version": "1.0.2"
+}

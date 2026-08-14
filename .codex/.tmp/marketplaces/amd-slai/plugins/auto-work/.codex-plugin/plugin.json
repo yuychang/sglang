@@ -1,0 +1,5 @@
+{
+  "name": "auto-work",
+  "description": "Generic orchestrator. Claims a JIRA via tasktree-claim, preps a fresh P4 changelist, dispatches",
+  "version": "3.0.2"
+}

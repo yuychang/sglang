@@ -1,0 +1,5 @@
+{
+  "name": "nanotime-timing-review",
+  "description": "Perform comprehensive SyncD timing reviews for SRAM macros using Nanotime",
+  "version": "1.0.9"
+}

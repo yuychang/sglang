@@ -1,0 +1,5 @@
+{
+  "name": "summarize-changelist",
+  "description": "Generate a Perforce changelist review/summary with code analysis, Jira tracking, and reviewer attribution. Supports free-form inputs (CL ID, Jira k...",
+  "version": "1.0.0"
+}

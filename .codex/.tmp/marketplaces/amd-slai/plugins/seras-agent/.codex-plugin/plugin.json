@@ -1,0 +1,5 @@
+{
+  "name": "seras-agent",
+  "description": "Autonomous agent for orchestrating Seras workflow graphs with LSF grid compute. Manages workspaces, monitors job execution, handles failures, and c...",
+  "version": "1.0.0"
+}

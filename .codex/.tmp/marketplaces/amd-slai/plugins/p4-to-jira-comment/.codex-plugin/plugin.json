@@ -1,0 +1,5 @@
+{
+  "name": "p4-to-jira-comment",
+  "description": "Update a Jira issue after submitting a Perforce fix — posts a structured comment with a diff snippet and updates the Revision Where-Fixed custom fi...",
+  "version": "1.0.5"
+}

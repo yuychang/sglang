@@ -1,0 +1,5 @@
+{
+  "name": "testplan-per-spec-workflow",
+  "description": "Verification documentation workflow v0.7 that generates structured planning",
+  "version": "0.7.5"
+}

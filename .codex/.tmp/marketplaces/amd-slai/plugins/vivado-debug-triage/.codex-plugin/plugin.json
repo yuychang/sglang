@@ -1,0 +1,5 @@
+{
+  "name": "vivado-debug-triage",
+  "description": "Debug and triage toolkit for analyzing test failures, XOAH result analysis, and GAP ticket automation",
+  "version": "1.2.0"
+}

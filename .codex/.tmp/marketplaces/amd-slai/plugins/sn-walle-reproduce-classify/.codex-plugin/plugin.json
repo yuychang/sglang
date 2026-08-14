@@ -1,0 +1,5 @@
+{
+  "name": "sn-walle-reproduce-classify",
+  "description": "Classify a Jira issue by type (ls-sync-drop, feature-request, bug-diagnostic,",
+  "version": "1.1.0"
+}

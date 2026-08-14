@@ -1,0 +1,5 @@
+{
+  "name": "pm-decision-log",
+  "description": "Capture, store, and query project decisions with rationale, alternatives",
+  "version": "1.0.0"
+}

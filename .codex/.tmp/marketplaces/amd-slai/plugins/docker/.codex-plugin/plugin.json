@@ -1,0 +1,5 @@
+{
+  "name": "docker",
+  "description": "Build, pull, push, run, exec, and `docker compose` containers on AMD",
+  "version": "0.1.2"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "timing-reports-analyzer",
+  "description": "Orchestrate the end-to-end DC/FC timing analysis pipeline - report discovery,",
+  "version": "1.0.1"
+}

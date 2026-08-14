@@ -1,0 +1,5 @@
+{
+  "name": "sn-skill-sync",
+  "description": "Compare and sync skills between ~/.claude/skills/ and the simnow-ai repo,",
+  "version": "1.0.2"
+}

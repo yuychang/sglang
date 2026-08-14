@@ -1,0 +1,5 @@
+{
+  "name": "lookup-register",
+  "description": "Look up register definitions, bit fields, addresses, defaults, and access",
+  "version": "1.0.2"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "log-verbosity-analyzer",
+  "description": "Analyze UVM regression test logs to identify verbose %I- messages, compute",
+  "version": "1.0.1"
+}

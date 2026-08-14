@@ -1,0 +1,5 @@
+{
+  "name": "conf-site-mgr",
+  "description": "Manage Confluence documentation as hierarchical markdown files - pull",
+  "version": "1.1.13"
+}

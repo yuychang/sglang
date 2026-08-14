@@ -1,0 +1,5 @@
+{
+  "name": "ledger",
+  "description": "Use when user asks to record, read, search, compare, or extract the history of file/folder/repo operations performed by an LLM session — \"what did ...",
+  "version": "1.0.2"
+}

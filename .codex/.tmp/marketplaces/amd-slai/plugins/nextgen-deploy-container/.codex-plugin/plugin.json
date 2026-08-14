@@ -1,0 +1,5 @@
+{
+  "name": "nextgen-deploy-container",
+  "description": "Deploy an AMD installer container as a pod on COMET (gbuild-default,",
+  "version": "1.0.0"
+}

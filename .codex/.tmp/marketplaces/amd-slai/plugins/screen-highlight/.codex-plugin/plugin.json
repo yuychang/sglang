@@ -1,0 +1,5 @@
+{
+  "name": "screen-highlight",
+  "description": "Generate highlight reels from screen recordings. Detects idle frames",
+  "version": "1.0.1"
+}

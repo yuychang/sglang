@@ -1,0 +1,5 @@
+{
+  "name": "security-cr-workflow",
+  "description": "End-to-end workflow for triaging, implementing, and reviewing SW-BP-*",
+  "version": "1.1.0"
+}

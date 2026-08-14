@@ -1,0 +1,5 @@
+{
+  "name": "spec-first-workflow",
+  "description": "Scaffold the AMD spec-first Claude Code workflow (specs/ directory, root and feature-level CLAUDE.md files, design.md/implementation.md/decisions.m...",
+  "version": "1.0.0"
+}

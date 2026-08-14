@@ -1,0 +1,5 @@
+{
+  "name": "pm-replan-assist",
+  "description": "Detect schedule drift or velocity drops and generate 3 concrete replan",
+  "version": "1.0.1"
+}

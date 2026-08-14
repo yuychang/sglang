@@ -1,0 +1,5 @@
+{
+  "name": "structurizr",
+  "description": "Validate, export, and render Structurizr DSL workspaces from a Claude",
+  "version": "0.1.0"
+}

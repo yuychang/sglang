@@ -1,0 +1,5 @@
+{
+  "name": "ccm-hbto-buddy",
+  "description": "Standalone heartbeat-timeout debug skill for CPU Coherency Moderator (CCM) failures. Use when debugging CCM HBTO or scoreboard-not-idle failures, p...",
+  "version": "1.0.3"
+}

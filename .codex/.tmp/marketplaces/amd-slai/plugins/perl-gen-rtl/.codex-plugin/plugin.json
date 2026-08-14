@@ -1,0 +1,5 @@
+{
+  "name": "perl-gen-rtl",
+  "description": "Build-time perl-generated RTL (.v.pl / .sv.pl / \"deperl\"). Use when a block needs to instantiate",
+  "version": "1.0.2"
+}

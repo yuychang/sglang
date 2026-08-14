@@ -1,0 +1,5 @@
+{
+  "name": "ppin-convert",
+  "description": "Convert AMD CPU serial numbers (S/N) to PPIN and PPIN back to S/N. Auto-detects direction from input format. Accepts inline values or an Excel file...",
+  "version": "1.1.4"
+}

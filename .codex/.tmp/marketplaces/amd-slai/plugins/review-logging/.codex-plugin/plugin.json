@@ -1,0 +1,5 @@
+{
+  "name": "review-logging",
+  "description": "Logging and observability review for C++ - log level correctness, message completeness, state transition coverage, error context, hot path safety.",
+  "version": "1.0.0"
+}

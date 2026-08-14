@@ -1,0 +1,5 @@
+{
+  "name": "slai-email",
+  "description": "Read, search, and send Outlook email using Microsoft Graph API. Use",
+  "version": "2.6.0"
+}

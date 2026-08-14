@@ -1,0 +1,5 @@
+{
+  "name": "hotpot-check",
+  "description": "Query AMD Hotpot (Snowflake) for one or more CPU or GPU/Instinct serial numbers. Returns fail date, customer, ODM, fail category, OSV result, FA co...",
+  "version": "1.1.6"
+}

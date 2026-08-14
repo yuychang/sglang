@@ -1,0 +1,5 @@
+{
+  "name": "sphinx",
+  "description": "Set up or update a Sphinx documentation build-and-publish flow. Scaffolds",
+  "version": "0.1.3"
+}

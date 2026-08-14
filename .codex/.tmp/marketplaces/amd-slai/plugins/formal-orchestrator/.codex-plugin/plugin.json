@@ -1,0 +1,5 @@
+{
+  "name": "formal-orchestrator",
+  "description": "Autonomous formal verification orchestrator — full loop from intake through proof plan, SVA authoring, flow generation, LSF job submission, CEX ana...",
+  "version": "1.1.8"
+}

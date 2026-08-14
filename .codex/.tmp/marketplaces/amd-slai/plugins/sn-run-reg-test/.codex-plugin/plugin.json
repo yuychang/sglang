@@ -1,0 +1,5 @@
+{
+  "name": "sn-run-reg-test",
+  "description": "Run a regression test from any scripts/commandregress/ subfolder (DevReg,",
+  "version": "1.0.2"
+}

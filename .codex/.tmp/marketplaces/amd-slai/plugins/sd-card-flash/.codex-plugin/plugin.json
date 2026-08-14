@@ -1,0 +1,5 @@
+{
+  "name": "sd-card-flash",
+  "description": "Flash an SD card on a board-farm board (if it has one), by running Linux",
+  "version": "1.0.0"
+}

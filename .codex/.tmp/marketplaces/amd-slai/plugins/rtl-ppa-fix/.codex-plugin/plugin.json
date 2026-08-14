@@ -1,0 +1,5 @@
+{
+  "name": "rtl-ppa-fix",
+  "description": "Propose RTL-level fixes for PPA issues (timing+LoL, power, area, coding standards) using",
+  "version": "2.0.5"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "wafer-map-builder",
+  "description": "Generate individual and overlay wafer map visualizations from die-level",
+  "version": "1.0.3"
+}

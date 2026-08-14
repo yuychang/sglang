@@ -1,0 +1,5 @@
+{
+  "name": "visio-generator",
+  "description": "Generate Microsoft Visio (.vsdx) diagram files programmatically using Python. Use this skill when the user asks to \"create a Visio diagram\", \"gener...",
+  "version": "1.0.0"
+}

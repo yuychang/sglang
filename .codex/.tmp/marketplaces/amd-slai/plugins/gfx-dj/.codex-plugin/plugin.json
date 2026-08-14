@@ -1,0 +1,5 @@
+{
+  "name": "gfx-dj",
+  "description": "Use when about to run any dj command (dj rt, dj ct, dj bs, dj run_test_list); when about",
+  "version": "1.0.5"
+}

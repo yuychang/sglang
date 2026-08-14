@@ -1,0 +1,5 @@
+{
+  "name": "sn-gopher-create",
+  "description": "Create Gopher hybrid models from existing standalone SimNow models, including",
+  "version": "1.0.1"
+}

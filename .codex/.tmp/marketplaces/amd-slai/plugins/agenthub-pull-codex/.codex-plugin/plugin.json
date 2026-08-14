@@ -1,0 +1,5 @@
+{
+  "name": "agenthub-pull-codex",
+  "description": "Pull an AgentHub run back into a Codex CLI session. Use this skill when you want to continue a completed cloud AgentHub run locally inside Codex.",
+  "version": "1.0.0"
+}

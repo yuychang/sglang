@@ -1,0 +1,5 @@
+{
+  "name": "pt-session-connect",
+  "description": "Connect to a PrimeTime saved session from within Genie and run timing",
+  "version": "1.0.1"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "formal-orchestrator-skill",
+  "description": "Run the full autonomous formal verification loop: plan, author SVA, generate flow, submit jobs, wait for results, analyze failures, fix or report, ...",
+  "version": "1.0.14"
+}

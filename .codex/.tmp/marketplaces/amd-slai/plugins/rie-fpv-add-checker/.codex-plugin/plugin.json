@@ -1,0 +1,5 @@
+{
+  "name": "rie-fpv-add-checker",
+  "description": "Use when adding a new FPV assertion, assumption, or cover to any RIE",
+  "version": "1.0.1"
+}

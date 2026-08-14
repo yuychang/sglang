@@ -1,0 +1,5 @@
+{
+  "name": "nanotime-ls-topology-maker",
+  "description": "Generate level shifter topology patterns for Nanotime from DSPF netlists.",
+  "version": "1.0.4"
+}

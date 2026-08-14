@@ -1,0 +1,5 @@
+{
+  "name": "drop2cad-release-notes",
+  "description": "Generate Confluence release notes from DROP2CAD labels — syncs files",
+  "version": "2.0.4"
+}

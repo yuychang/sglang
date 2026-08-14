@@ -1,0 +1,5 @@
+{
+  "name": "consensus-debug",
+  "description": "Use when a failure spans multiple domains (e.g., new-vs-old RTL pipeline, RTL+CSIM cross-check,",
+  "version": "1.0.2"
+}

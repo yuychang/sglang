@@ -1,0 +1,5 @@
+{
+  "name": "terminal-email",
+  "description": "Check AMD email from terminal using IMAP/OAuth2 and SMTP relay. For",
+  "version": "2.0.0"
+}

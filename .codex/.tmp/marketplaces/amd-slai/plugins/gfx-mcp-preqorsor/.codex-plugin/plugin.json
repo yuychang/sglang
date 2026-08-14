@@ -1,0 +1,5 @@
+{
+  "name": "gfx-mcp-preqorsor",
+  "description": "Silimate Preqorsor predictive PPA/timing MCP (run_preqorsor, report_ppa_bottlenecks, report_worst_path,",
+  "version": "1.0.2"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "wavedrom",
+  "description": "Render digital timing diagrams from WaveJSON (JSON5) using the upstream",
+  "version": "0.1.0"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "gce-hub-content-editor",
+  "description": "Make content and UI updates to the GCE Enablement Hub Astro portal (gce-hub).",
+  "version": "1.0.4"
+}

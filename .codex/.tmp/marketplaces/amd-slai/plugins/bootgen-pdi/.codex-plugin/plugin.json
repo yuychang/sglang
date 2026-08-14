@@ -1,0 +1,5 @@
+{
+  "name": "bootgen-pdi",
+  "description": "Generate PDI files with bootgen for Versal devices. Use when user needs to generate or regenerate PDI, asks about bootgen commands, BIF files, CDO ...",
+  "version": "2.0.0"
+}

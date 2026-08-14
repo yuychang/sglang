@@ -1,0 +1,5 @@
+{
+  "name": "submit-and-review",
+  "description": "Submit PR and automated Copilot review loop - commit, push, create PR, wait for Copilot review, fix comments, repeat until checks pass.",
+  "version": "1.0.0"
+}

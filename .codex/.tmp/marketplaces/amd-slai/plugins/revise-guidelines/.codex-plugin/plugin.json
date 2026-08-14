@@ -1,0 +1,5 @@
+{
+  "name": "revise-guidelines",
+  "description": "Revises code, docs, or PR text against merged hierarchical guidelines",
+  "version": "1.1.1"
+}

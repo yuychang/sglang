@@ -1,0 +1,5 @@
+{
+  "name": "fpga-trace",
+  "description": "FPGA part traceability lookup via the AMD/Xilinx Genealogy API. Takes",
+  "version": "1.0.9"
+}

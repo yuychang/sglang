@@ -1,0 +1,5 @@
+{
+  "name": "arteris-noc",
+  "description": "Use for any Arteris FlexNoC Network-on-Chip (NoC) task on a PDD (the FlexNoC project XML): reading and explaining the fabric, headless PDD edits an...",
+  "version": "1.0.4"
+}

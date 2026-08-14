@@ -1,0 +1,5 @@
+{
+  "name": "sva-auditor",
+  "description": "Quality gate for generated SVA files. Runs mechanical checks (grep/regex/count)",
+  "version": "1.0.6"
+}

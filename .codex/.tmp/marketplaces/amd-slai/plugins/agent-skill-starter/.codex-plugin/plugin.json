@@ -1,0 +1,5 @@
+{
+  "name": "agent-skill-starter",
+  "description": "Provides a minimal scaffolded skill package for building and deploying agents in the marketplace create flow. Use this when you need a validated st...",
+  "version": "1.0.0"
+}

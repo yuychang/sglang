@@ -1,0 +1,5 @@
+{
+  "name": "dpv-closed-loop-debug",
+  "description": "Closed-loop debugger for VC Formal DPV (Hector C++/RTL equivalence)",
+  "version": "1.0.1"
+}

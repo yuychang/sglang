@@ -1,0 +1,5 @@
+{
+  "name": "twiki-reader",
+  "description": "Fetch and read AMD internal TWiki pages (twiki.amd.com) and convert them to clean markdown plus structured metadata so the AI can reason and act on...",
+  "version": "1.0.9"
+}

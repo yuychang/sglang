@@ -1,0 +1,5 @@
+{
+  "name": "ogmatic-views",
+  "description": "ogmatic-views DBT project - Understand two-tier architecture (admin→App),",
+  "version": "1.0.2"
+}

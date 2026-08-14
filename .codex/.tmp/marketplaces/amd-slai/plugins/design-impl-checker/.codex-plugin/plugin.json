@@ -1,0 +1,5 @@
+{
+  "name": "design-impl-checker",
+  "description": "Checks how much of a design specification is implemented in the compiled",
+  "version": "1.0.0"
+}

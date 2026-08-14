@@ -1,0 +1,5 @@
+{
+  "name": "herdr-teams",
+  "description": "Attach the current Herdr-managed coding-agent session to a private Microsoft",
+  "version": "0.3.0"
+}

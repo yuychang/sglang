@@ -1,0 +1,5 @@
+{
+  "name": "conventional-commit-crafter",
+  "description": "Inspects staged git changes and drafts a conventional commit message string following the fixed Conventional Commits spec. Use when a user asks to ...",
+  "version": "1.0.0"
+}

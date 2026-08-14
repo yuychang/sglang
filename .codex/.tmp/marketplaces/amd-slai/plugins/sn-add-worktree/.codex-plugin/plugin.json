@@ -1,0 +1,5 @@
+{
+  "name": "sn-add-worktree",
+  "description": "add a simnow git worktree",
+  "version": "1.1.0"
+}

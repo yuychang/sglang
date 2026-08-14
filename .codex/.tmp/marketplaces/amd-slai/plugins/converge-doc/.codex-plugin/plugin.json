@@ -1,0 +1,5 @@
+{
+  "name": "converge-doc",
+  "description": "Drive a multi-cycle review-fix-review loop on a generic technical document",
+  "version": "1.0.7"
+}

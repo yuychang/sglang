@@ -1,0 +1,5 @@
+{
+  "name": "smart-cdc",
+  "description": "AMD-internal assistant for CDC/RDC flow setup, clock and reset understanding,",
+  "version": "1.0.25"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "gfx-mcp-debug-tracker",
+  "description": "Debug-tracker MCP server for AMD GFX hardware debug — structured hypothesis and evidence",
+  "version": "1.0.3"
+}

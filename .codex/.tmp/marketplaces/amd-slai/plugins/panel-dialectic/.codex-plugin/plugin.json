@@ -1,0 +1,5 @@
+{
+  "name": "panel-dialectic",
+  "description": "Use when spawned by panel-debug as the \"dialectic\" seat (seat 1) of the 3-reviewer panel.",
+  "version": "1.1.1"
+}

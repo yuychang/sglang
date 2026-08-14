@@ -1,0 +1,5 @@
+{
+  "name": "stuck-recovery",
+  "description": "Use when agent spent 3+ iterations on same problem without progress, progress velocity is",
+  "version": "1.0.1"
+}

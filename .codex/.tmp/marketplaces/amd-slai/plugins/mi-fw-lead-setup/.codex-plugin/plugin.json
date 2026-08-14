@@ -1,0 +1,5 @@
+{
+  "name": "mi-fw-lead-setup",
+  "description": "Bootstrap an MI4xx firmware engineering workspace for the mi-fw-lead",
+  "version": "1.0.1"
+}

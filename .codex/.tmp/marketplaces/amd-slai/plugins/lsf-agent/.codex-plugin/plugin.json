@@ -1,0 +1,5 @@
+{
+  "name": "lsf-agent",
+  "description": "Use this agent for ALL LSF-related tasks including job submission (bsub),",
+  "version": "1.0.1"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "amd-pptx-builder",
+  "description": "Build an AMD-styled PowerPoint (.pptx) from an approved deck plan using a reusable python-pptx render library. Consumes a plan (from amd-pptx-plann...",
+  "version": "1.0.0"
+}

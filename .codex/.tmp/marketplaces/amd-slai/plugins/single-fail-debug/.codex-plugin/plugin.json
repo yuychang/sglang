@@ -1,0 +1,5 @@
+{
+  "name": "single-fail-debug",
+  "description": "Diagnose universal test failures (all seeds fail) by systematically checking the full DV pipeline — Build, Compile, Simulation, and Post-process — ...",
+  "version": "1.0.2"
+}

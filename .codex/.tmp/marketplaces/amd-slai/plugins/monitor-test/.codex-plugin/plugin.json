@@ -1,0 +1,5 @@
+{
+  "name": "monitor-test",
+  "description": "Monitor running AMD GPU SoC VCS simulation tests with periodic status",
+  "version": "1.0.2"
+}

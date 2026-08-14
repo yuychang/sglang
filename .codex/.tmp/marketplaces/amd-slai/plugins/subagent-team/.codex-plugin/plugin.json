@@ -1,0 +1,5 @@
+{
+  "name": "subagent-team",
+  "description": "On explicit request, create or update repository AGENTS.md files with",
+  "version": "1.0.2"
+}

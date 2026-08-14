@@ -1,0 +1,5 @@
+{
+  "name": "slurm",
+  "description": "Submit, monitor, and manage GPU jobs on AMD's OCI Slurm cluster (`useocpslog01`",
+  "version": "0.1.0"
+}

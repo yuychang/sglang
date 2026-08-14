@@ -1,0 +1,5 @@
+{
+  "name": "aifirst-debug-test",
+  "description": "Autonomously debug ONE failing simulation test - determine root cause(s)",
+  "version": "1.0.1"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "sn-release-notes",
+  "description": "Generate polished SimNow release notes (Markdown + HTML) from git history",
+  "version": "1.0.1"
+}

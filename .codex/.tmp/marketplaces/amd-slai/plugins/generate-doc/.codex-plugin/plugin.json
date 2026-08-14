@@ -1,0 +1,5 @@
+{
+  "name": "generate-doc",
+  "description": "Generate formatted documents and reports - test reports, design specs, verification status, regression summaries. Markdown and CSV output.",
+  "version": "1.0.0"
+}

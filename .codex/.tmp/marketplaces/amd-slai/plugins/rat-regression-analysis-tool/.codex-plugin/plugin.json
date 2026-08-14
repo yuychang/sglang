@@ -1,0 +1,5 @@
+{
+  "name": "rat-regression-analysis-tool",
+  "description": "Analyzes regression/precheckin test results and provides output on which",
+  "version": "1.2.0"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "bvm-psp-replacement",
+  "description": "Turn a PMFW package into a flashable BIOS by cloning a BVM request or",
+  "version": "1.0.11"
+}

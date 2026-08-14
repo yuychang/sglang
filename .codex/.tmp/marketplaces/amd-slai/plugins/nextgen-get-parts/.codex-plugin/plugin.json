@@ -1,0 +1,5 @@
+{
+  "name": "nextgen-get-parts",
+  "description": "Run get_parts inside the pod to list all available device parts and validate",
+  "version": "1.0.0"
+}

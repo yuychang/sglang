@@ -1,0 +1,5 @@
+{
+  "name": "connexus",
+  "description": "Generate a JSON port descriptor from a hardware block diagram JPG. Use",
+  "version": "0.1.7"
+}

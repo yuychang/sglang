@@ -1,0 +1,5 @@
+{
+  "name": "outlook",
+  "description": "Use the outlook CLI to read and send Microsoft 365 mail via Microsoft",
+  "version": "2.0.10"
+}

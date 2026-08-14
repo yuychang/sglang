@@ -1,0 +1,5 @@
+{
+  "name": "psv-emu-triage-agent",
+  "description": "Auto-triage emulation failures by analysing logs, postcodes, RSMU/AXI",
+  "version": "2.0.1"
+}

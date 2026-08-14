@@ -1,0 +1,5 @@
+{
+  "name": "codex",
+  "description": "Spawn / invoke / use codex (the AMD-internal OpenAI CLI agent) — LOAD THIS SKILL FIRST;",
+  "version": "1.0.3"
+}

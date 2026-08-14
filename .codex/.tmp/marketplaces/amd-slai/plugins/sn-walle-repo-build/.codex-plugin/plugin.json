@@ -1,0 +1,5 @@
+{
+  "name": "sn-walle-repo-build",
+  "description": "Submit the SimNow cmake build as an LSF job and wait for completion.",
+  "version": "1.0.2"
+}

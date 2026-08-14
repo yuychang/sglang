@@ -1,0 +1,5 @@
+{
+  "name": "qtest",
+  "description": "Look up, create, update, export, and execute Tricentis qTest Manager",
+  "version": "1.5.1"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "gfx-mcp-gdb",
+  "description": "GDB debugging-session MCP for CSIM/RTL executables (gdb_start_session, gdb_break, gdb_continue,",
+  "version": "1.0.3"
+}

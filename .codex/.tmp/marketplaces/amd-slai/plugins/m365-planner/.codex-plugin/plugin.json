@@ -1,0 +1,5 @@
+{
+  "name": "m365-planner",
+  "description": "Manage Microsoft Planner and To Do tasks using Microsoft Graph API.",
+  "version": "2.2.1"
+}

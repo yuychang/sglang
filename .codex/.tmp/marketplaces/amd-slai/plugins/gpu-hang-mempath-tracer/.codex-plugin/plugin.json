@@ -1,0 +1,5 @@
+{
+  "name": "gpu-hang-mempath-tracer",
+  "description": "Analyze AMD GPU scan-dump HTML directories and audit existing hang reports",
+  "version": "1.4.1"
+}

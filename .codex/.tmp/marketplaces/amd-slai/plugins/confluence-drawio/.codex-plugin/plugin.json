@@ -1,0 +1,5 @@
+{
+  "name": "confluence-drawio",
+  "description": "Create Confluence pages with embedded DrawIO diagrams using the Confluence MCP server",
+  "version": "1.0.0"
+}

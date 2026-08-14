@@ -1,0 +1,5 @@
+{
+  "name": "gfx-spec-review",
+  "description": "Multi-persona critical review of a hardware HLD spec. Dispatches 6 parallel sub-agents (architectural-coherence,",
+  "version": "1.0.7"
+}

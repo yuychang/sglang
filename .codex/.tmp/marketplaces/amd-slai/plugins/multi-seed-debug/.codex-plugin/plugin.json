@@ -1,0 +1,5 @@
+{
+  "name": "multi-seed-debug",
+  "description": "Consolidate and root-cause failures across multiple seeds in a mixed PASS/FAIL regression run. Identifies the common failure signature, classifies ...",
+  "version": "1.0.6"
+}

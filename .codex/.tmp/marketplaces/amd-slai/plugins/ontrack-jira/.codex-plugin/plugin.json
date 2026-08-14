@@ -1,0 +1,5 @@
+{
+  "name": "ontrack-jira",
+  "description": "Queries AMD OnTrack (external Jira) to fetch full TIC-XXXXX or EXT-XXXXX tickets, run JQL searches, or download attachments via pure PowerShell. Us...",
+  "version": "1.0.0"
+}

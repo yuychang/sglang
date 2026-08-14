@@ -1,0 +1,5 @@
+{
+  "name": "sap-je-upload",
+  "description": "Builds a Python + Playwright automation script that watches a folder and uploads Excel Journal Entry files to SAP Fiori (FBDC_P001), posting entrie...",
+  "version": "1.0.0"
+}

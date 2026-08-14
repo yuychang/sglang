@@ -1,0 +1,5 @@
+{
+  "name": "palma-dev",
+  "description": "Full-lifecycle Palma ASIC development agent. Handles planning → coding → review → verify → git push → PR → merge with user-approval gates at each s...",
+  "version": "1.0.25"
+}

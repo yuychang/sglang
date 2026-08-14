@@ -1,0 +1,5 @@
+{
+  "name": "milestone-failure-debug",
+  "description": "Diagnose test regressions that passed in a prior milestone but consistently fail in a newer one. Compares RTL/FW/TB/config workspaces across milest...",
+  "version": "1.0.1"
+}

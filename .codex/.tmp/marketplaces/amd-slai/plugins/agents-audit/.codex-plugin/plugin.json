@@ -1,0 +1,5 @@
+{
+  "name": "agents-audit",
+  "description": "Use when the user runs /agents-audit; when the session-stop hook fires requesting a knowledge",
+  "version": "1.0.2"
+}

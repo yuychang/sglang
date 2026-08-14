@@ -1,0 +1,5 @@
+{
+  "name": "migrate-perforce-to-github",
+  "description": "Plan, audit, implement, maintain, shadow, validate, and cut over AMD",
+  "version": "1.1.0"
+}

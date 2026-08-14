@@ -1,0 +1,5 @@
+{
+  "name": "new-test-bringup",
+  "description": "Diagnose setup issues blocking a newly authored testcase during build, compile, or early sim/reset phases. Compares the new test against a known wo...",
+  "version": "1.0.2"
+}
