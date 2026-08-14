@@ -45,6 +45,7 @@ class _Handoff(msgspec.Struct):
 
 
 _handoff = _Handoff()
+_miss_logged = False
 
 
 def stage(x: torch.Tensor) -> None:
@@ -75,16 +76,41 @@ def try_route_quant_fused(
     """Fused replacement for the ungrouped-sigmoid moe_fused_gate call when a
     staged request covers it. Returns (weights, ids) on a hit, None otherwise
     (caller falls through to the unfused router)."""
+    global _miss_logged
     x = _handoff.request_x
     if x is None or num_fused_shared_experts != 0:
+        if x is not None and not _miss_logged:
+            import logging
+
+            _miss_logged = True
+            logging.getLogger(__name__).info(
+                "K3 route-quant handoff miss: num_fused_shared_experts=%d",
+                num_fused_shared_experts,
+            )
         return None
 
     from sglang.kernels.ops.moe import moe_route_quant_fused
 
-    if (
-        not moe_route_quant_fused.covered(gating_output, correction_bias, topk, x)
-        or not moe_route_quant_fused.available()
-    ):
+    covered = moe_route_quant_fused.covered(gating_output, correction_bias, topk, x)
+    available = moe_route_quant_fused.available() if covered else False
+    if not covered or not available:
+        if not _miss_logged:
+            import logging
+
+            _miss_logged = True
+            logging.getLogger(__name__).info(
+                "K3 route-quant handoff miss: covered=%s available=%s "
+                "scores=%s/%s/stride%s bias=%s x=%s/%s/stride%s",
+                covered,
+                available,
+                tuple(gating_output.shape),
+                gating_output.dtype,
+                gating_output.stride(),
+                correction_bias.dtype,
+                tuple(x.shape),
+                x.dtype,
+                x.stride(),
+            )
         return None
 
     weights, ids, packed, x_q, x_s = moe_route_quant_fused.route_quant_fused(
