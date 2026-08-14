@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import replace
 from typing import TYPE_CHECKING, List, Optional
@@ -72,6 +73,8 @@ has_triton_kernels = is_triton_kernels_available()
 # Serialized MXFP4 scales use raw UE8M0 bytes. Keep fresh parameters valid for
 # post-load transforms and dummy initialization; 127 is the neutral scale (1.0).
 _UE8M0_ONE = 127
+logger = logging.getLogger(__name__)
+_K3_AITER_PREQUANT_LOGGED = False
 
 
 if is_flashinfer_available():
@@ -1724,6 +1727,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
 
             prepared = route_quant_handoff.take(x)
             if prepared is not None:
+                global _K3_AITER_PREQUANT_LOGGED
                 _, x_padded, a13_scale_packed = prepared
                 if self.hidden_pad != 0:
                     raise RuntimeError(
@@ -1734,6 +1738,14 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                 a13_scale = a13_scale_packed.view(
                     aiter_dtypes.fp8_e8m0
                 ).reshape(x.shape[0], -1)
+                if (
+                    not _K3_AITER_PREQUANT_LOGGED
+                    and get_tp_group().rank_in_group == 0
+                ):
+                    _K3_AITER_PREQUANT_LOGGED = True
+                    logger.info(
+                        "K3 fused Radix/top-k/MXFP8 handoff active for AITER SiTU"
+                    )
             # Skip the explicit pad if x already arrives at the padded
             # hidden_size (the upstream RMSNorm fused the pad into its
             # output — see RMSNorm.x_pad_to_multiple). Saves a separate
