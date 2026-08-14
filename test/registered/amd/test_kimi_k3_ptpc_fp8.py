@@ -27,11 +27,34 @@ class TestKimiK3PtpcFp8(CustomTestCase):
         assert mod.weight.shape[0] == 128
         assert mod._k3_ptpc_orig_out_features == 96
         assert isinstance(mod.quant_method, K3PtpcFp8LinearMethod)
-        assert not mod._k3_ptpc_global_row_scale
+        assert not mod._k3_ptpc_row_sharded_scale
         # Padding rows encode exact zero with a benign scale.
         torch.testing.assert_close(
             mod.weight_scale[96:], torch.ones_like(mod.weight_scale[96:])
         )
+
+    def test_padded_apply_returns_packed_tensor(self):
+        """A padded layer must hand back a packed tensor, not a strided view.
+
+        Kimi-K3 splits fused_qkv_a_proj_with_mqa's output into q/kv/rope and
+        passes the pieces to kernels that index by row width. When apply()
+        returned out[..., :orig_n] the row stride was still the padded width, so
+        those kernels read across the pad and the model emitted fluent garbage
+        rather than failing.
+        """
+        from sglang.kernels.ops.kimi_k3.ptpc_fp8 import quantize_linear_weight_ptpc
+
+        torch.manual_seed(11)
+        # 2112 is K3's real fused_qkv_a width and pads to 2176.
+        mod = torch.nn.Linear(7168, 2112, bias=False).cuda().bfloat16()
+        assert quantize_linear_weight_ptpc(mod)
+        assert mod._k3_ptpc_orig_out_features == 2112
+
+        x = torch.randn(8, 7168, device="cuda", dtype=torch.bfloat16)
+        out = mod.quant_method.apply(mod, x)
+        assert out.shape == (8, 2112)
+        assert out.is_contiguous(), "padded PTPC output must be repacked"
+        assert out.stride(0) == 2112
 
     def test_ptpc_linear_bf16_and_prequantized_inputs(self):
         import aiter
