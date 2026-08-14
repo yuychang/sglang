@@ -420,6 +420,7 @@ def _add3(
 # One-shot log guard: proves the merged front is live (see _ep_front).
 _EP_FRONT_LOGGED = False
 _ROCM_PARTIAL_AR_NORM_LOGGED = False
+_ROUTE_QUANT_ELIGIBILITY_LOGGED = False
 
 
 def _o_proj_takes_output(o_proj: RowParallelLinear) -> bool:
@@ -1189,11 +1190,22 @@ class KimiK3MoE(nn.Module):
             and os.environ.get("AITER_SITUV2_A8W4", "0") == "1"
         )
         trtllm_mxfp8 = method.use_flashinfer and not method.use_marlin
-        return (
+        eligible = (
             (aiter_mxfp8 or trtllm_mxfp8)
             and method.flashinfer_mxfp4_moe_precision == "default"
             and self.experts.moe_runner_config.activation == "situ"
         )
+        global _ROUTE_QUANT_ELIGIBILITY_LOGGED
+        if not _ROUTE_QUANT_ELIGIBILITY_LOGGED:
+            _ROUTE_QUANT_ELIGIBILITY_LOGGED = True
+            rank0_log(
+                "K3 route-quant handoff eligibility: "
+                f"eligible={eligible}, runner={getattr(runner, 'runner_backend', None)}, "
+                f"aiter_mxfp8={aiter_mxfp8}, trtllm_mxfp8={trtllm_mxfp8}, "
+                f"precision={method.flashinfer_mxfp4_moe_precision}, "
+                f"activation={self.experts.moe_runner_config.activation}"
+            )
+        return eligible
 
     def _forward_routed(self, hidden_states, router_logits, routed_input, latent):
         if self._route_quant_fuse_eligible:
