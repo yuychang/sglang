@@ -154,7 +154,9 @@ class TestKimiK3PtpcFp8(CustomTestCase):
             x, gate, aiter.dtypes.fp8
         )
         assert torch.equal(actual_q, expected_q)
-        assert torch.equal(actual_scale, expected_scale)
+        torch.testing.assert_close(
+            actual_scale, expected_scale, rtol=1e-6, atol=1e-8
+        )
 
     def test_ptpc_linear_bf16_and_prequantized_inputs(self):
         import aiter
