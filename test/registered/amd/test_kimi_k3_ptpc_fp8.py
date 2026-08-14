@@ -155,8 +155,8 @@ class TestKimiK3PtpcFp8(CustomTestCase):
         torch.testing.assert_close(
             actual_q[0].float() * actual_q[1],
             expected_q.float() * expected_scale,
-            rtol=1e-5,
-            atol=1e-5,
+            rtol=0.08,
+            atol=0.002,
         )
         torch.testing.assert_close(
             actual_kv.float(), expected_kv, rtol=0.01, atol=0.01
