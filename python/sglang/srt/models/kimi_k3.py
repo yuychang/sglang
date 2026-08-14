@@ -2488,8 +2488,8 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
             self._gate_precomputed = (gate, alt)
 
     def maybe_quantize_ptpc_input(
-        self, hidden_states: Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        self, hidden_states: torch.Tensor | tuple[torch.Tensor, torch.Tensor]
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Quantize the normalized MLA input once for both input projections.
 
         ATOM only fuses input RMSNorm quantization when fused_qkv_a and g_proj
