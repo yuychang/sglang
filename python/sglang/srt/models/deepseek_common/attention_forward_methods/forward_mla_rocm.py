@@ -342,23 +342,23 @@ class DeepseekMLARocmForwardMixin:
                     self.kv_a_layernorm.variance_epsilon,
                 )
             elif getattr(self.q_b_proj, "_k3_ptpc_per_token", False):
-                # ATOM-compatible one-kernel order: q_a RMSNorm + one FP8 scale
-                # per token, alongside kv_a RMSNorm. The generic kernel's
-                # reshape requires a power-of-two group, so pad K3's logical
-                # q_lora width 1536 to one masked 2048-wide quant group.
-                q, _, k_nope, _ = fused_rms_fp8_group_quant(
+                # ATOM-compatible PTPC: q_b needs one activation scale per
+                # token, not 128-group scales. AITER's generic fused group
+                # kernel cannot use q_lora_rank=1536 as one group because its
+                # Triton reshape requires power-of-two group dimensions. Use
+                # K3's dedicated RMSNorm->per-token FP8 kernel and keep the
+                # independent KV norm on its existing AITER path.
+                from sglang.kernels.ops.kimi_k3.rmsnorm_fp8_quant import (
+                    rmsnorm_fp8_per_token,
+                )
+
+                q = rmsnorm_fp8_per_token(
                     q,
                     self.q_a_layernorm.weight,
                     self.q_a_layernorm.variance_epsilon,
-                    k_nope,
-                    self.kv_a_layernorm.weight,
-                    self.kv_a_layernorm.variance_epsilon,
-                    group_size=1 << (q.shape[-1] - 1).bit_length(),
-                    dtype_quant=self.q_b_proj.weight.dtype,
-                    res1=None,
-                    output_unquantized_inp1=False,
-                    transpose_scale=False,
+                    quant_dtype=self.q_b_proj.weight.dtype,
                 )
+                k_nope = self.kv_a_layernorm(k_nope)
             elif (
                 _use_aiter_gfx95
                 and self.q_b_proj.weight.dtype == torch.float8_e4m3fn
