@@ -43,7 +43,6 @@ def _agg_kernel(
     cw_ptr,  # [H] fp32; score_norm weight * score_proj weight
     ow_ptr,  # [H]; out RMSNorm weight, unread when not APPLY_OUT_NORM
     out_ptr,  # [T, H]
-    scale_ptr,  # [T, 1] fp32; unread when not QUANTIZE_OUT
     score_eps,
     out_eps,
     stride_pm,
@@ -59,8 +58,6 @@ def _agg_kernel(
     HAS_ADD: tl.constexpr,
     WRITE_BANK: tl.constexpr,
     APPLY_OUT_NORM: tl.constexpr,
-    QUANTIZE_OUT: tl.constexpr,
-    FP8_MAX: tl.constexpr,
 ):
     """One CTA per token: score the NVB+1 rows, softmax, mix, apply the output
     RMSNorm, all in one launch.
@@ -133,19 +130,7 @@ def _agg_kernel(
         scale = 1.0 / tl.sqrt(tl.sum(acc * acc) / H + out_eps)
         ow = tl.load(ow_ptr + offs, mask=mask, other=0.0).to(tl.float32)
         acc = acc * scale * ow
-    if QUANTIZE_OUT:
-        amax = tl.max(tl.where(mask, tl.abs(acc), 0.0))
-        q_scale = amax / FP8_MAX
-        inv = tl.where(q_scale > 0.0, 1.0 / q_scale, 0.0)
-        q = tl.minimum(tl.maximum(acc * inv, -FP8_MAX), FP8_MAX)
-        tl.store(out_ptr + t * stride_o + offs, q.to(out_ptr.dtype.element_ty), mask=mask)
-        tl.store(scale_ptr + t, q_scale)
-    else:
-        tl.store(
-            out_ptr + t * stride_o + offs,
-            acc.to(out_ptr.dtype.element_ty),
-            mask=mask,
-        )
+    tl.store(out_ptr + t * stride_o + offs, acc.to(out_ptr.dtype.element_ty), mask=mask)
 
 
 def attn_res_hip(
@@ -154,7 +139,6 @@ def attn_res_hip(
     cw: torch.Tensor,
     ow: Optional[torch.Tensor],
     out: torch.Tensor,
-    scale: Optional[torch.Tensor],
     nvb: int,
     score_eps: float,
     out_eps: float,
@@ -200,7 +184,6 @@ def attn_res_hip(
     addend_arg = addend if has_add else prefix_sum
     prefix_out_arg = prefix_out if has_add else prefix_sum
     ow_arg = ow if ow is not None else cw
-    scale_arg = scale if scale is not None else cw
 
     _agg_kernel[(T,)](
         prefix_sum,
@@ -210,7 +193,6 @@ def attn_res_hip(
         cw,
         ow_arg,
         out,
-        scale_arg,
         score_eps,
         out_eps,
         prefix_sum.stride(0),
@@ -226,11 +208,5 @@ def attn_res_hip(
         HAS_ADD=has_add,
         WRITE_BANK=write_prefix,
         APPLY_OUT_NORM=ow is not None,
-        QUANTIZE_OUT=scale is not None,
-        FP8_MAX=(
-            float(torch.finfo(out.dtype).max)
-            if scale is not None
-            else 1.0
-        ),
         num_warps=4,
     )

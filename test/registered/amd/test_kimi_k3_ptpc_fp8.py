@@ -100,41 +100,6 @@ class TestKimiK3PtpcFp8(CustomTestCase):
         # A pre-quantized tuple is handed through, not quantized twice.
         assert attn.maybe_quantize_ptpc_input(actual) is actual
 
-    def test_attn_res_hip_fuses_output_norm_and_per_token_quant(self):
-        from sglang.kernels.ops.kimi_k3.attn_res_hip import attn_res_hip
-        from sglang.kernels.ops.kimi_k3.ptpc_fp8 import k3_ptpc_fp8_dtype
-
-        torch.manual_seed(29)
-        t, h, nvb = 4, 7168, 2
-        prefix = torch.randn(t, h, device="cuda", dtype=torch.bfloat16)
-        bank = torch.randn(t, 4, h, device="cuda", dtype=torch.bfloat16)
-        cw = torch.randn(h, device="cuda", dtype=torch.float32) * 0.01
-        ow = torch.randn(h, device="cuda", dtype=torch.bfloat16)
-        out = torch.empty(t, h, device="cuda", dtype=k3_ptpc_fp8_dtype())
-        scale = torch.empty(t, 1, device="cuda", dtype=torch.float32)
-
-        attn_res_hip(
-            prefix,
-            bank,
-            cw,
-            ow,
-            out,
-            scale,
-            nvb,
-            1e-5,
-            1e-5,
-        )
-
-        rows = torch.cat((bank[:, :nvb].float(), prefix[:, None].float()), dim=1)
-        scores = (rows * cw).sum(-1) / torch.sqrt(
-            rows.square().mean(-1) + 1e-5
-        )
-        mixed = (torch.softmax(scores, dim=1)[..., None] * rows).sum(1)
-        reference = F.rms_norm(mixed, (h,), ow.float(), 1e-5)
-        torch.testing.assert_close(
-            out.float() * scale, reference, rtol=0.08, atol=0.08
-        )
-
     def test_mla_output_gate_fuses_per_token_quant(self):
         import aiter
 
