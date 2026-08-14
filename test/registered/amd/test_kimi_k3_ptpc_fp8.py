@@ -135,6 +135,27 @@ class TestKimiK3PtpcFp8(CustomTestCase):
             out.float() * scale, reference, rtol=0.08, atol=0.08
         )
 
+    def test_mla_output_gate_fuses_per_token_quant(self):
+        import aiter
+
+        from sglang.kernels.ops.kimi_k3.mla_output_gate import (
+            kimi_k3_mla_output_gate,
+            kimi_k3_mla_output_gate_fp8_per_token,
+        )
+
+        torch.manual_seed(31)
+        x = torch.randn(8, 1536, device="cuda", dtype=torch.bfloat16)
+        gate = torch.randn_like(x)
+        reference = kimi_k3_mla_output_gate(x, gate)
+        expected_q, expected_scale = aiter.per_token_quant_hip(
+            reference, quant_dtype=aiter.dtypes.fp8
+        )
+        actual_q, actual_scale = kimi_k3_mla_output_gate_fp8_per_token(
+            x, gate, aiter.dtypes.fp8
+        )
+        assert torch.equal(actual_q, expected_q)
+        assert torch.equal(actual_scale, expected_scale)
+
     def test_ptpc_linear_bf16_and_prequantized_inputs(self):
         import aiter
 

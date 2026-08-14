@@ -2431,11 +2431,22 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
                         # fused_qkv_a and g_proj consume the same (fp8, scale).
                         # The BF16-only fused gate GEMM cannot own this case.
                         gate = self.g_proj(gate_input)[0]
-                        x = (
-                            mla_output_gate.kimi_k3_mla_output_gate(x, gate)
-                            if mla_output_gate.covered(x, gate)
-                            else x * torch.sigmoid(gate)
-                        )
+                        if (
+                            getattr(self.o_proj, "_k3_ptpc_per_token", False)
+                            and mla_output_gate.covered(x, gate)
+                        ):
+                            # ATOM order: gate first, then o_proj activation
+                            # quant. Keep both in one kernel and hand the
+                            # pre-quantized tuple to the PTPC linear.
+                            x = mla_output_gate.kimi_k3_mla_output_gate_fp8_per_token(
+                                x, gate, self.o_proj.weight.dtype
+                            )
+                        else:
+                            x = (
+                                mla_output_gate.kimi_k3_mla_output_gate(x, gate)
+                                if mla_output_gate.covered(x, gate)
+                                else x * torch.sigmoid(gate)
+                            )
                     elif (
                         precomputed is None
                         and _aiter_mla_gate
