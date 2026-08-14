@@ -1593,7 +1593,20 @@ def biased_grouped_topk_gpu(
         scaling = routed_scaling_factor if routed_scaling_factor is not None else 1.0
 
         from sglang.kernels.ops.moe import moe_route_radix4
+        from sglang.srt.layers.moe import route_quant_handoff
         from sglang.srt.environ import envs
+
+        fused = route_quant_handoff.try_route_quant_fused(
+            gating_output,
+            correction_bias,
+            topk,
+            num_fused_shared_experts=num_fused_shared_experts,
+            renormalize=renormalize,
+            routed_scaling_factor=routed_scaling_factor,
+            apply_routed_scaling_factor_on_output=False,
+        )
+        if fused is not None:
+            return fused
 
         # Gated on the routing shape. Kimi-K3 (896 experts, top-16, ungrouped)
         # is the only config covered for now; anything else falls back to aiter.
