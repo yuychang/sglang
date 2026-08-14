@@ -664,6 +664,15 @@ class Envs:
     # packed KDA and MoE fusions. Explicit opt-in: this must not change RMSNorm
     # dispatch or model memory for unrelated/default ROCm runs.
     SGLANG_ROCM_K3_PTPC_FP8 = EnvBool(False)
+    # Under PTPC, fall the norms that are NOT part of the FP8 activation path
+    # back to the native implementation. Those norms feed BF16 consumers and run
+    # the same AITER kernels a non-PTPC server runs, so the fallback buys nothing
+    # unless AITER's quant JIT really does perturb them; it is retained as an
+    # escape hatch, not as the default, because it is expensive: at ISL 8192 /
+    # OSL 1024 / TP 8 it replaced 2.25 ms of fused AITER norms with 19.04 ms of
+    # torch primitives per profiled decode capture, which is more than the FP8
+    # GEMMs it accompanies save.
+    SGLANG_ROCM_K3_PTPC_NATIVE_NORM = EnvBool(False)
     # K3-specific packed MoE collective: all-reduce [latent|shared], RMSNorm
     # only the latent row prefix. This is not the generic K2.5 residual fusion.
     SGLANG_ROCM_K3_AR_NORM = EnvBool(False)

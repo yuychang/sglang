@@ -103,20 +103,16 @@ def quantize_linear_weight_ptpc(
 
     pad_n = _round_up(orig_n, n_tile)
     row_parallel = _is_row_parallel_weight(module, w)
-    if row_parallel:
-        # PTPC is per *logical* output row. Quantizing each K shard separately
-        # gives each TP rank a different scale and diverges from ATOM/offline
-        # PTPC. Gather once at load time, quantize the full row, then return this
-        # rank's K shard while retaining the replicated per-row scale.
-        from sglang.srt.distributed.parallel_state import get_tp_group
-
-        full_w = get_tp_group().all_gather(w.contiguous(), dim=1)
-        qw, scale = _quantize_weight_rows(full_w, fp8_dtype, pad_n=pad_n)
-        tp_rank = int(getattr(module, "tp_rank", get_tp_group().rank_in_group))
-        qw = qw.narrow(1, tp_rank * k, k).contiguous()
-        del full_w
-    else:
-        qw, scale = _quantize_weight_rows(w, fp8_dtype, pad_n=pad_n)
+    # A row-parallel weight is K-sharded and each rank's partial product is
+    # summed by the output all-reduce, so a per-rank row scale reconstructs the
+    # same sum: rank r contributes s_r * (Q_r @ x_r) == W_r @ x_r whatever s_r
+    # is. Gathering the full row first only buys agreement with ATOM's offline
+    # scale, and it costs a load-time collective plus a rank-indexing contract:
+    # the gather runs on the global TP group while the narrow uses the module's
+    # own tp_rank, which for MLA is the *attention* TP rank. Quantize the local
+    # shard instead -- no collective, no cross-group assumption, and a tighter
+    # scale because the amax is taken over this rank's K only.
+    qw, scale = _quantize_weight_rows(w, fp8_dtype, pad_n=pad_n)
 
     from aiter.ops.shuffle import shuffle_weight
 
@@ -124,7 +120,7 @@ def quantize_linear_weight_ptpc(
         shuffle_weight(qw, (16, 16)), requires_grad=False
     )
     module.weight_scale = torch.nn.Parameter(scale, requires_grad=False)
-    module._k3_ptpc_global_row_scale = row_parallel  # type: ignore[attr-defined]
+    module._k3_ptpc_row_sharded_scale = row_parallel  # type: ignore[attr-defined]
     if pad_n != orig_n:
         module._k3_ptpc_orig_out_features = orig_n  # type: ignore[attr-defined]
     module.quant_method = K3PtpcFp8LinearMethod()
@@ -154,7 +150,13 @@ class K3PtpcFp8LinearMethod:
         )
         orig_n = getattr(layer, "_k3_ptpc_orig_out_features", None)
         if orig_n is not None:
-            out = out[..., :orig_n]
+            # Narrowing the padded output gives a view with the padded row
+            # stride. A BF16 linear here returns a packed tensor, so consumers
+            # are entitled to assume one: MLA splits this into q/kv/rope and
+            # hands the pieces to kernels that index by row width, and they read
+            # across the pad instead of failing. Repack rather than propagate a
+            # tensor that only looks right.
+            out = out[..., :orig_n].contiguous()
         return out
 
     def apply_into(
@@ -186,15 +188,61 @@ def quantize_moe_gate_ptpc(gate: torch.nn.Module) -> bool:
     return quantize_linear_weight_ptpc(gate)
 
 
+def ptpc_scope() -> frozenset[str]:
+    """Which linear families PTPC is allowed to quantize.
+
+    ``SGLANG_ROCM_K3_PTPC_SCOPE`` takes a comma-separated subset of
+    ``mla_qkv_a``, ``mla_q_b``, ``mla_o_proj``, ``mla_g_proj``, ``kda_o_proj``,
+    ``dense_mlp``, or ``all``. It exists because the families are not equally
+    safe: they are consumed by different downstream code, and a family whose
+    consumer reads the BF16 weight directly has to be excluded rather than
+    quantized and hoped for.
+    """
+    import os
+
+    raw = os.environ.get("SGLANG_ROCM_K3_PTPC_SCOPE", "").strip().lower()
+    if raw == "":
+        return frozenset(_SAFE_SCOPES)
+    if raw == "all":
+        return frozenset(_ALL_SCOPES)
+    return frozenset(part.strip() for part in raw.split(",") if part.strip())
+
+
+_ALL_SCOPES = (
+    "mla_qkv_a",
+    "mla_q_b",
+    "mla_o_proj",
+    "mla_g_proj",
+    "kda_o_proj",
+    "dense_mlp",
+)
+
+# Quantizing any of the MLA linears makes Kimi-K3 emit fluent garbage on this
+# tree: a greedy gsm8k question that answers "72" comes back as " Natal" padded
+# with spaces. Bisected one family at a time -- mla_qkv_a+mla_q_b and
+# mla_o_proj+mla_g_proj each reproduce it on their own, while
+# kda_o_proj+dense_mlp is clean and scores normally -- so the fault is the MLA
+# attention path rather than one layer, and the quant math itself is fine
+# (test_kimi_k3_ptpc_fp8.py passes). Root cause is still open, so the default
+# scope is the subset that is known good; pass scope=all to reproduce.
+_SAFE_SCOPES = (
+    "kda_o_proj",
+    "dense_mlp",
+)
+
+
 def quantize_k3_dense_linears_in_layer(
     layer: torch.nn.Module,
     *,
     skip_o_proj: bool = False,
+    scope: Optional[frozenset[str]] = None,
 ) -> int:
     """Online-quantize every eligible dense bf16 linear in one decoder layer."""
     count = 0
     attn = getattr(layer, "self_attn", None)
     mlp = getattr(layer, "mlp", None)
+    if scope is None:
+        scope = ptpc_scope()
 
     def _try(mod: Optional[torch.nn.Module]) -> None:
         nonlocal count
@@ -204,15 +252,17 @@ def quantize_k3_dense_linears_in_layer(
     if attn is not None:
         # MLA-style attention (fused qkv_a present).
         if hasattr(attn, "fused_qkv_a_proj_with_mqa"):
-            for name in (
-                "fused_qkv_a_proj_with_mqa",
-                "q_b_proj",
-                "o_proj",
+            for name, tag in (
+                ("fused_qkv_a_proj_with_mqa", "mla_qkv_a"),
+                ("q_b_proj", "mla_q_b"),
+                ("o_proj", "mla_o_proj"),
             ):
                 if name == "o_proj" and skip_o_proj:
                     continue
+                if tag not in scope:
+                    continue
                 _try(getattr(attn, name, None))
-            if getattr(attn, "use_output_gate", False):
+            if getattr(attn, "use_output_gate", False) and "mla_g_proj" in scope:
                 _try(getattr(attn, "g_proj", None))
         # KDA-style attention (fused qkvg present).
         elif hasattr(attn, "fused_qkvg_proj"):
@@ -220,12 +270,12 @@ def quantize_k3_dense_linears_in_layer(
             # faster than separate PTPC launches and the AITER one-launch decode
             # requires BF16 f_b. Quantizing the packed stand-in as well as its
             # constituent views also retained ~5.8 GiB/rank of duplicate weights.
-            if not skip_o_proj:
+            if not skip_o_proj and "kda_o_proj" in scope:
                 _try(getattr(attn, "o_proj", None))
 
     if mlp is not None:
         if hasattr(mlp, "gate_up_proj") and hasattr(mlp, "down_proj"):
-            if not hasattr(mlp, "experts"):
+            if not hasattr(mlp, "experts") and "dense_mlp" in scope:
                 _try(mlp.gate_up_proj)
                 _try(mlp.down_proj)
         if hasattr(mlp, "experts"):
@@ -241,10 +291,13 @@ def quantize_k3_dense_linears_in_layer(
 def quantize_k3_model_dense_linears(model: torch.nn.Module) -> int:
     """Walk ``model.layers`` and quantize all eligible dense bf16 linears."""
     total = 0
+    scope = ptpc_scope()
     layers = getattr(getattr(model, "model", model), "layers", [])
     for layer in layers:
         if not hasattr(layer, "self_attn"):
             continue
         skip_o = bool(getattr(layer, "all_reduce_fusion", False))
-        total += quantize_k3_dense_linears_in_layer(layer, skip_o_proj=skip_o)
+        total += quantize_k3_dense_linears_in_layer(
+            layer, skip_o_proj=skip_o, scope=scope
+        )
     return total
