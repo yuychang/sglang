@@ -747,7 +747,11 @@ class Envs:
     # 576-dim latent query against the paged latent pool. Experimental / off by
     # default. Like the Gluon prefill flag, it does NOT lift the ~6144
     # single-batch prefill fault (root cause is a non-attention kernel), so the
-    # chunk clamp stays.
+    # chunk clamp stays. Measured 8k/1k TP8 gfx950 (chunk 4096): correct and
+    # fault-free, and 2.4x faster than the Gluon MTP prefill at c32 (11.9s vs
+    # 28.4s TTFT), but ~23% slower on TTFT than the materialized-MHA baseline
+    # (absorbed 576-dim attention costs more FLOPs than 192-dim MHA), so the
+    # baseline stays the default prefill path.
     SGLANG_ROCM_K3_AITER_MLA_PREFILL = EnvBool(False)
     # AITER MoE sorting backend (FlyDSL). Read by aiter at runtime.
     AITER_USE_FLYDSL_MOE_SORTING = EnvBool(True)
