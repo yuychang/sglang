@@ -429,6 +429,24 @@ def _kimi_k3_rocm_overrides(server_args: Any) -> dict:
         )
     if server_args.mla_runner_backend == "auto":
         overrides["mla_runner_backend"] = "gluon"
+    # Triton MLA extend on gfx950 faults when a single batch carries
+    # max_extend_len >= ~6144 (BLOCK_M=64 -> z-grid >= 96) for K3 Lq=576 /
+    # 12 heads / fp8 KV. Keep chunked prefill at the known-safe 4096 ceiling
+    # unless the operator already chose a smaller value.
+    _safe_chunk = 4096
+    if (
+        getattr(server_args, "chunked_prefill_size", None) is not None
+        and server_args.chunked_prefill_size > _safe_chunk
+    ):
+        logger.warning(
+            "Kimi-K3 on ROCm: clamping chunked_prefill_size %s -> %s. "
+            "Triton MLA extend faults for single-batch max_extend_len >= ~6144 "
+            "(12-head Lq=576 fp8 KV on gfx950); AITER has no 12-head prefill "
+            "replacement yet.",
+            server_args.chunked_prefill_size,
+            _safe_chunk,
+        )
+        overrides["chunked_prefill_size"] = _safe_chunk
     logger.info(
         "Kimi-K3 on ROCm uses Triton MLA prefill and aiter's Gluon MLA decode "
         "(prefill=%r -> 'triton', decode=%r -> 'aiter', "
