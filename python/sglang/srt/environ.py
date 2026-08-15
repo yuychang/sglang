@@ -723,13 +723,16 @@ class Envs:
     SGLANG_ROCM_K3_AR_NORM_1STAGE_MAX_BYTES = EnvInt(512 * 1024)
     SGLANG_ROCM_K3_AR_NORM_MAX_TOKENS = EnvInt(2)
     # K3 non-DCP MLA prefill (extend) on aiter's Gluon MLA kernel (MTP mode)
-    # instead of the Triton extend kernel. The Triton MLA extend path faults on
-    # gfx950 for a single batch with max_extend_len >= ~6144 (BLOCK_M=64 ->
-    # z-grid >= 96, Lq=576 / 12 heads / fp8 KV), which forces chunked_prefill_size
-    # down to 4096. mla_gluon MTP tiles heads into blocks of 16 (so it serves K3's
-    # 12 local heads at tp8) and carries q_pos on a grid axis (no z-grid cap), so
-    # it runs the full 8k prefill in one chunk. When enabled, K3 prefill routes to
-    # the aiter backend and the 4096 chunk clamp is lifted.
+    # instead of the Triton extend kernel. mla_gluon MTP tiles heads into blocks
+    # of 16 (so it serves K3's 12 local heads at tp8, which the aiter
+    # absorb-prefill reducer rejects) and is numerically correct for K3 prefill
+    # (validated against an fp64 causal-MLA reference). When enabled, K3 extend
+    # dispatches to the absorbed MLA path and the aiter backend runs it on the
+    # Gluon MTP kernel. Experimental / off by default: it does NOT lift the
+    # ~6144 single-batch prefill fault (that fault reproduces at the same
+    # threshold on both the Triton and Gluon attention paths, so its root cause
+    # is elsewhere in the large-token prefill pipeline), so the chunk clamp
+    # stays. Works for chunks up to ~5k.
     SGLANG_ROCM_K3_GLUON_PREFILL = EnvBool(False)
     # AITER MoE sorting backend (FlyDSL). Read by aiter at runtime.
     AITER_USE_FLYDSL_MOE_SORTING = EnvBool(True)

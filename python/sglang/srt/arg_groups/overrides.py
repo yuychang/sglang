@@ -425,10 +425,14 @@ def _kimi_k3_rocm_overrides(server_args: Any) -> dict:
     if server_args.mla_runner_backend == "auto":
         overrides["mla_runner_backend"] = "gluon"
 
-    # Gluon MLA MTP prefill: run extend on aiter's Gluon MLA kernel (MTP mode)
-    # rather than Triton extend. The Gluon kernel serves 12 heads and has no
-    # z-grid cap, so it runs the full 8k prefill in one chunk and the 4096 clamp
-    # below is unnecessary. Route the whole MLA path (prefill + decode) to aiter.
+    # Gluon MLA MTP prefill (experimental): run extend on aiter's Gluon MLA
+    # kernel (MTP mode) rather than the Triton extend kernel. It serves K3's 12
+    # local heads (which the aiter absorb-prefill reducer rejects) and is
+    # numerically correct for chunks up to ~5k. It does NOT lift the ~6144
+    # single-batch prefill fault: that fault reproduces at the same threshold on
+    # both the Triton and Gluon attention paths, so its root cause is elsewhere
+    # in the large-token prefill pipeline (not the attention kernel). The chunk
+    # clamp therefore stays regardless of this flag.
     gluon_prefill = envs.SGLANG_ROCM_K3_GLUON_PREFILL.get()
     if gluon_prefill:
         if prefill_backend not in ("aiter", None):
@@ -436,28 +440,20 @@ def _kimi_k3_rocm_overrides(server_args: Any) -> dict:
                 prefill_attention_backend="aiter",
                 decode_attention_backend="aiter",
             )
-        logger.info(
-            "Kimi-K3 on ROCm uses aiter's Gluon MLA kernel for BOTH prefill "
-            "(MTP mode, SGLANG_ROCM_K3_GLUON_PREFILL=1) and decode "
-            "(prefill=%r -> 'aiter', decode=%r -> 'aiter', "
-            "mla_runner_backend=%r -> 'gluon'). This removes the Triton MLA "
-            "extend z-grid fault, so chunked_prefill_size is left unclamped.",
-            prefill_backend,
-            decode_backend,
-            server_args.mla_runner_backend,
-        )
-        return overrides
+        prefill_desc = "aiter's Gluon MLA MTP kernel"
+    else:
+        if prefill_backend != "triton":
+            overrides.update(
+                prefill_attention_backend="triton",
+                decode_attention_backend="aiter",
+            )
+        prefill_desc = "Triton MLA extend"
 
-    if prefill_backend != "triton":
-        overrides.update(
-            prefill_attention_backend="triton",
-            decode_attention_backend="aiter",
-        )
-    # Triton MLA extend on gfx950 faults when a single batch carries
-    # max_extend_len >= ~6144 (BLOCK_M=64 -> z-grid >= 96) for K3 Lq=576 /
-    # 12 heads / fp8 KV. Keep chunked prefill at the known-safe 4096 ceiling
-    # unless the operator already chose a smaller value. Set
-    # SGLANG_ROCM_K3_GLUON_PREFILL=1 to lift this via the Gluon MTP path above.
+    # MLA extend on gfx950 faults when a single batch carries
+    # max_extend_len >= ~6144 (observed on both the Triton extend kernel and the
+    # Gluon MLA MTP kernel) for K3 Lq=576 / 12 heads / fp8 KV. Keep chunked
+    # prefill at the known-safe 4096 ceiling unless the operator already chose a
+    # smaller value.
     _safe_chunk = 4096
     if (
         getattr(server_args, "chunked_prefill_size", None) is not None
@@ -465,18 +461,19 @@ def _kimi_k3_rocm_overrides(server_args: Any) -> dict:
     ):
         logger.warning(
             "Kimi-K3 on ROCm: clamping chunked_prefill_size %s -> %s. "
-            "Triton MLA extend faults for single-batch max_extend_len >= ~6144 "
-            "(12-head Lq=576 fp8 KV on gfx950); set SGLANG_ROCM_K3_GLUON_PREFILL=1 "
-            "to run prefill on the Gluon MLA MTP kernel and lift this clamp.",
+            "MLA prefill faults for single-batch max_extend_len >= ~6144 "
+            "(12-head Lq=576 fp8 KV on gfx950) on both the Triton and Gluon "
+            "attention paths.",
             server_args.chunked_prefill_size,
             _safe_chunk,
         )
         overrides["chunked_prefill_size"] = _safe_chunk
     logger.info(
-        "Kimi-K3 on ROCm uses Triton MLA prefill and aiter's Gluon MLA decode "
-        "(prefill=%r -> 'triton', decode=%r -> 'aiter', "
-        "mla_runner_backend=%r -> 'gluon'): aiter's legacy prefill/decode "
-        "kernels do not serve this model's local head count.",
+        "Kimi-K3 on ROCm uses %s and aiter's Gluon MLA decode "
+        "(prefill=%r, decode=%r -> 'aiter', mla_runner_backend=%r -> 'gluon'): "
+        "aiter's legacy prefill/decode kernels do not serve this model's local "
+        "head count.",
+        prefill_desc,
         prefill_backend,
         decode_backend,
         server_args.mla_runner_backend,
