@@ -836,12 +836,14 @@ class KimiK3MoE(nn.Module):
 
         The shared-expert branch AND its all-reduce run on the side stream so
         the collective hides under the routed-expert GEMMs on the main stream.
-        Compute/compute overlap alone loses on gfx950 — ROCm taxes every
-        main-stream node for as long as a second queue is live — but an
-        all-reduce is communication, not CU work, so hiding it under the routed
-        GEMMs is a real win. The two collectives stay ordered on the single TP
-        communicator: the shared reduce (side stream) completes before the join,
-        then the routed reduce runs on the main stream.
+        The two collectives stay ordered on the single TP communicator: the
+        shared reduce (side stream) completes before the join, then the routed
+        reduce runs on the main stream.
+
+        MEASURED: this loses to single-stream at K3 decode on gfx950 (~+18-25%
+        TPOT at C1/C8/C32). Splitting the packed [latent|shared] collective
+        re-adds an all-reduce, and the live side queue taxes every main-stream
+        node. Kept behind SGLANG_ROCM_USE_MULTI_STREAM for experimentation.
 
         Splits the packed [latent|shared] collective into two — one extra
         launch — which is why it is gated to decode sizes where the routed GEMMs
@@ -1519,14 +1521,17 @@ class KimiK3MoE(nn.Module):
                     prefix_sum,
                 )
         else:  # single collective over the flat [latent | shared] pair
-            # ROCm dual-stream (ATOM pattern). Two variants, see
+            # ROCm dual-stream (ATOM pattern), opt-in via
+            # SGLANG_ROCM_USE_MULTI_STREAM. Two variants, see
             # SGLANG_ROCM_K3_DUAL_STREAM_MOE_MODE:
             #   "ar"      — shared compute + its all-reduce ride the side stream
-            #               so the collective hides under the routed GEMMs; this
-            #               is the variant that beats single-stream (comm does
-            #               not consume CUs, so it dodges ROCm's per-node tax).
+            #               so the collective hides under the routed GEMMs.
             #   "compute" — packed single collective, overlap only the two
-            #               compute branches (kept for A/B; loses to the tax).
+            #               compute branches.
+            # NOTE: both measured slower than single-stream at K3 decode on
+            # gfx950 (the packed collective already minimizes exposed comm, and
+            # a live second queue taxes every main-stream node). Retained behind
+            # the flag for experimentation; see environ.py for the measurements.
             if self._use_rocm_dual_stream_moe(num_tokens) and not use_latent_tail:
                 if envs.SGLANG_ROCM_K3_DUAL_STREAM_MOE_MODE.get() == "ar":
                     return self._forward_fused_dual_stream_ar(

@@ -644,13 +644,24 @@ class Envs:
     # GEMMs already saturate the CUs, so the overlap only adds contention; there
     # single-stream is kept. Mirrors ATOM's ATOM_DUAL_STREAM_MOE_TOKEN_THRESHOLD.
     SGLANG_ROCM_K3_DUAL_STREAM_MOE_MAX_TOKENS = EnvInt(1024)
-    # Dual-stream overlap mode. "ar" (default) runs the shared-expert branch AND
-    # its all-reduce on the side stream so the collective (communication) hides
-    # under the routed-expert GEMMs on the main stream — this is ATOM's win and
-    # the only variant that beats single-stream on gfx950, because comm does not
-    # consume CUs. "compute" keeps the packed single collective and overlaps only
-    # the two compute branches; kept for A/B since ROCm taxes every main-stream
-    # node while a second queue is live, so compute/compute overlap alone loses.
+    # Dual-stream overlap mode (only consulted when SGLANG_ROCM_USE_MULTI_STREAM
+    # is set; multi-stream is opt-in and OFF by default).
+    #   "ar"      — shared-expert branch AND its all-reduce ride the side stream
+    #               so the collective (comm) hides under the routed GEMMs, à la
+    #               ATOM's dual_stream_moe_forward. Splits the packed
+    #               [latent|shared] collective into two.
+    #   "compute" — packed single collective, overlap only the two compute
+    #               branches.
+    # MEASURED on gfx950 (MI355X, K3 TP8, Triton MLA): both variants LOSE to
+    # single-stream at decode — "ar" is ~+18-25% TPOT worse across C1/C8/C32.
+    # Root cause: (1) ROCm charges a per-node tax to every main-stream kernel
+    # while a second queue is live (scales with the layer's kernel count), and
+    # (2) K3 already fuses the routed+shared reduce into ONE packed collective,
+    # so there is no exposed comm to hide — splitting it just re-adds the AR the
+    # overlap was meant to hide. A real multi-stream win here needs coarse-grained
+    # two-batch overlap (enable_two_batch_overlap) with EP a2a comm to hide, not
+    # this fine-grained MoE dual-stream. Kept behind the flag for experimentation
+    # on other configs/hardware.
     SGLANG_ROCM_K3_DUAL_STREAM_MOE_MODE = EnvStr("ar")
     # Fold the KDA [f_a|b] tail into the wide [q,k,v,g] projection so the whole
     # in-proj is one GEMM (what ATOM does). The N=6288 shape has no tuned aiter
