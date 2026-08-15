@@ -652,6 +652,10 @@ class Envs:
     #               [latent|shared] collective into two.
     #   "compute" — packed single collective, overlap only the two compute
     #               branches.
+    #   "atom"    — exact ATOM K3 schedule: split shared gate_up out of the
+    #               merged front, queue routed pre-AR work first, then run the
+    #               full shared MLP + shared AR on the side stream before the
+    #               routed AR.
     # MEASURED on gfx950 (MI355X, K3 TP8, Triton MLA): both variants LOSE to
     # single-stream at decode — "ar" is ~+18-25% TPOT worse across C1/C8/C32.
     # Root cause: (1) ROCm charges a per-node tax to every main-stream kernel
@@ -662,7 +666,7 @@ class Envs:
     # two-batch overlap (enable_two_batch_overlap) with EP a2a comm to hide, not
     # this fine-grained MoE dual-stream. Kept behind the flag for experimentation
     # on other configs/hardware.
-    SGLANG_ROCM_K3_DUAL_STREAM_MOE_MODE = EnvStr("ar")
+    SGLANG_ROCM_K3_DUAL_STREAM_MOE_MODE = EnvStr("atom")
     # Fold the KDA [f_a|b] tail into the wide [q,k,v,g] projection so the whole
     # in-proj is one GEMM (what ATOM does). The N=6288 shape has no tuned aiter
     # config and the 6144 one does, but at decode the projection is bandwidth

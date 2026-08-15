@@ -464,6 +464,10 @@ class KimiK3MoE(nn.Module):
         # loading by _merge_front_weights().
         self._front_w: Optional[torch.Tensor] = None
         self._front_sizes: Optional[List[int]] = None
+        # Contiguous view of the merged front without the shared gate_up rows.
+        # The ATOM-aligned dual-stream path uses this for [gate | routed_down]
+        # on the main stream while the full shared MLP runs on alt_stream.
+        self._front_w_nogu: Optional[torch.Tensor] = None
         # True when _front_w merges only [gate, routed_expert_down_proj] (the EP
         # a2a pair) rather than the three-way fused-front weight.
         self._front_is_ep_pair = False
@@ -713,6 +717,11 @@ class KimiK3MoE(nn.Module):
             return
         self._front_w, self._front_sizes = _merge_weights_as_views(mods)
         self._front_is_ep_pair = len(mods) == 2
+        self._front_w_nogu = (
+            None
+            if self._front_is_ep_pair
+            else self._front_w[self._front_sizes[0] :]
+        )
         # Invalidate the cached properties.
         for prop in (
             "_eligible_for_fused_front",
@@ -862,6 +871,70 @@ class KimiK3MoE(nn.Module):
         shared_output.record_stream(current_stream)
         # Routed reduce after the join so it never races the shared reduce on
         # the shared communicator.
+        if self._routed_needs_reduce:
+            latent = tensor_model_parallel_all_reduce(latent)
+        latent = self._latent_norm(latent)
+        out, _ = self.routed_expert_up_proj(latent)
+        return _add3(out, shared_output, prefix_sum, prefetch_bc=True)
+
+    def _forward_fused_dual_stream_atom(
+        self,
+        hidden_states: torch.Tensor,
+        prefix_sum: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        """Match ATOM K3's latent-MoE dual-stream schedule exactly.
+
+        Main stream: [router gate | routed down] -> routed experts
+        Alt stream:  shared gate_up -> activation -> shared down -> shared AR
+        Join:        routed AR -> latent norm -> routed up -> add shared
+
+        Unlike ``_forward_fused_dual_stream_ar``, this intentionally splits the
+        shared gate_up rows out of K3's merged front and queues all routed pre-AR
+        work before submitting the full shared MLP to the alternate stream.
+        """
+        assert self._front_w_nogu is not None
+        assert self._front_sizes is not None
+        shared = self.shared_experts
+        assert shared is not None
+
+        self._log_dual_stream_once(
+            "ATOM-aligned full shared MLP+AR under routed pre-AR"
+        )
+        current = torch.cuda.current_stream()
+        alt = self.alt_stream
+        alt.wait_stream(current)
+
+        # ATOM queues routed pre-AR work first on the main stream.
+        routed_front = _k3_bf16_gemm(hidden_states, self._front_w_nogu)
+        router_logits, routed_input = torch.split(
+            routed_front, self._front_sizes[1:], dim=-1
+        )
+        if hidden_states.shape[0] > 1 and _is_hip and not _aiter_k3_opt:
+            router_logits = router_logits.contiguous()
+        if self._moe_front_needs_dense_bf16:
+            routed_input = routed_input.to(hidden_states.dtype).contiguous()
+        latent = hidden_states.new_empty(
+            hidden_states.shape[0], self.moe_hidden_size
+        )
+        self._forward_routed(
+            hidden_states, router_logits, routed_input, latent
+        )
+
+        # Then submit ATOM's full shared branch to the side stream.
+        with torch.cuda.stream(alt):
+            gate_up = _k3_bf16_gemm(
+                hidden_states, shared.gate_up_proj.weight
+            )
+            shared_output = hidden_states.new_empty(
+                hidden_states.shape[0], hidden_states.shape[1]
+            )
+            self._forward_shared(gate_up, shared_output)
+            if self.tp_size > 1 and not self._shared_experts_tp1:
+                shared_output = tensor_model_parallel_all_reduce(shared_output)
+
+        # Preserve shared AR -> routed AR ordering on the TP communicator.
+        current.wait_stream(alt)
+        shared_output.record_stream(current)
         if self._routed_needs_reduce:
             latent = tensor_model_parallel_all_reduce(latent)
         latent = self._latent_norm(latent)
@@ -1392,6 +1465,16 @@ class KimiK3MoE(nn.Module):
             )
 
         num_tokens, hidden_size = hidden_states.shape
+        if (
+            self._use_rocm_dual_stream_moe(num_tokens)
+            and envs.SGLANG_ROCM_K3_DUAL_STREAM_MOE_MODE.get() == "atom"
+            and not k3_ar_fusion.enabled()
+            and self._front_w_nogu is not None
+            and not self._front_fp32
+        ):
+            return self._forward_fused_dual_stream_atom(
+                hidden_states, prefix_sum
+            )
         preroute = None
         if (
             num_tokens <= 2
