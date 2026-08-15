@@ -144,10 +144,6 @@ class ForwardMetadata:
     # pages at 1 token, so it cannot read dcp_block_table (pages of page_size);
     # only built when --mla-runner-backend gluon is selected.
     dcp_verify_token_table: Optional[torch.Tensor] = None
-    # Paged block table [bs, max_num_blocks] for the non-DCP aiter Triton
-    # mla_prefill_fwd extend path (SGLANG_ROCM_K3_AITER_MLA_PREFILL). Built once
-    # per forward from req_to_token instead of per layer.
-    aiter_prefill_block_table: Optional[torch.Tensor] = None
 
 
 _AITER_PARTITION_SIZE_ROCM = 256
@@ -308,24 +304,6 @@ class AiterAttnBackend(AttentionBackend):
 
         self.use_mla = model_runner.model_config.attention_arch == AttentionArch.MLA
         self.use_aiter_gluon_mla = model_runner.server_args.use_aiter_gluon_mla()
-        # K3 non-DCP MLA prefill on the Gluon MLA MTP kernel instead of Triton
-        # extend (avoids the gfx950 z-grid >= 96 fault at max_extend_len >= ~6144
-        # for Lq=576 / 12 heads). Only meaningful when the Gluon MLA decode path
-        # is already selected, since it reuses that kernel's head tiling.
-        self.use_gluon_mla_prefill = (
-            self.use_mla
-            and self.use_aiter_gluon_mla
-            and get_bool_env_var("SGLANG_ROCM_K3_GLUON_PREFILL", "False")
-        )
-        # K3 non-DCP MLA prefill on aiter's Triton mla_prefill_fwd (the same
-        # kernel the K3 DCP prefill path uses) over the paged latent KV pool,
-        # instead of materializing MHA. The Triton kernel tiles the 12 local
-        # heads into BLOCK_M=16 and masks the tail, so no head padding is needed;
-        # KV is read at the pool's native page_size (no block_size=1 slowdown of
-        # the ASM aiter.mla.mla_prefill_fwd).
-        self.use_aiter_mla_prefill = self.use_mla and get_bool_env_var(
-            "SGLANG_ROCM_K3_AITER_MLA_PREFILL", "False"
-        )
 
         # Get v_head_dim based on model type
         if self.use_mla:
@@ -1348,227 +1326,6 @@ class AiterAttnBackend(AttentionBackend):
         )
         return out
 
-    def _mla_prefill_fwd_gluon_mtp(self, q, layer, forward_batch):
-        """Non-DCP MLA prefill (extend) on aiter's Gluon MLA kernel, MTP mode.
-
-        A drop-in for the Triton extend kernel that faults on gfx950 when a
-        single batch carries ``max_extend_len >= ~6144`` (BLOCK_M=64 -> z-grid
-        >= 96 for Lq=576 / 12 heads / fp8 KV). ``mla_gluon`` tiles heads into
-        blocks of 16 (so it serves K3's 12 local heads at tp8) and carries the
-        query position on a grid axis, so there is no z-grid cap and one compiled
-        kernel serves any extend length.
-
-        MTP masking is ``q_pos attends KV[0, seq_len - qlen + q_pos]``, exactly
-        the extend window: ``seq_len`` is the request's full (prefix + extend)
-        sequence and ``qlen`` its extend count. The new tokens are already in the
-        pool (``save_kv_cache`` ran before this call), so the full per-request KV
-        is ``req_to_token[req_idx, :seq_len]``.
-
-        ``mla_gluon`` MTP requires every request in a launch to share one qlen, so
-        ragged prefill batches are dispatched one request at a time (bs=1). A
-        prefill batch holds few requests, so the per-request launch cost is
-        negligible next to the O(qlen * seq_len) attention it replaces.
-        """
-        from aiter.ops.triton.gluon.mla_gluon import mla_gluon
-
-        num_heads = layer.tp_q_head_num
-        kv_lora_rank = layer.v_head_dim
-        qk_head_dim = layer.qk_head_dim
-
-        kv_c = self.token_to_kv_pool.get_key_buffer(layer.layer_id).view(
-            -1, qk_head_dim
-        )
-        q3 = q.reshape(-1, num_heads, qk_head_dim)
-        out = q.new_empty((q3.shape[0], num_heads, kv_lora_rank), dtype=self.input_dtype)
-
-        extend_lens = forward_batch.extend_seq_lens_cpu
-        req_pool_indices = forward_batch.req_pool_indices
-        seq_lens = forward_batch.seq_lens
-
-        q_start = 0
-        for i, ext_len in enumerate(extend_lens):
-            seq_len = int(seq_lens[i].item())
-            req_idx = int(req_pool_indices[i].item())
-            # Full per-request KV (prefix + the extend tokens just written).
-            kv_indices = self.req_to_token[req_idx, :seq_len].to(torch.int32)
-            kv_indptr = torch.tensor(
-                [0, seq_len], device=q.device, dtype=torch.int32
-            )
-
-            q4 = q3[q_start : q_start + ext_len].reshape(
-                1, ext_len, num_heads, qk_head_dim
-            )
-            o4 = out[q_start : q_start + ext_len].reshape(
-                1, ext_len, num_heads, kv_lora_rank
-            )
-            mla_gluon(
-                q4[..., :kv_lora_rank],
-                q4[..., kv_lora_rank:],
-                kv_c,
-                o4,
-                kv_indices,
-                kv_indptr,
-                layer.scaling,
-                use_2d_view=False,
-                min_kv_seq_len=1,
-                return_lse=False,
-            )
-            q_start += ext_len
-
-        return out.view(-1, num_heads * kv_lora_rank)
-
-    def _mla_prefill_fwd_dcp_triton(self, q, layer, k_descale, forward_batch):
-        """DCP prefill (extend) via aiter's MLA absorb-prefill kernel over
-        the assembled full-sequence KV in ``attn_dcp_metadata.dcp_kv_buffer``.
-
-        Under DCP the KV pool is physically round-robin sharded (owner rule
-        pos % W == rank, physical = pos // W), so the full per-request sequence
-        cannot be read from this rank's local cache. The model layer
-        (forward_absorb_prepare -> all_gather_kv_cache_for_mla_extend) assembles
-        the full KV — gathered prefix + in-hand new tokens — into dcp_kv_buffer,
-        indexed by dcp_kv_indices with per-request boundaries dcp_kv_indptr.
-
-        Kimi-K3 MLA is NoPE with 12 local heads at tp8; the ASM mla_prefill_fwd
-        and flash_attn_varlen absorb path can't serve those dims. mla_prefill_fwd tiles
-        heads. Q is NOT gathered for extend (each rank computes full attention for
-        its local heads over the full KV — no cross-rank merge).
-        """
-        from aiter.ops.triton.attention.mla import mla_prefill_fwd
-
-        from sglang.kernels.ops.attention.dcp_mla_reduce import (
-            pack_dcp_kv_into_pages,
-        )
-
-        dcp_meta = forward_batch.attn_dcp_metadata
-        kv_buffer = dcp_meta.dcp_kv_buffer  # [seq_lens_sum, 1, qk_head_dim]
-        kv_indptr = dcp_meta.dcp_kv_indptr  # [bs + 1] full-seq boundaries
-        kv_indices = dcp_meta.dcp_kv_indices  # indices into dcp_kv_buffer
-        bs = kv_indptr.shape[0] - 1
-        num_heads = layer.tp_q_head_num
-        kv_lora_rank = layer.v_head_dim
-        qk_rope_head_dim = layer.qk_head_dim - kv_lora_rank
-
-        # NOTE: the .item() below is a GPU->CPU sync, which would be illegal
-        # under cuda-graph capture -- but this path is uncapturable anyway
-        # (pack_dcp_kv_into_pages allocates per batch) and prefill cuda graphs
-        # are disabled for K3 DCP. Do NOT try to assert that via
-        # ForwardMetadata.run_graph: it defaults to True and is only set to
-        # False explicitly on the eager decode/verify paths, so on the prefill
-        # metadata it is always True and says nothing about capture state.
-        seqused_k = (kv_indptr[1 : bs + 1] - kv_indptr[:bs]).to(torch.int32)
-        max_kv = int(seqused_k.max().item())
-        # mla_prefill_fwd takes its KV tile straight from the paged block size, so feeding
-        # the assembled buffer as block_size 1 collapses each tile to a single
-        # token: a 16384x16384 chunk measured 5156 ms that way vs 39 ms at block
-        # size 64 on gfx950 (~131x). Repack into per-request page-aligned pages.
-        paged_kv, block_tables = pack_dcp_kv_into_pages(
-            kv_buffer, kv_indptr, kv_indices, bs, _DCP_PREFILL_PAGE_SIZE
-        )
-
-        out = q.new_empty(
-            (q.shape[0], num_heads * kv_lora_rank), dtype=self.input_dtype
-        )
-        mla_prefill_fwd(
-            q.view(-1, num_heads, layer.qk_head_dim),
-            paged_kv,
-            out.view(-1, num_heads, kv_lora_rank),
-            self.forward_metadata.qo_indptr,  # extend query-token boundaries
-            seqused_k,
-            max_kv,
-            block_tables,
-            layer.scaling,
-            kv_lora_rank,
-            qk_rope_head_dim,
-            True,  # causal
-            k_descale,
-            k_descale,
-        )
-        return out
-
-    def _build_aiter_prefill_block_table(self, forward_batch, bs):
-        """Paged block table [bs, max_num_blocks] for the non-DCP aiter Triton
-        mla_prefill_fwd extend path.
-
-        Built once per forward from req_to_token (same construction the paged
-        decode path uses: token-level indices via create_flashmla_kv_indices,
-        then strided//page_size), so mla_prefill_fwd can read the pool at its
-        native page_size instead of collapsing to block_size 1.
-        """
-        max_kv = int(forward_batch.seq_lens_cpu.max().item())
-        token_table = torch.zeros(
-            bs, max_kv, dtype=torch.int32, device=self.device
-        )
-        create_flashmla_kv_indices_triton[
-            (bs, get_num_kv_index_blocks_flashmla(max_kv, 1))
-        ](
-            self.req_to_token,
-            forward_batch.req_pool_indices,
-            forward_batch.seq_lens,
-            None,
-            token_table,
-            self.req_to_token.stride(0),
-            max_kv,
-            1,
-        )
-        if self.page_size > 1:
-            return self._transform_table_1_to_real(token_table)
-        return token_table
-
-    def _mla_prefill_fwd_aiter_triton(self, q, layer, k_descale, forward_batch):
-        """Non-DCP K3 prefill (extend) via aiter's Triton MLA absorb-prefill
-        kernel (aiter.ops.triton.attention.mla.mla_prefill_fwd) over the paged
-        latent KV pool.
-
-        This is the same kernel the K3 DCP prefill path uses
-        (_mla_prefill_fwd_dcp_triton), but the KV comes from this rank's local
-        paged pool (no cross-rank assembly). The absorbed 576-dim latent query
-        [T, 12, 576] attends the latent pool [num_pages, page_size, 1, 576]
-        directly. The Triton kernel tiles the 12 local heads into a BLOCK_M=16
-        tile and masks the tail (query_offset < num_query_heads), so it serves
-        K3's 12 local heads with no head padding, and reads KV at the pool's
-        native page_size (no block_size=1 slowdown of the ASM
-        aiter.mla.mla_prefill_fwd).
-        """
-        from aiter.ops.triton.attention.mla import mla_prefill_fwd
-
-        fm = self.forward_metadata
-        bs = forward_batch.batch_size
-        num_heads = layer.tp_q_head_num
-        kv_lora_rank = layer.v_head_dim
-        qk_rope_head_dim = layer.qk_head_dim - kv_lora_rank
-
-        k_buffer = self.token_to_kv_pool.get_key_buffer(layer.layer_id)
-        paged_kv = k_buffer.view(-1, self.page_size, 1, layer.qk_head_dim)
-
-        seqused_k = forward_batch.seq_lens[:bs].to(torch.int32)
-        max_kv = fm.max_kv_len
-        if max_kv is None:
-            max_kv = int(forward_batch.seq_lens_cpu.max().item())
-
-        block_tables = fm.aiter_prefill_block_table
-        if block_tables is None:
-            block_tables = self._build_aiter_prefill_block_table(forward_batch, bs)
-
-        out = q.new_empty(
-            (q.shape[0], num_heads * kv_lora_rank), dtype=self.input_dtype
-        )
-        mla_prefill_fwd(
-            q.view(-1, num_heads, layer.qk_head_dim),
-            paged_kv,
-            out.view(-1, num_heads, kv_lora_rank),
-            fm.qo_indptr,
-            seqused_k,
-            int(max_kv),
-            block_tables,
-            layer.scaling,
-            kv_lora_rank,
-            qk_rope_head_dim,
-            True,  # causal
-            k_descale,
-            k_descale,
-        )
-        return out
-
     def mla_fp8_prefill_attn(
         self,
         q: torch.Tensor,
@@ -2163,12 +1920,6 @@ class AiterAttnBackend(AttentionBackend):
                         total_s, device=self.device, dtype=torch.int32
                     )
 
-                aiter_prefill_block_table = None
-                if self.use_aiter_mla_prefill:
-                    aiter_prefill_block_table = self._build_aiter_prefill_block_table(
-                        forward_batch, bs
-                    )
-
                 self.forward_metadata = ForwardMetadata(
                     self.mla_indices_updater_prefill.kv_indptr,
                     self.mla_indices_updater_prefill.kv_indices,
@@ -2183,7 +1934,6 @@ class AiterAttnBackend(AttentionBackend):
                     reduce_final_map=reduce_final_map,
                     reduce_partial_map=reduce_partial_map,
                     fp8_prefill_kv_indices=fp8_prefill_kv_indices,
-                    aiter_prefill_block_table=aiter_prefill_block_table,
                 )
             else:
                 self.indices_updater_prefill.update(
@@ -2905,12 +2655,6 @@ class AiterAttnBackend(AttentionBackend):
                 and not forward_batch.forward_mode.is_target_verify()
                 and not forward_batch.forward_mode.is_draft_extend_v2()
             ):
-                if self.use_gluon_mla_prefill:
-                    return self._mla_prefill_fwd_gluon_mtp(q, layer, forward_batch)
-                if self.use_aiter_mla_prefill:
-                    return self._mla_prefill_fwd_aiter_triton(
-                        q, layer, k_descale, forward_batch
-                    )
                 extend_no_prefix = not any(forward_batch.extend_prefix_lens_cpu)
                 if kv_indices.shape[0] == 0 or extend_no_prefix:
                     if _use_fp8_prefill_attn:

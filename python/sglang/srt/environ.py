@@ -722,37 +722,6 @@ class Envs:
     SGLANG_ROCM_K3_AR_NORM = EnvBool(True)
     SGLANG_ROCM_K3_AR_NORM_1STAGE_MAX_BYTES = EnvInt(512 * 1024)
     SGLANG_ROCM_K3_AR_NORM_MAX_TOKENS = EnvInt(2)
-    # K3 non-DCP MLA prefill (extend) on aiter's Gluon MLA kernel (MTP mode)
-    # instead of the Triton extend kernel. mla_gluon MTP tiles heads into blocks
-    # of 16 (so it serves K3's 12 local heads at tp8, which the aiter
-    # absorb-prefill reducer rejects) and is numerically correct for K3 prefill
-    # (validated against an fp64 causal-MLA reference). When enabled, K3 extend
-    # dispatches to the absorbed MLA path and the aiter backend runs it on the
-    # Gluon MTP kernel. Experimental / off by default: it does NOT lift the
-    # ~6144 single-batch prefill fault (that fault reproduces at the same
-    # threshold on both the Triton and Gluon attention paths, so its root cause
-    # is elsewhere in the large-token prefill pipeline), so the chunk clamp
-    # stays. Works for chunks up to ~5k.
-    SGLANG_ROCM_K3_GLUON_PREFILL = EnvBool(False)
-    # K3 non-DCP MLA prefill (extend) on aiter's *Triton* MLA absorb-prefill
-    # kernel (aiter.ops.triton.attention.mla.mla_prefill_fwd) over the paged
-    # latent KV pool, instead of materializing MHA (kv_b_proj reconstruction +
-    # flash_attn_varlen) or the Triton extend kernel. The Triton mla_prefill_fwd
-    # tiles the 12 local heads into a BLOCK_M=16 tile and masks the tail
-    # (query_offset < num_query_heads), so it serves K3's 12 local heads at tp8
-    # with no head padding, and reads KV at the pool's native page_size (no
-    # block_size=1 slowdown of the ASM aiter.mla.mla_prefill_fwd). This is the
-    # same kernel the K3 DCP prefill path already uses. When enabled, K3 extend
-    # dispatches to the absorbed MLA path and the aiter backend runs the absorbed
-    # 576-dim latent query against the paged latent pool. Experimental / off by
-    # default. Like the Gluon prefill flag, it does NOT lift the ~6144
-    # single-batch prefill fault (root cause is a non-attention kernel), so the
-    # chunk clamp stays. Measured 8k/1k TP8 gfx950 (chunk 4096): correct and
-    # fault-free, and 2.4x faster than the Gluon MTP prefill at c32 (11.9s vs
-    # 28.4s TTFT), but ~23% slower on TTFT than the materialized-MHA baseline
-    # (absorbed 576-dim attention costs more FLOPs than 192-dim MHA), so the
-    # baseline stays the default prefill path.
-    SGLANG_ROCM_K3_AITER_MLA_PREFILL = EnvBool(False)
     # AITER MoE sorting backend (FlyDSL). Read by aiter at runtime.
     AITER_USE_FLYDSL_MOE_SORTING = EnvBool(True)
     # Lossy 4-bit intermediate transform in aiter fused MoE (shape-gated in aiter).
