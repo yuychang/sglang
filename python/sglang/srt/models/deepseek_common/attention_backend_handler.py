@@ -16,6 +16,16 @@ from sglang.srt.utils import is_sm100_or_sm110_supported, use_intel_amx_backend
 
 MHA_ONE_SHOT_SUPPORTED_BACKENDS = ["fa3", "flashinfer", "flashmla"]
 
+
+def _use_gluon_mla_prefill() -> bool:
+    """K3 non-DCP MLA prefill on aiter's Gluon MLA MTP kernel (gfx950).
+
+    Gated the same way as AiterAttnBackend.use_gluon_mla_prefill so the model's
+    extend dispatch and the backend's extend kernel agree."""
+    from sglang.srt.utils import get_bool_env_var
+
+    return _is_hip and get_bool_env_var("SGLANG_ROCM_K3_GLUON_PREFILL", "False")
+
 # ROCm runs dedicated MHA/MLA implementations (forward_mha_rocm.py /
 # forward_mla_rocm.py) so the shared CUDA paths carry no AMD branches. Backend
 # handlers keep returning the generic method; the platform swap happens here.
@@ -190,6 +200,13 @@ def handle_attention_aiter(attn, forward_batch):
     if is_in_tc_piecewise_cuda_graph() or is_in_breakable_cuda_graph():
         return AttnForwardMethod.MHA
     if forward_batch.forward_mode.is_extend_without_speculative():
+        # K3 Gluon MLA MTP prefill runs extend in the absorbed latent space
+        # (the Gluon kernel reads the 576-dim latent KV), so dispatch extend to
+        # MLA rather than the materialized MHA path. The aiter backend's
+        # forward_extend then intercepts the absorbed extend with the Gluon MTP
+        # kernel (see _mla_prefill_fwd_gluon_mtp).
+        if _use_gluon_mla_prefill():
+            return AttnForwardMethod.MLA
         return AttnForwardMethod.MHA
     else:
         return AttnForwardMethod.MLA
