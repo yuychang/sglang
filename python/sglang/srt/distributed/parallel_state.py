@@ -840,9 +840,8 @@ class GroupCoordinator:
         if envs.SGLANG_USE_1STAGE_ALLREDUCE.is_set():
             use_1stage = envs.SGLANG_USE_1STAGE_ALLREDUCE.get()
         else:
-            use_1stage = (
-                total_bytes <= envs.SGLANG_ROCM_K3_AR_NORM_1STAGE_MAX_BYTES.get()
-            )
+            # Match kimi_k3._K3_AR_NORM_1STAGE_MAX_BYTES (512 KiB).
+            use_1stage = total_bytes <= 512 * 1024
         try:
             return ca_comm.custom_fused_ar_partial_rms(
                 input_, weight_, norm_rows, eps, use_1stage

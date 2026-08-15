@@ -1,11 +1,11 @@
 """Numerics check for the fused gated-RMSNorm + per-token FP8 quant kernel.
 
-Under SGLANG_ROCM_K3_KDA_O_PROJ_FP8 the KDA output norm writes o_proj's
-``(fp8, per-token scale)`` pair directly instead of a bf16 tensor that a
-separate quant kernel then re-reads. This pins the fused result against the
-unfused reference (gated norm in fp32, then per-token quant) and checks the
-pieces the consuming GEMM relies on: the scale is per token across *all* heads,
-the norm is per head, and a strided gate is read in place.
+On ROCm the KDA output norm writes o_proj's ``(fp8, per-token scale)`` pair
+directly instead of a bf16 tensor that a separate quant kernel then re-reads.
+This pins the fused result against the unfused reference (gated norm in fp32,
+then per-token quant) and checks the pieces the consuming GEMM relies on: the
+scale is per token across *all* heads, the norm is per head, and a strided gate
+is read in place.
 """
 
 import unittest

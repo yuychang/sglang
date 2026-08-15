@@ -132,11 +132,18 @@ from sglang.srt.utils.common import (
 logger = logging.getLogger(__name__)
 _is_hip = is_hip()
 _use_aiter = get_bool_env_var("SGLANG_USE_AITER") and _is_hip
-_aiter_k3_opt = get_bool_env_var("SGLANG_AITER_K3_OPT")
+# K3 AITER decode opts (fused route-quant staging, mxfp4 inter-align, …)
+# are always on when SGLANG_USE_AITER is set — no separate enable flag.
+_aiter_k3_opt = _use_aiter
 _aiter_mla_gate = get_bool_env_var("SGLANG_K3_AITER_MLA_GATE")
 _aiter_kda_group64 = get_bool_env_var("SGLANG_K3_AITER_KDA_GROUP64")
 _aiter_moe_preroute_fp8 = get_bool_env_var("SGLANG_K3_AITER_MOE_PREROUTE_FP8")
 _aiter_latent_tail_fp8 = get_bool_env_var("SGLANG_K3_AITER_LATENT_TAIL_FP8")
+
+# Measured-best thresholds for the always-on K3 ROCm decode wins (gfx950 TP8).
+_K3_AR_NORM_MAX_TOKENS = 2
+_K3_AR_NORM_1STAGE_MAX_BYTES = 512 * 1024
+_K3_FUSE_KDA_INPROJ_MAX_TOKENS = 256
 
 
 def _cdiv(a: int, b: int) -> int:
@@ -215,13 +222,13 @@ def _merge_weights_as_views(
 
 
 def _k3_ptpc_fp8_enabled() -> bool:
-    return _is_hip and _use_aiter and envs.SGLANG_ROCM_K3_PTPC_FP8.get()
+    """Selective K3 ptpc_fp8 for dense linears that compose with KDA/MoE fusions."""
+    return _is_hip and _use_aiter
 
 
 def _k3_o_proj_fp8_enabled() -> bool:
-    return _k3_ptpc_fp8_enabled() or (
-        _use_aiter and envs.SGLANG_ROCM_K3_KDA_O_PROJ_FP8.get()
-    )
+    """KDA o_proj as per-token per-channel FP8 GEMM (aiter a8w8_bpreshuffle)."""
+    return _is_hip and _use_aiter
 
 
 def _k3_fused_norm_fp8_enabled() -> bool:
@@ -1277,8 +1284,7 @@ class KimiK3MoE(nn.Module):
         """Fuse packed latent/shared AR with latent-only RMSNorm on gfx950."""
         if not (
             _is_hip
-            and envs.SGLANG_ROCM_K3_AR_NORM.get()
-            and 0 < num_tokens <= envs.SGLANG_ROCM_K3_AR_NORM_MAX_TOKENS.get()
+            and 0 < num_tokens <= _K3_AR_NORM_MAX_TOKENS
             and self.fuse_ar_norm
             and self._routed_needs_reduce
             and not self._dp_attention
@@ -1671,7 +1677,7 @@ class KimiK3DeltaAttention(nn.Module):
             self._qkvgbfa_w: Optional[torch.Tensor] = None
             self._qkvgbfa_sizes: Optional[list[int]] = None
             self._qkvgbfa_bs_limit = (
-                envs.SGLANG_ROCM_K3_FUSE_KDA_INPROJ_MAX_TOKENS.get() if _is_hip else 0
+                _K3_FUSE_KDA_INPROJ_MAX_TOKENS if _is_hip else 0
             )
         elif self.do_fuse_qkvbfg:
             self.qkvb_sizes = [
@@ -1942,7 +1948,7 @@ class KimiK3DeltaAttention(nn.Module):
         plain unquantized tensors of the same dtype -- the checkpoint keeps
         attention in bf16, but a quantized variant would carry scales that a
         raw row-cat would silently drop."""
-        if not (_is_hip and envs.SGLANG_ROCM_K3_FUSE_KDA_INPROJ.get()):
+        if not _is_hip:
             return False
         if not (self.do_fuse_qkvbfg and self.use_full_rank_gate):
             return False
@@ -1989,8 +1995,7 @@ class KimiK3DeltaAttention(nn.Module):
         the already-loaded weight: one scale per output channel (amax / fp8_max
         over the input dim), the weight preshuffled into aiter's (16, 16) B
         layout, and a matching quant_method swapped in. The gated output norm
-        then feeds the GEMM a pre-quantized (fp8, scale) pair -- see
-        SGLANG_ROCM_K3_KDA_O_PROJ_FP8.
+        then feeds the GEMM a pre-quantized (fp8, scale) pair.
 
         Called once from load_weights (after all weights are loaded, before
         cuda graph capture). A no-op unless the flag is on, aiter is in use, and

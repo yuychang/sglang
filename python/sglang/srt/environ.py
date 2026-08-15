@@ -655,40 +655,10 @@ class Envs:
     # off: the fine-grained K3 MoE dual-stream schedule was measured slower
     # than single-stream on gfx950 (~+15-25% TPOT) and has been removed.
     SGLANG_ROCM_USE_MULTI_STREAM = EnvBool(False)
-    # Fold the KDA [f_a|b] tail into the wide [q,k,v,g] projection so the whole
-    # in-proj is one GEMM (what ATOM does). The N=6288 shape has no tuned aiter
-    # config and the 6144 one does, but at decode the projection is bandwidth
-    # bound and the 144 extra output columns ride along nearly free, so dropping
-    # the second launch wins outright: measured on gfx950 at H=7168/TP8, one
-    # GEMM is 0.55-0.73x the split at M<=64 and 0.83-0.97x through M=256. Past
-    # that the untuned config costs more than the launch it saves, so the split
-    # stays. NVIDIA keeps the split at every M (cublas picks worse kernels for
-    # 6288 - see the fused_qkvg_proj comment).
-    SGLANG_ROCM_K3_FUSE_KDA_INPROJ = EnvBool(True)
-    SGLANG_ROCM_K3_FUSE_KDA_INPROJ_MAX_TOKENS = EnvInt(256)
-
-    # Run the KDA o_proj as a per-token per-channel FP8 GEMM (aiter
-    # gemm_a8w8_bpreshuffle) instead of bf16, quantizing the weight once after
-    # load. The gated output RMSNorm then emits (fp8, scale) directly, so the
-    # activation is written once instead of three times -- this is what ATOM's
-    # recipe does via `--online_quant_config ptpc_fp8`. It quantizes a layer the
-    # K3 checkpoint ships in bf16, so it was validated before being turned on:
-    # gsm8k n=400 scores 0.9850 with it and 0.9825 without (SEM 0.66pp), and it
-    # is worth 0.7-1.7% output throughput and 1.4-1.8% ITL at ISL 8192 /
-    # OSL 1024 / TP 8 across concurrency 2..32.
-    SGLANG_ROCM_K3_KDA_O_PROJ_FP8 = EnvBool(True)
-    # Selective K3 ptpc_fp8 for dense linears that compose with the model's
-    # packed KDA and MoE fusions. Explicit opt-in: this must not change RMSNorm
-    # dispatch or model memory for unrelated/default ROCm runs.
-    SGLANG_ROCM_K3_PTPC_FP8 = EnvBool(False)
-    # K3-specific packed MoE collective: all-reduce [latent|shared], RMSNorm
-    # only the latent row prefix. This is not the generic K2.5 residual fusion.
-    # Graph microbench on gfx950 TP8 (packed latent|shared H=3584/7168):
-    #   tokens=1: 1.08x vs split AR+RMSNorm; tokens=2: 1.02x; tokens>=8: <=0.98x.
-    # Keep MAX_TOKENS=2 so mid-batch decode stays on the faster split path.
-    SGLANG_ROCM_K3_AR_NORM = EnvBool(True)
-    SGLANG_ROCM_K3_AR_NORM_1STAGE_MAX_BYTES = EnvInt(512 * 1024)
-    SGLANG_ROCM_K3_AR_NORM_MAX_TOKENS = EnvInt(2)
+    # K3 ROCm decode wins (KDA in-proj fuse, KDA o_proj FP8, selective PTPC,
+    # packed AR+partial RMSNorm) are integrated by default in kimi_k3.py —
+    # no enable/disable env vars. Thresholds (fuse M<=256, AR-norm tokens<=2,
+    # 1-stage AR bytes<=512KiB) are constants next to those call sites.
     # AITER MoE sorting backend (FlyDSL). Read by aiter at runtime.
     AITER_USE_FLYDSL_MOE_SORTING = EnvBool(True)
     # Lossy 4-bit intermediate transform in aiter fused MoE (shape-gated in aiter).
