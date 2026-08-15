@@ -399,7 +399,7 @@ def _require_kimi_k3_cutedsl_dcp_support() -> None:
 
 
 def _kimi_k3_rocm_overrides(server_args: Any) -> dict:
-    """Kimi-K3 on ROCm without DCP: run aiter MLA decode on the Gluon kernel.
+    """Kimi-K3 on ROCm without DCP: run decode on aiter's Gluon MLA kernel.
 
     Kimi-K3 has 96 attention heads, so every tp size that shards them below 16
     leaves a local head count aiter's legacy MLA decode turns away -- 12 at tp8,
@@ -408,21 +408,37 @@ def _kimi_k3_rocm_overrides(server_args: Any) -> dict:
     same reason. Without this, ``--attention-backend aiter`` fails the head-count
     assertion in AiterAttnBackend before the first forward.
 
+    Aiter's absorb-prefill reducer has the same 12-head restriction and aborts
+    rather than returning an error. Keep prefill on Triton, whose latent KV
+    layout is compatible with the Gluon decode path.
+
     Only 'auto' is upgraded: an explicit --mla-runner-backend triton is a
     deliberate request for the legacy kernel and is left to fail on its own
     terms.
     """
-    _, decode_backend = attention_backends_of(server_args)
+    prefill_backend, decode_backend = attention_backends_of(server_args)
     if decode_backend not in ("aiter", None):
         return {}
-    if server_args.mla_runner_backend != "auto":
+    if server_args.mla_runner_backend == "triton":
         return {}
+    overrides = {}
+    if prefill_backend != "triton":
+        overrides.update(
+            prefill_attention_backend="triton",
+            decode_attention_backend="aiter",
+        )
+    if server_args.mla_runner_backend == "auto":
+        overrides["mla_runner_backend"] = "gluon"
     logger.info(
-        "Kimi-K3 on ROCm uses aiter's Gluon MLA kernel "
-        "(mla_runner_backend -> 'gluon'): the legacy aiter MLA decode does not "
-        "serve this model's local head count."
+        "Kimi-K3 on ROCm uses Triton MLA prefill and aiter's Gluon MLA decode "
+        "(prefill=%r -> 'triton', decode=%r -> 'aiter', "
+        "mla_runner_backend=%r -> 'gluon'): aiter's legacy prefill/decode "
+        "kernels do not serve this model's local head count.",
+        prefill_backend,
+        decode_backend,
+        server_args.mla_runner_backend,
     )
-    return {"mla_runner_backend": "gluon"}
+    return overrides
 
 
 @_register_for("KimiK3ForConditionalGeneration")
