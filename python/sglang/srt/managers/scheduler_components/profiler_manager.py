@@ -209,9 +209,13 @@ class SchedulerProfilerManager:
             schema.writeSchema(connection)
             connection.commit()
             del connection
-            # Child processes inherit RPDT_FILENAME; skipCreate so initializeFile
-            # does not try to recreate/remove the file we just wrote.
+            # rpdTracerControl.initializeFile() always does
+            #   os.environ["RPDT_FILENAME"] = cls.__filename
+            # so the class attribute must be synced before constructing, or the
+            # native tracer silently falls back to cwd/trace.rpd (and deadlocks
+            # under TP). setFilename() is a no-op-sync when the env is already set.
             os.environ["RPDT_FILENAME"] = self.rpd_db_path
+            rpdTracerControl.setFilename(self.rpd_db_path)
             rpdTracerControl.skipCreate()
             torch.distributed.barrier(self.dp_tp_cpu_group)
 

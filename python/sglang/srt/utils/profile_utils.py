@@ -427,7 +427,10 @@ class _ProfilerRPD(_ProfilerConcreteBase):
         schema.writeSchema(connection)
         connection.commit()
         del connection
+        # See profiler_manager.py: sync class __filename before construct so the
+        # native tracer does not fall back to cwd/trace.rpd.
         os.environ["RPDT_FILENAME"] = self.rpd_db_path
+        rpdTracerControl.setFilename(self.rpd_db_path)
         rpdTracerControl.skipCreate()
         torch.distributed.barrier(self.cpu_group)
 
