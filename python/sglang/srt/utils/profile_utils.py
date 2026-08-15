@@ -405,27 +405,30 @@ class _ProfilerRPD(_ProfilerConcreteBase):
     def start(self):
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
 
+        import sqlite3
+
+        from rocpd.schema import RocpdSchema
         from rpdTracerControl import rpdTracerControl
 
-        rpdTracerControl.skipCreate()
-
+        # Per-rank SQLite files avoid multi-TP lock contention on a shared
+        # trace.rpd (which previously deadlocked rpdflush across ranks).
+        self.rpd_db_path = os.path.join(
+            self.output_dir,
+            f"trace-TP-{self.ps.tp_rank}.rpd",
+        )
         self.rpd_profile_path = os.path.join(
             self.output_dir,
             "rpd-" + str(time.time()) + f"-TP-{self.ps.tp_rank}" + ".trace.json.gz",
         )
-
-        if self.ps.tp_rank == 0:
-            import sqlite3
-
-            from rocpd.schema import RocpdSchema
-
-            if os.path.exists("trace.rpd"):
-                os.unlink("trace.rpd")
-            schema = RocpdSchema()
-            connection = sqlite3.connect("trace.rpd")
-            schema.writeSchema(connection)
-            connection.commit()
-            del connection
+        if os.path.exists(self.rpd_db_path):
+            os.unlink(self.rpd_db_path)
+        schema = RocpdSchema()
+        connection = sqlite3.connect(self.rpd_db_path)
+        schema.writeSchema(connection)
+        connection.commit()
+        del connection
+        os.environ["RPDT_FILENAME"] = self.rpd_db_path
+        rpdTracerControl.skipCreate()
         torch.distributed.barrier(self.cpu_group)
 
         self.rpd_profiler = rpdTracerControl()
@@ -439,10 +442,12 @@ class _ProfilerRPD(_ProfilerConcreteBase):
         self.rpd_profiler.flush()
 
         torch.distributed.barrier(self.cpu_group)
-        if self.ps.tp_rank == 0:
+        try:
             from sglang.srt.utils.rpd_utils import rpd_to_chrome_trace
 
-            rpd_to_chrome_trace("trace.rpd", self.rpd_profile_path)
+            rpd_to_chrome_trace(self.rpd_db_path, self.rpd_profile_path)
+        except Exception as e:
+            logger.warning("RPD chrome-trace conversion failed: %s", e)
 
 
 def build_step_span_name(forward_batch: ForwardBatch) -> str:

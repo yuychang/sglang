@@ -187,27 +187,32 @@ class SchedulerProfilerManager:
         ]
 
         if "RPD" in activities:  # for ROCM
+            import sqlite3
+
+            from rocpd.schema import RocpdSchema
             from rpdTracerControl import rpdTracerControl
 
-            rpdTracerControl.skipCreate()
-
+            # Per-rank SQLite files avoid multi-TP lock contention on a shared
+            # trace.rpd (which previously deadlocked rpdflush across ranks).
+            self.rpd_db_path = os.path.join(
+                self.torch_profiler_output_dir,
+                f"trace-TP-{self.ps.tp_rank}.rpd",
+            )
             self.rpd_profile_path = os.path.join(
                 self.torch_profiler_output_dir,
                 "rpd-" + str(time.time()) + f"-TP-{self.ps.tp_rank}" + ".trace.json.gz",
             )
-
-            if self.ps.tp_rank == 0:
-                import sqlite3
-
-                from rocpd.schema import RocpdSchema
-
-                if os.path.exists("trace.rpd"):
-                    os.unlink("trace.rpd")
-                schema = RocpdSchema()
-                connection = sqlite3.connect("trace.rpd")
-                schema.writeSchema(connection)
-                connection.commit()
-                del connection
+            if os.path.exists(self.rpd_db_path):
+                os.unlink(self.rpd_db_path)
+            schema = RocpdSchema()
+            connection = sqlite3.connect(self.rpd_db_path)
+            schema.writeSchema(connection)
+            connection.commit()
+            del connection
+            # Child processes inherit RPDT_FILENAME; skipCreate so initializeFile
+            # does not try to recreate/remove the file we just wrote.
+            os.environ["RPDT_FILENAME"] = self.rpd_db_path
+            rpdTracerControl.skipCreate()
             torch.distributed.barrier(self.dp_tp_cpu_group)
 
             self.rpd_profiler = rpdTracerControl()
@@ -348,12 +353,19 @@ class SchedulerProfilerManager:
             self.rpd_profiler.flush()
 
             torch.distributed.barrier(self.dp_tp_cpu_group)
-            if self.ps.tp_rank == 0:
+            # Each rank owns its own RPD DB; convert independently.
+            try:
                 from sglang.srt.utils.rpd_utils import rpd_to_chrome_trace
 
-                rpd_to_chrome_trace("trace.rpd", self.rpd_profile_path)
+                rpd_to_chrome_trace(
+                    getattr(self, "rpd_db_path", "trace.rpd"),
+                    self.rpd_profile_path,
+                )
+            except Exception as e:
+                logger.warning("RPD chrome-trace conversion failed: %s", e)
             self.rpd_profiler = None
             self.rpd_profile_path = None
+            self.rpd_db_path = None
 
         if self.profiler_activities is not None and "MEM" in self.profiler_activities:
             memory_profile_path = os.path.join(
