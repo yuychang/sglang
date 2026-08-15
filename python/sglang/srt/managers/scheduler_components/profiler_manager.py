@@ -214,7 +214,14 @@ class SchedulerProfilerManager:
             # so the class attribute must be synced before constructing, or the
             # native tracer silently falls back to cwd/trace.rpd (and deadlocks
             # under TP). setFilename() is a no-op-sync when the env is already set.
+            #
+            # Clear any prior session env/class state so a long-lived server can
+            # start a second RPD profile into a fresh per-rank DB. The native
+            # Logger still pins its first filename for process life, so callers
+            # that need multiple independent captures should restart the server;
+            # this just keeps the Python wrapper from pointing at a stale path.
             os.environ["RPDT_FILENAME"] = self.rpd_db_path
+            rpdTracerControl._rpdTracerControl__filename = self.rpd_db_path  # noqa: SLF001
             rpdTracerControl.setFilename(self.rpd_db_path)
             rpdTracerControl.skipCreate()
             torch.distributed.barrier(self.dp_tp_cpu_group)
