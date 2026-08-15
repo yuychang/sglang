@@ -716,7 +716,10 @@ class Envs:
     SGLANG_ROCM_K3_PTPC_FP8 = EnvBool(False)
     # K3-specific packed MoE collective: all-reduce [latent|shared], RMSNorm
     # only the latent row prefix. This is not the generic K2.5 residual fusion.
-    SGLANG_ROCM_K3_AR_NORM = EnvBool(False)
+    # Graph microbench on gfx950 TP8 (packed latent|shared H=3584/7168):
+    #   tokens=1: 1.08x vs split AR+RMSNorm; tokens=2: 1.02x; tokens>=8: <=0.98x.
+    # Keep MAX_TOKENS=2 so mid-batch decode stays on the faster split path.
+    SGLANG_ROCM_K3_AR_NORM = EnvBool(True)
     SGLANG_ROCM_K3_AR_NORM_1STAGE_MAX_BYTES = EnvInt(512 * 1024)
     SGLANG_ROCM_K3_AR_NORM_MAX_TOKENS = EnvInt(2)
     # AITER MoE sorting backend (FlyDSL). Read by aiter at runtime.
