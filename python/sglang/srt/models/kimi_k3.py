@@ -470,10 +470,6 @@ class KimiK3MoE(nn.Module):
         # loading by _merge_front_weights().
         self._front_w: Optional[torch.Tensor] = None
         self._front_sizes: Optional[List[int]] = None
-        # Contiguous view of the merged front without the shared gate_up rows.
-        # The ATOM-aligned dual-stream path uses this for [gate | routed_down]
-        # on the main stream while the full shared MLP runs on alt_stream.
-        self._front_w_nogu: Optional[torch.Tensor] = None
         # True when _front_w merges only [gate, routed_expert_down_proj] (the EP
         # a2a pair) rather than the three-way fused-front weight.
         self._front_is_ep_pair = False
@@ -723,11 +719,6 @@ class KimiK3MoE(nn.Module):
             return
         self._front_w, self._front_sizes = _merge_weights_as_views(mods)
         self._front_is_ep_pair = len(mods) == 2
-        self._front_w_nogu = (
-            None
-            if self._front_is_ep_pair
-            else self._front_w[self._front_sizes[0] :]
-        )
         # Invalidate the cached properties.
         for prop in (
             "_eligible_for_fused_front",
