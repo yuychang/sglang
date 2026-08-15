@@ -408,9 +408,12 @@ def _kimi_k3_rocm_overrides(server_args: Any) -> dict:
     same reason. Without this, ``--attention-backend aiter`` fails the head-count
     assertion in AiterAttnBackend before the first forward.
 
-    Aiter's absorb-prefill reducer has the same 12-head restriction and aborts
-    rather than returning an error. Keep prefill on Triton, whose latent KV
-    layout is compatible with the Gluon decode path.
+    Aiter's *ASM* absorb-prefill reducer (aiter.mla.mla_prefill_fwd) has the same
+    12-head restriction and aborts rather than returning an error, so prefill
+    defaults to Triton, whose latent KV layout is compatible with the Gluon
+    decode path. aiter's *Triton* mla_prefill_fwd (the kernel the DCP path uses)
+    does serve 12 heads by masking the BLOCK_M=16 tile; the experimental
+    SGLANG_ROCM_K3_AITER_MLA_PREFILL flag routes non-DCP extend to it.
 
     Only 'auto' is upgraded: an explicit --mla-runner-backend triton is a
     deliberate request for the legacy kernel and is left to fail on its own
@@ -434,13 +437,20 @@ def _kimi_k3_rocm_overrides(server_args: Any) -> dict:
     # in the large-token prefill pipeline (not the attention kernel). The chunk
     # clamp therefore stays regardless of this flag.
     gluon_prefill = envs.SGLANG_ROCM_K3_GLUON_PREFILL.get()
-    if gluon_prefill:
+    aiter_mla_prefill = envs.SGLANG_ROCM_K3_AITER_MLA_PREFILL.get()
+    if gluon_prefill or aiter_mla_prefill:
+        # Both absorbed prefill paths (Gluon MTP and aiter Triton
+        # mla_prefill_fwd) live in the aiter backend, so route extend there.
         if prefill_backend not in ("aiter", None):
             overrides.update(
                 prefill_attention_backend="aiter",
                 decode_attention_backend="aiter",
             )
-        prefill_desc = "aiter's Gluon MLA MTP kernel"
+        prefill_desc = (
+            "aiter's Triton MLA absorb-prefill kernel"
+            if aiter_mla_prefill
+            else "aiter's Gluon MLA MTP kernel"
+        )
     else:
         if prefill_backend != "triton":
             overrides.update(

@@ -734,6 +734,21 @@ class Envs:
     # is elsewhere in the large-token prefill pipeline), so the chunk clamp
     # stays. Works for chunks up to ~5k.
     SGLANG_ROCM_K3_GLUON_PREFILL = EnvBool(False)
+    # K3 non-DCP MLA prefill (extend) on aiter's *Triton* MLA absorb-prefill
+    # kernel (aiter.ops.triton.attention.mla.mla_prefill_fwd) over the paged
+    # latent KV pool, instead of materializing MHA (kv_b_proj reconstruction +
+    # flash_attn_varlen) or the Triton extend kernel. The Triton mla_prefill_fwd
+    # tiles the 12 local heads into a BLOCK_M=16 tile and masks the tail
+    # (query_offset < num_query_heads), so it serves K3's 12 local heads at tp8
+    # with no head padding, and reads KV at the pool's native page_size (no
+    # block_size=1 slowdown of the ASM aiter.mla.mla_prefill_fwd). This is the
+    # same kernel the K3 DCP prefill path already uses. When enabled, K3 extend
+    # dispatches to the absorbed MLA path and the aiter backend runs the absorbed
+    # 576-dim latent query against the paged latent pool. Experimental / off by
+    # default. Like the Gluon prefill flag, it does NOT lift the ~6144
+    # single-batch prefill fault (root cause is a non-attention kernel), so the
+    # chunk clamp stays.
+    SGLANG_ROCM_K3_AITER_MLA_PREFILL = EnvBool(False)
     # AITER MoE sorting backend (FlyDSL). Read by aiter at runtime.
     AITER_USE_FLYDSL_MOE_SORTING = EnvBool(True)
     # Lossy 4-bit intermediate transform in aiter fused MoE (shape-gated in aiter).

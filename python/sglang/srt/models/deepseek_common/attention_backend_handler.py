@@ -26,6 +26,22 @@ def _use_gluon_mla_prefill() -> bool:
 
     return _is_hip and get_bool_env_var("SGLANG_ROCM_K3_GLUON_PREFILL", "False")
 
+
+def _use_aiter_mla_prefill() -> bool:
+    """K3 non-DCP MLA prefill on aiter's Triton mla_prefill_fwd (gfx950).
+
+    Gated the same way as AiterAttnBackend.use_aiter_mla_prefill so the model's
+    extend dispatch and the backend's extend kernel agree. Like the Gluon path
+    it runs extend in the absorbed 576-dim latent space, so extend must dispatch
+    to MLA rather than the materialized MHA path."""
+    from sglang.srt.utils import get_bool_env_var
+
+    return _is_hip and get_bool_env_var("SGLANG_ROCM_K3_AITER_MLA_PREFILL", "False")
+
+
+def _use_absorbed_mla_prefill() -> bool:
+    return _use_gluon_mla_prefill() or _use_aiter_mla_prefill()
+
 # ROCm runs dedicated MHA/MLA implementations (forward_mha_rocm.py /
 # forward_mla_rocm.py) so the shared CUDA paths carry no AMD branches. Backend
 # handlers keep returning the generic method; the platform swap happens here.
@@ -200,12 +216,13 @@ def handle_attention_aiter(attn, forward_batch):
     if is_in_tc_piecewise_cuda_graph() or is_in_breakable_cuda_graph():
         return AttnForwardMethod.MHA
     if forward_batch.forward_mode.is_extend_without_speculative():
-        # K3 Gluon MLA MTP prefill runs extend in the absorbed latent space
-        # (the Gluon kernel reads the 576-dim latent KV), so dispatch extend to
+        # K3 absorbed MLA prefill (Gluon MTP kernel or aiter Triton
+        # mla_prefill_fwd) runs extend in the absorbed 576-dim latent space
+        # (both kernels read the latent KV directly), so dispatch extend to
         # MLA rather than the materialized MHA path. The aiter backend's
-        # forward_extend then intercepts the absorbed extend with the Gluon MTP
-        # kernel (see _mla_prefill_fwd_gluon_mtp).
-        if _use_gluon_mla_prefill():
+        # forward_extend then intercepts the absorbed extend with the selected
+        # kernel (see _mla_prefill_fwd_gluon_mtp / _mla_prefill_fwd_aiter_triton).
+        if _use_absorbed_mla_prefill():
             return AttnForwardMethod.MLA
         return AttnForwardMethod.MHA
     else:
