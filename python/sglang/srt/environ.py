@@ -656,8 +656,14 @@ class Envs:
     #               merged front, queue routed pre-AR work first, then run the
     #               full shared MLP + shared AR on the side stream before the
     #               routed AR.
-    # MEASURED on gfx950 (MI355X, K3 TP8, Triton MLA): both variants LOSE to
-    # single-stream at decode — "ar" is ~+18-25% TPOT worse across C1/C8/C32.
+    # MEASURED on gfx950 (MI355X, K3 TP8, Triton MLA): all variants lose to
+    # single-stream at decode. Exact "atom" alignment measured:
+    #   C1:  16.09 -> 19.00 ms TPOT (+18.1%)
+    #   C8:  31.43 -> 35.97 ms TPOT (+14.4%)
+    #   C32: 40.23 -> 47.27 ms TPOT (+17.5%)
+    # It improves on the partial "ar" schedule (20.18/36.97/47.40 ms), proving
+    # the full shared MLP placement and routed-first submission matter, but not
+    # enough to cross single-stream.
     # Root cause: (1) ROCm charges a per-node tax to every main-stream kernel
     # while a second queue is live (scales with the layer's kernel count), and
     # (2) K3 already fuses the routed+shared reduce into ONE packed collective,
