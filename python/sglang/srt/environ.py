@@ -651,43 +651,10 @@ class Envs:
     USE_ROCM_AITER_ROPE_BACKEND = EnvStr("0")
     SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK = EnvInt(4096)
     # Enable dual-stream MoE (shared experts vs routed experts) on the
-    # ROCm/AITER path.
+    # ROCm/AITER path. Also builds the K3 alt-stream pool when set. Default
+    # off: the fine-grained K3 MoE dual-stream schedule was measured slower
+    # than single-stream on gfx950 (~+15-25% TPOT) and has been removed.
     SGLANG_ROCM_USE_MULTI_STREAM = EnvBool(False)
-    # Decode-only gate for the K3 ROCm dual-stream MoE overlap: the shared-expert
-    # branch is issued on the side stream to hide under the routed-expert branch
-    # only when the batch has <= this many tokens. At larger (prefill) batches the
-    # GEMMs already saturate the CUs, so the overlap only adds contention; there
-    # single-stream is kept. Mirrors ATOM's ATOM_DUAL_STREAM_MOE_TOKEN_THRESHOLD.
-    SGLANG_ROCM_K3_DUAL_STREAM_MOE_MAX_TOKENS = EnvInt(1024)
-    # Dual-stream overlap mode (only consulted when SGLANG_ROCM_USE_MULTI_STREAM
-    # is set; multi-stream is opt-in and OFF by default).
-    #   "ar"      — shared-expert branch AND its all-reduce ride the side stream
-    #               so the collective (comm) hides under the routed GEMMs, à la
-    #               ATOM's dual_stream_moe_forward. Splits the packed
-    #               [latent|shared] collective into two.
-    #   "compute" — packed single collective, overlap only the two compute
-    #               branches.
-    #   "atom"    — exact ATOM K3 schedule: split shared gate_up out of the
-    #               merged front, queue routed pre-AR work first, then run the
-    #               full shared MLP + shared AR on the side stream before the
-    #               routed AR.
-    # MEASURED on gfx950 (MI355X, K3 TP8, Triton MLA): all variants lose to
-    # single-stream at decode. Exact "atom" alignment measured:
-    #   C1:  16.09 -> 19.00 ms TPOT (+18.1%)
-    #   C8:  31.43 -> 35.97 ms TPOT (+14.4%)
-    #   C32: 40.23 -> 47.27 ms TPOT (+17.5%)
-    # It improves on the partial "ar" schedule (20.18/36.97/47.40 ms), proving
-    # the full shared MLP placement and routed-first submission matter, but not
-    # enough to cross single-stream.
-    # Root cause: (1) ROCm charges a per-node tax to every main-stream kernel
-    # while a second queue is live (scales with the layer's kernel count), and
-    # (2) K3 already fuses the routed+shared reduce into ONE packed collective,
-    # so there is no exposed comm to hide — splitting it just re-adds the AR the
-    # overlap was meant to hide. A real multi-stream win here needs coarse-grained
-    # two-batch overlap (enable_two_batch_overlap) with EP a2a comm to hide, not
-    # this fine-grained MoE dual-stream. Kept behind the flag for experimentation
-    # on other configs/hardware.
-    SGLANG_ROCM_K3_DUAL_STREAM_MOE_MODE = EnvStr("atom")
     # Fold the KDA [f_a|b] tail into the wide [q,k,v,g] projection so the whole
     # in-proj is one GEMM (what ATOM does). The N=6288 shape has no tuned aiter
     # config and the 6144 one does, but at decode the projection is bandwidth

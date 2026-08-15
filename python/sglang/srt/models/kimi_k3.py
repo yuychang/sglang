@@ -420,7 +420,6 @@ def _add3(
 # One-shot log guard: proves the merged front is live (see _ep_front).
 _EP_FRONT_LOGGED = False
 _ROCM_PARTIAL_AR_NORM_LOGGED = False
-_ROCM_DUAL_STREAM_MOE_LOGGED = False
 
 
 def _o_proj_takes_output(o_proj: RowParallelLinear) -> bool:
@@ -819,143 +818,6 @@ class KimiK3MoE(nn.Module):
             and get_moe_a2a_backend().is_none()
             and self.shared_experts.down_proj.weight.dtype
             in (torch.bfloat16, torch.float16)
-        )
-
-    def _log_dual_stream_once(self, detail: str) -> None:
-        global _ROCM_DUAL_STREAM_MOE_LOGGED
-        if not _ROCM_DUAL_STREAM_MOE_LOGGED:
-            _ROCM_DUAL_STREAM_MOE_LOGGED = True
-            logger.info(
-                "K3 ROCm dual-stream MoE active (%s; <=%d tokens)",
-                detail,
-                envs.SGLANG_ROCM_K3_DUAL_STREAM_MOE_MAX_TOKENS.get(),
-            )
-
-    def _forward_fused_dual_stream_ar(
-        self,
-        hidden_states: torch.Tensor,
-        gate_up: torch.Tensor,
-        router_logits: torch.Tensor,
-        routed_input: torch.Tensor,
-        latent: torch.Tensor,
-        shared_output: torch.Tensor,
-        prefix_sum: Optional[torch.Tensor],
-    ) -> torch.Tensor:
-        """ATOM-style comm/compute overlap for the ROCm fused-front path.
-
-        The shared-expert branch AND its all-reduce run on the side stream so
-        the collective hides under the routed-expert GEMMs on the main stream.
-        The two collectives stay ordered on the single TP communicator: the
-        shared reduce (side stream) completes before the join, then the routed
-        reduce runs on the main stream.
-
-        MEASURED: this loses to single-stream at K3 decode on gfx950 (~+18-25%
-        TPOT at C1/C8/C32). Splitting the packed [latent|shared] collective
-        re-adds an all-reduce, and the live side queue taxes every main-stream
-        node. Kept behind SGLANG_ROCM_USE_MULTI_STREAM for experimentation.
-
-        Splits the packed [latent|shared] collective into two — one extra
-        launch — which is why it is gated to decode sizes where the routed GEMMs
-        are long enough to hide the shared reduce under.
-        """
-        self._log_dual_stream_once("shared compute+AR on alt overlaps routed")
-        current_stream = torch.cuda.current_stream()
-        self.alt_stream.wait_stream(current_stream)
-        with torch.cuda.stream(self.alt_stream):
-            self._forward_shared(gate_up, shared_output)
-            if self.tp_size > 1 and not self._shared_experts_tp1:
-                shared_output = tensor_model_parallel_all_reduce(shared_output)
-        # Routed compute on the main stream, concurrent with the shared reduce.
-        self._forward_routed(hidden_states, router_logits, routed_input, latent)
-        current_stream.wait_stream(self.alt_stream)
-        shared_output.record_stream(current_stream)
-        # Routed reduce after the join so it never races the shared reduce on
-        # the shared communicator.
-        if self._routed_needs_reduce:
-            latent = tensor_model_parallel_all_reduce(latent)
-        latent = self._latent_norm(latent)
-        out, _ = self.routed_expert_up_proj(latent)
-        return _add3(out, shared_output, prefix_sum, prefetch_bc=True)
-
-    def _forward_fused_dual_stream_atom(
-        self,
-        hidden_states: torch.Tensor,
-        prefix_sum: Optional[torch.Tensor],
-    ) -> torch.Tensor:
-        """Match ATOM K3's latent-MoE dual-stream schedule exactly.
-
-        Main stream: [router gate | routed down] -> routed experts
-        Alt stream:  shared gate_up -> activation -> shared down -> shared AR
-        Join:        routed AR -> latent norm -> routed up -> add shared
-
-        Unlike ``_forward_fused_dual_stream_ar``, this intentionally splits the
-        shared gate_up rows out of K3's merged front and queues all routed pre-AR
-        work before submitting the full shared MLP to the alternate stream.
-        """
-        assert self._front_w_nogu is not None
-        assert self._front_sizes is not None
-        shared = self.shared_experts
-        assert shared is not None
-
-        self._log_dual_stream_once(
-            "ATOM-aligned full shared MLP+AR under routed pre-AR"
-        )
-        current = torch.cuda.current_stream()
-        alt = self.alt_stream
-        alt.wait_stream(current)
-
-        # ATOM queues routed pre-AR work first on the main stream.
-        routed_front = _k3_bf16_gemm(hidden_states, self._front_w_nogu)
-        router_logits, routed_input = torch.split(
-            routed_front, self._front_sizes[1:], dim=-1
-        )
-        if hidden_states.shape[0] > 1 and _is_hip and not _aiter_k3_opt:
-            router_logits = router_logits.contiguous()
-        if self._moe_front_needs_dense_bf16:
-            routed_input = routed_input.to(hidden_states.dtype).contiguous()
-        latent = hidden_states.new_empty(
-            hidden_states.shape[0], self.moe_hidden_size
-        )
-        self._forward_routed(
-            hidden_states, router_logits, routed_input, latent
-        )
-
-        # Then submit ATOM's full shared branch to the side stream.
-        with torch.cuda.stream(alt):
-            gate_up = _k3_bf16_gemm(
-                hidden_states, shared.gate_up_proj.weight
-            )
-            shared_output = hidden_states.new_empty(
-                hidden_states.shape[0], hidden_states.shape[1]
-            )
-            self._forward_shared(gate_up, shared_output)
-            if self.tp_size > 1 and not self._shared_experts_tp1:
-                shared_output = tensor_model_parallel_all_reduce(shared_output)
-
-        # Preserve shared AR -> routed AR ordering on the TP communicator.
-        current.wait_stream(alt)
-        shared_output.record_stream(current)
-        if self._routed_needs_reduce:
-            latent = tensor_model_parallel_all_reduce(latent)
-        latent = self._latent_norm(latent)
-        out, _ = self.routed_expert_up_proj(latent)
-        return _add3(out, shared_output, prefix_sum, prefetch_bc=True)
-
-    def _use_rocm_dual_stream_moe(self, num_tokens: int) -> bool:
-        """Decode-only shared-vs-routed overlap on the ROCm fused-front path.
-
-        Mirrors ATOM's dual_stream_moe_forward: the shared-expert branch rides
-        the persistent alt_stream under the routed-expert branch. Gated to
-        decode sizes so prefill (already CU-saturated) stays single-stream.
-        Requires SGLANG_ROCM_USE_MULTI_STREAM so the model builds the stream
-        pool; k3_ar_fusion's own dual-stream site stays exclusive (handled by
-        the `if k3_ar_fusion.enabled()` branch above this call).
-        """
-        return (
-            _is_hip
-            and self.alt_stream is not None
-            and self.shared_experts is not None
-            and 0 < num_tokens <= envs.SGLANG_ROCM_K3_DUAL_STREAM_MOE_MAX_TOKENS.get()
         )
 
     @cached_property
@@ -1465,16 +1327,6 @@ class KimiK3MoE(nn.Module):
             )
 
         num_tokens, hidden_size = hidden_states.shape
-        if (
-            self._use_rocm_dual_stream_moe(num_tokens)
-            and envs.SGLANG_ROCM_K3_DUAL_STREAM_MOE_MODE.get() == "atom"
-            and not k3_ar_fusion.enabled()
-            and self._front_w_nogu is not None
-            and not self._front_fp32
-        ):
-            return self._forward_fused_dual_stream_atom(
-                hidden_states, prefix_sum
-            )
         preroute = None
         if (
             num_tokens <= 2
@@ -1604,43 +1456,10 @@ class KimiK3MoE(nn.Module):
                     prefix_sum,
                 )
         else:  # single collective over the flat [latent | shared] pair
-            # ROCm dual-stream (ATOM pattern), opt-in via
-            # SGLANG_ROCM_USE_MULTI_STREAM. Two variants, see
-            # SGLANG_ROCM_K3_DUAL_STREAM_MOE_MODE:
-            #   "ar"      — shared compute + its all-reduce ride the side stream
-            #               so the collective hides under the routed GEMMs.
-            #   "compute" — packed single collective, overlap only the two
-            #               compute branches.
-            # NOTE: both measured slower than single-stream at K3 decode on
-            # gfx950 (the packed collective already minimizes exposed comm, and
-            # a live second queue taxes every main-stream node). Retained behind
-            # the flag for experimentation; see environ.py for the measurements.
-            if self._use_rocm_dual_stream_moe(num_tokens) and not use_latent_tail:
-                if envs.SGLANG_ROCM_K3_DUAL_STREAM_MOE_MODE.get() == "ar":
-                    return self._forward_fused_dual_stream_ar(
-                        hidden_states,
-                        gate_up,
-                        router_logits,
-                        routed_input,
-                        latent,
-                        shared_output,
-                        prefix_sum,
-                    )
-                self._log_dual_stream_once("shared compute on alt under routed")
-                current_stream = torch.cuda.current_stream()
-                self.alt_stream.wait_stream(current_stream)
-                with torch.cuda.stream(self.alt_stream):
-                    self._forward_shared(gate_up, shared_output)
-                self._forward_routed(
-                    hidden_states, router_logits, routed_input, latent
-                )
-                current_stream.wait_stream(self.alt_stream)
-                shared_output.record_stream(current_stream)
-            else:
-                self._forward_shared(gate_up, shared_output)
-                self._forward_routed(
-                    hidden_states, router_logits, routed_input, latent
-                )
+            self._forward_shared(gate_up, shared_output)
+            self._forward_routed(
+                hidden_states, router_logits, routed_input, latent
+            )
             if self.fuse_ar_norm and k3_ar_fusion.enabled() and not use_latent_tail:
                 fused_norm = True
                 k3_ar_fusion.all_reduce_norm(
