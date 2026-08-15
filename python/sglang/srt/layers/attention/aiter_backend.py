@@ -304,6 +304,15 @@ class AiterAttnBackend(AttentionBackend):
 
         self.use_mla = model_runner.model_config.attention_arch == AttentionArch.MLA
         self.use_aiter_gluon_mla = model_runner.server_args.use_aiter_gluon_mla()
+        # K3 non-DCP MLA prefill on the Gluon MLA MTP kernel instead of Triton
+        # extend (avoids the gfx950 z-grid >= 96 fault at max_extend_len >= ~6144
+        # for Lq=576 / 12 heads). Only meaningful when the Gluon MLA decode path
+        # is already selected, since it reuses that kernel's head tiling.
+        self.use_gluon_mla_prefill = (
+            self.use_mla
+            and self.use_aiter_gluon_mla
+            and get_bool_env_var("SGLANG_ROCM_K3_GLUON_PREFILL", "False")
+        )
 
         # Get v_head_dim based on model type
         if self.use_mla:
@@ -1325,6 +1334,75 @@ class AiterAttnBackend(AttentionBackend):
             return_lse=False,
         )
         return out
+
+    def _mla_prefill_fwd_gluon_mtp(self, q, layer, forward_batch):
+        """Non-DCP MLA prefill (extend) on aiter's Gluon MLA kernel, MTP mode.
+
+        A drop-in for the Triton extend kernel that faults on gfx950 when a
+        single batch carries ``max_extend_len >= ~6144`` (BLOCK_M=64 -> z-grid
+        >= 96 for Lq=576 / 12 heads / fp8 KV). ``mla_gluon`` tiles heads into
+        blocks of 16 (so it serves K3's 12 local heads at tp8) and carries the
+        query position on a grid axis, so there is no z-grid cap and one compiled
+        kernel serves any extend length.
+
+        MTP masking is ``q_pos attends KV[0, seq_len - qlen + q_pos]``, exactly
+        the extend window: ``seq_len`` is the request's full (prefix + extend)
+        sequence and ``qlen`` its extend count. The new tokens are already in the
+        pool (``save_kv_cache`` ran before this call), so the full per-request KV
+        is ``req_to_token[req_idx, :seq_len]``.
+
+        ``mla_gluon`` MTP requires every request in a launch to share one qlen, so
+        ragged prefill batches are dispatched one request at a time (bs=1). A
+        prefill batch holds few requests, so the per-request launch cost is
+        negligible next to the O(qlen * seq_len) attention it replaces.
+        """
+        from aiter.ops.triton.gluon.mla_gluon import mla_gluon
+
+        num_heads = layer.tp_q_head_num
+        kv_lora_rank = layer.v_head_dim
+        qk_head_dim = layer.qk_head_dim
+
+        kv_c = self.token_to_kv_pool.get_key_buffer(layer.layer_id).view(
+            -1, qk_head_dim
+        )
+        q3 = q.reshape(-1, num_heads, qk_head_dim)
+        out = q.new_empty((q3.shape[0], num_heads, kv_lora_rank), dtype=self.input_dtype)
+
+        extend_lens = forward_batch.extend_seq_lens_cpu
+        req_pool_indices = forward_batch.req_pool_indices
+        seq_lens = forward_batch.seq_lens
+
+        q_start = 0
+        for i, ext_len in enumerate(extend_lens):
+            seq_len = int(seq_lens[i].item())
+            req_idx = int(req_pool_indices[i].item())
+            # Full per-request KV (prefix + the extend tokens just written).
+            kv_indices = self.req_to_token[req_idx, :seq_len].to(torch.int32)
+            kv_indptr = torch.tensor(
+                [0, seq_len], device=q.device, dtype=torch.int32
+            )
+
+            q4 = q3[q_start : q_start + ext_len].reshape(
+                1, ext_len, num_heads, qk_head_dim
+            )
+            o4 = out[q_start : q_start + ext_len].reshape(
+                1, ext_len, num_heads, kv_lora_rank
+            )
+            mla_gluon(
+                q4[..., :kv_lora_rank],
+                q4[..., kv_lora_rank:],
+                kv_c,
+                o4,
+                kv_indices,
+                kv_indptr,
+                layer.scaling,
+                use_2d_view=False,
+                min_kv_seq_len=1,
+                return_lse=False,
+            )
+            q_start += ext_len
+
+        return out.view(-1, num_heads * kv_lora_rank)
 
     def _mla_prefill_fwd_dcp_triton(self, q, layer, k_descale, forward_batch):
         """DCP prefill (extend) via aiter's MLA absorb-prefill kernel over
@@ -2723,6 +2801,8 @@ class AiterAttnBackend(AttentionBackend):
                 and not forward_batch.forward_mode.is_target_verify()
                 and not forward_batch.forward_mode.is_draft_extend_v2()
             ):
+                if self.use_gluon_mla_prefill:
+                    return self._mla_prefill_fwd_gluon_mtp(q, layer, forward_batch)
                 extend_no_prefix = not any(forward_batch.extend_prefix_lens_cpu)
                 if kv_indices.shape[0] == 0 or extend_no_prefix:
                     if _use_fp8_prefill_attn:
