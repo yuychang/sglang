@@ -222,13 +222,15 @@ def _merge_weights_as_views(
 
 
 def _k3_ptpc_fp8_enabled() -> bool:
-    """Selective K3 ptpc_fp8 for dense linears that compose with KDA/MoE fusions."""
-    return _is_hip and _use_aiter
+    """Selective K3 ptpc_fp8 (opt-in; default off — not a default serving win)."""
+    return _is_hip and _use_aiter and envs.SGLANG_ROCM_K3_PTPC_FP8.get()
 
 
 def _k3_o_proj_fp8_enabled() -> bool:
-    """KDA o_proj as per-token per-channel FP8 GEMM (aiter a8w8_bpreshuffle)."""
-    return _is_hip and _use_aiter
+    """KDA o_proj FP8 (opt-in; default off — mixed on exact FP8-KV ladder)."""
+    return _k3_ptpc_fp8_enabled() or (
+        _use_aiter and envs.SGLANG_ROCM_K3_KDA_O_PROJ_FP8.get()
+    )
 
 
 def _k3_fused_norm_fp8_enabled() -> bool:

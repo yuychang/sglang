@@ -655,10 +655,16 @@ class Envs:
     # off: the fine-grained K3 MoE dual-stream schedule was measured slower
     # than single-stream on gfx950 (~+15-25% TPOT) and has been removed.
     SGLANG_ROCM_USE_MULTI_STREAM = EnvBool(False)
-    # K3 ROCm decode wins (KDA in-proj fuse, KDA o_proj FP8, selective PTPC,
-    # packed AR+partial RMSNorm) are integrated by default in kimi_k3.py —
-    # no enable/disable env vars. Thresholds (fuse M<=256, AR-norm tokens<=2,
-    # 1-stage AR bytes<=512KiB) are constants next to those call sites.
+    # K3 ROCm decode wins integrated by default in kimi_k3.py (no enable flag):
+    #   KDA in-proj fuse (M<=256), packed AR+partial RMSNorm (tokens<=2),
+    #   AITER K3 mxfp4 align-128. Thresholds are constants next to call sites.
+    #
+    # Opt-in only (exact FP8-KV ladder 2026-08-14: ~0% / mixed serving gain):
+    # Run the KDA o_proj as per-token per-channel FP8. Default OFF.
+    SGLANG_ROCM_K3_KDA_O_PROJ_FP8 = EnvBool(False)
+    # Selective PTPC FP8 for dense linears. Correct in safe scope but not a
+    # meaningful default serving win on MI355X. Default OFF.
+    SGLANG_ROCM_K3_PTPC_FP8 = EnvBool(False)
     # AITER MoE sorting backend (FlyDSL). Read by aiter at runtime.
     AITER_USE_FLYDSL_MOE_SORTING = EnvBool(True)
     # Lossy 4-bit intermediate transform in aiter fused MoE (shape-gated in aiter).
