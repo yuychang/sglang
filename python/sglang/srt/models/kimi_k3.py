@@ -2103,6 +2103,21 @@ class KimiK3DeltaAttention(nn.Module):
                         dim=-1,
                     )
                     return mixed_qkv, beta, f_a, g_proj_states
+            if getattr(self._qkvgbfa_layer, "weight_scale", None) is not None:
+                # PTPC quantizes the merged in-proj and then drops the BF16
+                # views (_bfa_w / fused_qkvg_proj.weight). Always use the
+                # fused FP8 GEMM; the split path cannot consume a tuple.
+                fused_states = _k3_dense_linear(
+                    self._qkvgbfa_layer, hidden_states
+                )
+                qkv, g_proj_states, f_a, beta, _pad = torch.split(
+                    fused_states, self._qkvgbfa_sizes, dim=-1
+                )
+                f_a = f_a.contiguous()
+                forget_gate = (
+                    f_a if defer_f_b else _k3_dense_linear(self.f_b_proj, f_a)
+                )
+                return qkv, beta, forget_gate, g_proj_states
             if self._bfa_w is not None:
                 w = self._bfa_w
                 n_fa, n_b = self._bfa_fa_size, self._bfa_b_size
