@@ -2256,11 +2256,15 @@ class KimiK3DeltaAttention(nn.Module):
                     rmsnorm_gated_fp8_per_token,
                 )
 
-                x = core_attn_out.squeeze(0)
-                gate = norm_gate.squeeze(0)
-                if x.dim() != 3:
+                x = core_attn_out
+                if x.dim() == 4:
+                    x = x.reshape(x.shape[-3], x.shape[-2], x.shape[-1])
+                elif x.dim() == 2:
                     x = x.unflatten(-1, (-1, self.head_dim))
-                if gate.dim() != 3:
+                gate = g_proj_states
+                if gate.dim() == 1:
+                    gate = gate.unsqueeze(0)
+                if gate.dim() == 2:
                     gate = gate.unflatten(-1, (-1, self.head_dim))
                 core_attn_out = rmsnorm_gated_fp8_per_token(
                     x,
