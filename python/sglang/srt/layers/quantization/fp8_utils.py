@@ -1970,6 +1970,8 @@ def apply_fp8_ptpc_linear(
     if isinstance(input, tuple):
         q_input, x_scale = input
         q_input = q_input.view(-1, q_input.shape[-1])
+        if not q_input.is_contiguous():
+            q_input = q_input.contiguous()
         output_shape = [*q_input.shape[:-1], weight.shape[0]]
         output = aiter.gemm_a8w8_bpreshuffle(
             q_input, weight, x_scale, weight_scale, None, torch.bfloat16
@@ -1980,6 +1982,8 @@ def apply_fp8_ptpc_linear(
 
     # View input as 2D matrix for fp8 methods
     input_2d = input.view(-1, input.shape[-1])
+    if not input_2d.is_contiguous():
+        input_2d = input_2d.contiguous()
 
     # weight is transposed (K, N)
     output_shape = [*input.shape[:-1], weight.shape[1]]

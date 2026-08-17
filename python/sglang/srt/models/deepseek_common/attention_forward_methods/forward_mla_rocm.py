@@ -66,6 +66,8 @@ from sglang.srt.utils import BumpAllocator
 
 logger = logging.getLogger(__name__)
 _SGLANG_EXPERIMENTAL_LORA_OPTI = envs.SGLANG_EXPERIMENTAL_LORA_OPTI.get()
+_aiter_fused_qk_rmsnorm_unified = None
+_AiterQuantType = None
 
 if TYPE_CHECKING:
     from sglang.srt.models.deepseek_v2 import DeepseekV2AttentionMLA
@@ -77,6 +79,8 @@ if _use_aiter:
     # with a different (in-place, kwarg-only, no-return) signature. Probe for the
     # new symbol first so SGLang works with both pre- and post-#2958 aiter without
     # requiring the docker pin to be bumped atomically.
+    _aiter_fused_qk_rmsnorm_unified = None
+    _AiterQuantType = None
     try:
         from aiter.ops.enum import QuantType as _AiterQuantType
         from aiter.ops.fused_qk_rmsnorm_group_quant import (
@@ -224,7 +228,10 @@ def rocm_absorb_v_bmm(
         # _bmm_buf is already (batch, heads, dim) contiguous
         if attn.o_proj.weight.dtype == torch.uint8:
             attn_bmm_output = fused_flatten_mxfp4_quant(_bmm_buf)
-        elif attn.o_proj.weight.dtype == torch.float8_e4m3fn:
+        elif (
+            attn.o_proj.weight.dtype == torch.float8_e4m3fn
+            and not getattr(attn.o_proj, "_k3_ptpc_per_token", False)
+        ):
             attn_bmm_output = fused_flatten_fp8_group_quant(
                 _bmm_buf,
                 group_size=128,
@@ -240,7 +247,10 @@ def rocm_absorb_v_bmm(
     elif attn.o_proj.weight.dtype == torch.uint8:
         attn_bmm_output = attn_bmm_output.transpose(0, 1)
         attn_bmm_output = fused_flatten_mxfp4_quant(attn_bmm_output)
-    elif attn.o_proj.weight.dtype == torch.float8_e4m3fn:
+    elif (
+        attn.o_proj.weight.dtype == torch.float8_e4m3fn
+        and not getattr(attn.o_proj, "_k3_ptpc_per_token", False)
+    ):
         attn_bmm_output = attn_bmm_output.transpose(0, 1)
         attn_bmm_output = fused_flatten_fp8_group_quant(
             attn_bmm_output,
@@ -335,7 +345,59 @@ class DeepseekMLARocmForwardMixin:
                     self.kv_a_layernorm.weight,
                     self.kv_a_layernorm.variance_epsilon,
                 )
-            elif _use_aiter_gfx95 and self.q_b_proj.weight.dtype == torch.float8_e4m3fn:
+            elif getattr(self.q_b_proj, "_k3_ptpc_per_token", False):
+                # ATOM: one fused_qk_rmsnorm does q_a RMSNorm + per-token FP8
+                # quant and kv_a RMSNorm. Fall back to two kernels if this
+                # aiter build lacks the unified per-token entry point.
+                if (
+                    _use_aiter
+                    and _aiter_fused_qk_rmsnorm_unified is not None
+                    and _AiterQuantType is not None
+                ):
+                    q_out = torch.empty(
+                        q.shape,
+                        dtype=self.q_b_proj.weight.dtype,
+                        device=q.device,
+                    )
+                    q_scale = torch.empty(
+                        (q.shape[0], 1), dtype=torch.float32, device=q.device
+                    )
+                    k_out = torch.empty_like(k_nope)
+                    if q.stride(-1) != 1:
+                        q = q.contiguous()
+                    if k_nope.stride(-1) != 1:
+                        k_nope = k_nope.contiguous()
+                    _aiter_fused_qk_rmsnorm_unified(
+                        q_out_quantized=q_out,
+                        q_out_scale=q_scale,
+                        q=q,
+                        q_weight=self.q_a_layernorm.weight,
+                        q_epsilon=self.q_a_layernorm.variance_epsilon,
+                        k_out=k_out,
+                        k=k_nope,
+                        k_weight=self.kv_a_layernorm.weight,
+                        k_epsilon=self.kv_a_layernorm.variance_epsilon,
+                        quant_type=_AiterQuantType.per_Token,
+                    )
+                    q = (q_out, q_scale)
+                    k_nope = k_out
+                else:
+                    from sglang.kernels.ops.kimi_k3.rmsnorm_fp8_quant import (
+                        rmsnorm_fp8_per_token,
+                    )
+
+                    q = rmsnorm_fp8_per_token(
+                        q,
+                        self.q_a_layernorm.weight,
+                        self.q_a_layernorm.variance_epsilon,
+                        quant_dtype=self.q_b_proj.weight.dtype,
+                    )
+                    k_nope = self.kv_a_layernorm(k_nope)
+            elif (
+                _use_aiter_gfx95
+                and self.q_b_proj.weight.dtype == torch.float8_e4m3fn
+                and not getattr(self.q_b_proj, "_k3_ptpc_per_token", False)
+            ):
                 if self.use_dsa:
                     q_quanted, q_lora, k_nope, _ = fused_rms_fp8_group_quant(
                         q,

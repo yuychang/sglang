@@ -646,6 +646,12 @@ class Envs:
     # NVIDIA keeps the split at every M (see the fused_qkvg_proj comment).
     SGLANG_ROCM_K3_FUSE_KDA_INPROJ = EnvBool(True)
     SGLANG_ROCM_K3_FUSE_KDA_INPROJ_MAX_TOKENS = EnvInt(256)
+    # ATOM-aligned online PTPC FP8 for K3 dense linears. Default off so the
+    # BF16 recipe stays the controlled baseline; set to 1 to match ATOM's
+    # ``global_quant_config=ptpc_fp8`` coverage (MLA + KDA inproj/f_b/o_proj
+    # + dense MLP + shared experts).
+    SGLANG_ROCM_K3_PTPC_FP8 = EnvBool(False)
+    SGLANG_ROCM_K3_KDA_O_PROJ_FP8 = EnvBool(False)
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("tilelang")
 
     # MPS (Apple Silicon)

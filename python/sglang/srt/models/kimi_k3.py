@@ -214,6 +214,107 @@ def _merge_weights_as_views(
     return merged, sizes
 
 
+def _k3_ptpc_fp8_enabled() -> bool:
+    return _is_hip and _use_aiter and envs.SGLANG_ROCM_K3_PTPC_FP8.get()
+
+
+def _k3_o_proj_fp8_enabled() -> bool:
+    return _k3_ptpc_fp8_enabled() or (
+        _use_aiter and envs.SGLANG_ROCM_K3_KDA_O_PROJ_FP8.get()
+    )
+
+
+def _k3_dense_linear(module, x):
+    """Dense linear that respects online ptpc_fp8 weights."""
+    if getattr(module, "weight_scale", None) is not None:
+        if not isinstance(x, tuple) and not x.is_contiguous():
+            x = x.contiguous()
+        return module.quant_method.apply(module, x)
+    if isinstance(x, tuple):
+        raise TypeError(
+            "pre-quantized (fp8, scale) input requires PTPC weights on "
+            f"{type(module).__name__}"
+        )
+    if not callable(module):
+        return torch.nn.functional.linear(x, module.weight)
+    out = module(x)
+    return out[0] if isinstance(out, tuple) else out
+
+
+def _k3_apply_input_norm(norm, hidden_states, residual=None):
+    if not _k3_ptpc_fp8_enabled():
+        if residual is None:
+            return norm(hidden_states), None
+        return norm(hidden_states, residual)
+    from sglang.kernels.ops.kimi_k3.rmsnorm_fp8_quant import rmsnorm_fp8_per_token
+
+    if residual is None:
+        return (
+            rmsnorm_fp8_per_token(hidden_states, norm.weight, norm.variance_epsilon),
+            None,
+        )
+    return rmsnorm_fp8_per_token(
+        hidden_states, norm.weight, norm.variance_epsilon, residual=residual
+    )
+
+
+def _k3_apply_post_attn_norm(norm, hidden_states, residual, fuse_quant: bool):
+    if not fuse_quant:
+        return norm(hidden_states, residual)
+    from sglang.kernels.ops.kimi_k3.rmsnorm_fp8_quant import rmsnorm_fp8_per_token
+
+    return rmsnorm_fp8_per_token(
+        hidden_states, norm.weight, norm.variance_epsilon, residual=residual
+    )
+
+
+def _k3_hidden_rows(hidden_states) -> int:
+    tensor = hidden_states[0] if isinstance(hidden_states, tuple) else hidden_states
+    return tensor.shape[0]
+
+
+def _k3_slice_hidden(hidden_states, num_real):
+    if isinstance(hidden_states, tuple):
+        x, scale = hidden_states
+        return (x[:num_real], scale[:num_real])
+    return hidden_states[:num_real]
+
+
+def _k3_wrap_rmsnorm_fp8(norm) -> None:
+    """Make ``norm.forward`` emit a PTPC ``(fp8, scale)`` pair.
+
+    ATOM folds this into RMSNorm when the consumer is PTPC. SGLang's AttnRes
+    kernel still writes BF16 from ``out_norm.weight``; wrapping ``forward``
+    covers the nvb==0 / standard-residual call sites that actually invoke it.
+    """
+    if getattr(norm, "_k3_ptpc_fused_quant", False):
+        return
+    from sglang.kernels.ops.kimi_k3.rmsnorm_fp8_quant import rmsnorm_fp8_per_token
+
+    eps = float(getattr(norm, "variance_epsilon", getattr(norm, "eps", 1e-6)))
+
+    def _forward(hidden_states, residual=None, **kwargs):
+        if residual is None:
+            return rmsnorm_fp8_per_token(hidden_states, norm.weight, eps)
+        return rmsnorm_fp8_per_token(
+            hidden_states, norm.weight, eps, residual=residual
+        )
+
+    norm.forward = _forward
+    norm._k3_ptpc_fused_quant = True
+
+
+def _k3_install_fused_rmsnorm_quant(model) -> None:
+    layers = getattr(getattr(model, "model", model), "layers", [])
+    for layer in layers:
+        if hasattr(layer, "input_layernorm"):
+            _k3_wrap_rmsnorm_fp8(layer.input_layernorm)
+        if hasattr(layer, "post_attention_layernorm") and not getattr(
+            layer, "_is_moe_layer", True
+        ):
+            _k3_wrap_rmsnorm_fp8(layer.post_attention_layernorm)
+
+
 # DP attention helpers.
 #
 # K3 cannot use LayerCommunicator: the attn-res aggregation kernels replace
@@ -362,11 +463,21 @@ def _o_proj_takes_output(o_proj: RowParallelLinear) -> bool:
     return getattr(o_proj.quant_method, "apply_into", None) is not None
 
 
-def _k3_symm_o_proj_out(o_proj: RowParallelLinear, x: torch.Tensor) -> torch.Tensor:
+def _k3_symm_o_proj_out(o_proj: RowParallelLinear, x) -> torch.Tensor:
     """Symmetric storage for o_proj's TP-partial output; the fused attention
     all-reduce reduces it in place."""
+    xt = x[0] if isinstance(x, tuple) else x
+    rows = xt.shape[0]
+    out_n = getattr(o_proj, "_k3_ptpc_orig_out_features", None)
+    if out_n is None:
+        out_n = int(getattr(o_proj, "output_size", o_proj.weight.shape[0]))
+    dtype = (
+        torch.bfloat16
+        if isinstance(x, tuple) or xt.dtype not in (torch.bfloat16, torch.float16)
+        else xt.dtype
+    )
     return k3_ar_fusion.symm_buffer(
-        k3_ar_fusion.ATTN_O_PROJ, x.shape[0], o_proj.weight.shape[0], x.dtype
+        k3_ar_fusion.ATTN_O_PROJ, rows, out_n, dtype
     )
 
 
@@ -623,6 +734,10 @@ class KimiK3MoE(nn.Module):
         cuda graph capture); only plain bf16/fp16 dense weights are merged —
         quantized or mixed-dtype checkpoints keep the unfused path.
         """
+        if _k3_ptpc_fp8_enabled():
+            # ATOM keeps shared experts as standalone PTPC linears. Merging
+            # them into the BF16 MoE front would prevent that quant.
+            return
         if not self.use_latent_moe:
             return
         if self.shared_experts is not None and get_moe_a2a_backend().is_none():
@@ -656,6 +771,8 @@ class KimiK3MoE(nn.Module):
             self.__dict__.pop(prop, None)
 
     def _prepare_preroute_fp8(self) -> None:
+        if _k3_ptpc_fp8_enabled():
+            return
         if (
             not _aiter_moe_preroute_fp8
             or not self.use_latent_moe
@@ -1775,6 +1892,8 @@ class KimiK3DeltaAttention(nn.Module):
         cuda graph capture)."""
         if not self.use_full_rank_gate:
             return
+        if getattr(self._qkvgbfa_layer, "weight_scale", None) is not None:
+            return
 
         fuse_inproj = self._may_fuse_kda_inproj()
         mods = [self.f_a_proj, self.b_proj]
@@ -1811,7 +1930,14 @@ class KimiK3DeltaAttention(nn.Module):
         plain unquantized 2-D tensors of one dtype and width -- the checkpoint
         keeps attention in bf16, but a quantized variant would carry scales
         that a raw row-cat would silently drop."""
-        if not (_is_hip and envs.SGLANG_ROCM_K3_FUSE_KDA_INPROJ.get()):
+        if getattr(self._qkvgbfa_layer, "weight_scale", None) is not None:
+            return False
+        if not (
+            _is_hip
+            and (
+                envs.SGLANG_ROCM_K3_FUSE_KDA_INPROJ.get() or _k3_ptpc_fp8_enabled()
+            )
+        ):
             return False
         if not (self.do_fuse_qkvbfg and self.use_full_rank_gate):
             return False
@@ -1821,6 +1947,8 @@ class KimiK3DeltaAttention(nn.Module):
         return len({(w.dtype, w.shape[1]) for w in ws}) == 1
 
     def _prepare_group64_projection(self) -> None:
+        if _k3_ptpc_fp8_enabled():
+            return
         if (
             not _aiter_kda_group64
             or not self.do_fuse_qkvbfg
@@ -1853,6 +1981,10 @@ class KimiK3DeltaAttention(nn.Module):
         the compiled kernel the stash stays unset and decode keeps the
         unfused chain. Called once from load_weights (after all weights are
         loaded, before cuda graph capture)."""
+        if _k3_ptpc_fp8_enabled():
+            # ATOM quantizes f_b_proj to PTPC; the fused AITER decode kernel
+            # requires a BF16 f_b weight, so skip it when PTPC is on.
+            return
         if _is_hip:
             from sglang.kernels.ops.attention import kda_fused_decode_aiter_hip
 
@@ -1978,25 +2110,27 @@ class KimiK3DeltaAttention(nn.Module):
 
                 if (
                     self._qkvgbfa_sizes is not None
-                    and 0 < hidden_states.shape[0] <= self._qkvgbfa_bs_limit
-                ):
+                    and 0 < _k3_hidden_rows(hidden_states) <= self._qkvgbfa_bs_limit
+                ) or getattr(self._qkvgbfa_layer, "weight_scale", None) is not None:
                     # One GEMM for the whole in-proj: the [f_a|b] tail rides
                     # along in the wide projection's bandwidth instead of
                     # paying its own launch. Worth ~30% of the in-proj at
                     # decode on gfx950; see SGLANG_ROCM_K3_FUSE_KDA_INPROJ.
-                    fused_states = self.fused_qkvg_proj.quant_method.apply(
-                        self._qkvgbfa_layer, hidden_states, None
+                    fused_states = _k3_dense_linear(
+                        self._qkvgbfa_layer, hidden_states
                     )
                     qkv, g_proj_states, f_a, beta, _pad = torch.split(
                         fused_states, self._qkvgbfa_sizes, dim=-1
                     )
-                    forget_gate = f_a if defer_f_b else gemm(f_a, self.f_b_proj.weight)
+                    forget_gate = (
+                        f_a if defer_f_b else _k3_dense_linear(self.f_b_proj, f_a)
+                    )
                     return qkv, beta, forget_gate, g_proj_states
 
                 if (
                     self._bfa_alt_stream is not None
                     and get_is_capture_mode()
-                    and 0 < hidden_states.shape[0] <= self._bfa_bs_limit
+                    and 0 < _k3_hidden_rows(hidden_states) <= self._bfa_bs_limit
                 ):
                     # Issue the tiny [f_a|b] + f_b GEMVs on the side stream,
                     # then the wide [q,k,v,g] GEMM on the main stream; both
@@ -2010,7 +2144,7 @@ class KimiK3DeltaAttention(nn.Module):
                         forget_gate = (
                             bfa[..., :n_fa]
                             if defer_f_b
-                            else gemm(bfa[..., :n_fa], self.f_b_proj.weight)
+                            else _k3_dense_linear(self.f_b_proj, bfa[..., :n_fa])
                         )
                         beta = bfa[..., n_fa : n_fa + n_b]
                     fused_states, _ = self.fused_qkvg_proj(hidden_states)
@@ -2026,7 +2160,7 @@ class KimiK3DeltaAttention(nn.Module):
                 forget_gate = (
                     bfa[..., :n_fa]
                     if defer_f_b
-                    else gemm(bfa[..., :n_fa], self.f_b_proj.weight)
+                    else _k3_dense_linear(self.f_b_proj, bfa[..., :n_fa])
                 )
                 beta = bfa[..., n_fa : n_fa + n_b]
             else:
@@ -2034,7 +2168,9 @@ class KimiK3DeltaAttention(nn.Module):
                 qkv, g_proj_states = torch.split(fused_states, self.split_sizes, dim=-1)
                 beta = self.b_proj(hidden_states)[0]
                 f_a = self.f_a_proj(hidden_states)[0]
-                forget_gate = f_a if defer_f_b else self.f_b_proj(f_a)[0]
+                forget_gate = (
+                    f_a if defer_f_b else _k3_dense_linear(self.f_b_proj, f_a)
+                )
         else:
             fused_states = self.fused_qkvbfg_a_proj(hidden_states)
             qkv, beta, fg_a_states = torch.split(fused_states, self.split_sizes, dim=-1)
@@ -2100,8 +2236,29 @@ class KimiK3DeltaAttention(nn.Module):
             self.attn._k3_deferred_f_b = False
         if not fused_onorm:
             norm_gate = g_proj_states.unflatten(-1, (-1, self.head_dim))
-            core_attn_out = self.o_norm(core_attn_out, norm_gate)
-        core_attn_out = core_attn_out.squeeze(0).flatten(-2)
+            if getattr(self.o_proj, "weight_scale", None) is not None:
+                from sglang.kernels.ops.kimi_k3.rmsnorm_gated_quant import (
+                    rmsnorm_gated_fp8_per_token,
+                )
+
+                x = core_attn_out.squeeze(0)
+                gate = norm_gate.squeeze(0)
+                if x.dim() != 3:
+                    x = x.unflatten(-1, (-1, self.head_dim))
+                if gate.dim() != 3:
+                    gate = gate.unflatten(-1, (-1, self.head_dim))
+                core_attn_out = rmsnorm_gated_fp8_per_token(
+                    x,
+                    self.o_norm.weight,
+                    gate,
+                    float(self.o_norm.eps),
+                    self.o_proj.weight.dtype,
+                )
+            else:
+                core_attn_out = self.o_norm(core_attn_out, norm_gate)
+                core_attn_out = core_attn_out.squeeze(0).flatten(-2)
+        else:
+            core_attn_out = core_attn_out.squeeze(0).flatten(-2)
         if self.all_reduce_fusion:
             out = _k3_symm_o_proj_out(self.o_proj, core_attn_out)
             partial, _ = self.o_proj(core_attn_out, output_tensor=out)
@@ -2235,6 +2392,8 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
                     if (
                         precomputed is None
                         and _aiter_mla_gate
+                        and not isinstance(gate_input, tuple)
+                        and not getattr(self.g_proj, "_k3_ptpc_per_token", False)
                         and mla_gate_aiter_hip.covered(
                             gate_input, self.g_proj.weight, x
                         )
@@ -2271,13 +2430,31 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
             # event record and the o_proj-side wait, so under breakable capture
             # the wait would cross graph segments; use the lazy path instead.
             and not is_in_breakable_cuda_graph()
-            and (0 < hidden_states.shape[0] <= self._gate_bs_limit)
+            and (0 < _k3_hidden_rows(hidden_states) <= self._gate_bs_limit)
         ):
             alt = self._gate_alt_stream
             alt.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(alt):
                 gate, _ = self.g_proj(hidden_states)
             self._gate_precomputed = (gate, alt)
+
+    def maybe_quantize_ptpc_input(self, hidden_states):
+        """Share one per-token quant across MLA fused_qkv_a and g_proj.
+
+        ATOM fuses this into the preceding RMSNorm when both projections use
+        PTPC. The AttnRes kernel still emits BF16, so quantize once here
+        instead of letting each linear launch its own quantizer.
+        """
+        if isinstance(hidden_states, tuple) or not self.use_output_gate:
+            return hidden_states
+        if not (
+            getattr(self.fused_qkv_a_proj_with_mqa, "_k3_ptpc_per_token", False)
+            and getattr(self.g_proj, "_k3_ptpc_per_token", False)
+        ):
+            return hidden_states
+        from aiter import dtypes, per_token_quant_hip
+
+        return per_token_quant_hip(hidden_states.contiguous(), quant_dtype=dtypes.fp8)
 
     def forward(
         self,
@@ -2287,6 +2464,7 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
         zero_allocator: BumpAllocator,
         **kwargs,
     ):
+        hidden_states = self.maybe_quantize_ptpc_input(hidden_states)
         if self.use_output_gate:
             self._gate_hidden_states = hidden_states
             self._precompute_output_gate(hidden_states)
@@ -2512,18 +2690,25 @@ class KimiK3DecoderLayer(nn.Module):
         # attention metadata; pass hidden_states through shape-preserving
         # (same as the LayerCommunicator models' is_idle skip).
         if forward_batch.forward_mode.is_idle():
-            return hidden_states
+            hs = (
+                hidden_states[0]
+                if isinstance(hidden_states, tuple)
+                else hidden_states
+            )
+            if hs.dtype != torch.bfloat16:
+                return torch.zeros(
+                    hs.shape[0],
+                    hs.shape[-1],
+                    dtype=torch.bfloat16,
+                    device=hs.device,
+                )
+            return hs
 
-        # mlp-sync (DP attention OR MoE a2a/EP — require_mlp_sync) pads
-        # extend batches to a multiple of attn_tp_size
-        # (prepare_mlp_sync_batch ceil_align), but the attention metadata
-        # (qo_indptr / query_start_loc) covers only the real tokens — the
-        # flashinfer ragged prefill rejects the row mismatch, and silent
-        # paths write the padded rows' garbage KV through the zero-padded
-        # out_cache_loc entries (clobbering pool slot 0 → cross-request
-        # corruption). Run attention on the real rows and zero-pad the
-        # output back; padded rows are discarded downstream.
-        num_padded = hidden_states.shape[0]
+        quantize_ptpc_input = getattr(self.self_attn, "maybe_quantize_ptpc_input", None)
+        if quantize_ptpc_input is not None:
+            hidden_states = quantize_ptpc_input(hidden_states)
+
+        num_padded = _k3_hidden_rows(hidden_states)
         num_real = num_padded
         if self._trim_padded_attn and forward_batch.forward_mode.is_extend():
             extend_lens = forward_batch.extend_seq_lens_cpu
@@ -2532,7 +2717,7 @@ class KimiK3DecoderLayer(nn.Module):
         if num_real != num_padded:
             with k3_sp_collective.o_proj_output_rows(num_padded):
                 attn_out = self._run_self_attn_inner(
-                    hidden_states[:num_real],
+                    _k3_slice_hidden(hidden_states, num_real),
                     positions[:num_real],
                     forward_batch,
                     zero_allocator,
@@ -2542,7 +2727,7 @@ class KimiK3DecoderLayer(nn.Module):
             )
             if padded_o_proj is not None:
                 return padded_o_proj
-            out = hidden_states.new_zeros(num_padded, attn_out.shape[-1])
+            out = attn_out.new_zeros(num_padded, attn_out.shape[-1])
             out[:num_real] = attn_out
             return out
         return self._run_self_attn_inner(
@@ -2607,9 +2792,13 @@ class KimiK3DecoderLayer(nn.Module):
         # Standard residual path
         if residual is None:
             residual = hidden_states
-            hidden_states = self.input_layernorm(hidden_states)
+            hidden_states, _ = _k3_apply_input_norm(
+                self.input_layernorm, hidden_states
+            )
         else:
-            hidden_states, residual = self.input_layernorm(hidden_states, residual)
+            hidden_states, residual = _k3_apply_input_norm(
+                self.input_layernorm, hidden_states, residual
+            )
 
         hidden_states = self._run_self_attn(
             hidden_states, positions, forward_batch, zero_allocator
@@ -2620,7 +2809,10 @@ class KimiK3DecoderLayer(nn.Module):
             hidden_states, allow_scatter=False
         )
 
-        hidden_states, residual = self.post_attention_layernorm(hidden_states, residual)
+        fuse_post = _k3_ptpc_fp8_enabled() and not self._is_moe_layer
+        hidden_states, residual = _k3_apply_post_attn_norm(
+            self.post_attention_layernorm, hidden_states, residual, fuse_post
+        )
         hidden_states = self.mlp(hidden_states, forward_batch=forward_batch)
         return hidden_states, residual, False
 
@@ -3296,7 +3488,11 @@ class KimiK3LinearForCausalLM(nn.Module):
             self_attn.w_vc = w_vc.contiguous().transpose(1, 2)
             if hasattr(self_attn.kv_b_proj, "weight_scale"):
                 self_attn.w_scale = self_attn.kv_b_proj.weight_scale
-            if _aiter_mla_gate and isinstance(self_attn, KimiK3MLAAttention):
+            if (
+                _aiter_mla_gate
+                and isinstance(self_attn, KimiK3MLAAttention)
+                and not _k3_ptpc_fp8_enabled()
+            ):
                 from sglang.kernels.ops.kimi_k3 import mla_gate_aiter_hip
 
                 mla_gate_aiter_hip.warmup(self_attn.g_proj.weight)
@@ -3345,6 +3541,20 @@ class KimiK3LinearForCausalLM(nn.Module):
                 layer.self_attn._prepare_group64_projection()
                 layer.self_attn._prepare_fused_decode()
 
+        if _k3_ptpc_fp8_enabled():
+            from sglang.kernels.ops.kimi_k3.ptpc_fp8 import (
+                quantize_k3_model_dense_linears,
+            )
+
+            n_quant = quantize_k3_model_dense_linears(self.model)
+            _k3_install_fused_rmsnorm_quant(self.model)
+            rank0_log(
+                f"Kimi-K3 ATOM ptpc_fp8: quantized {n_quant} dense linears "
+                "(MLA projections, KDA in_proj/f_b/o_proj, dense MLP, shared "
+                "experts); routed MXFP4 experts, router, conv1d, and embeddings "
+                "stay native."
+            )
+
         for layer in self.model.layers:
             if isinstance(layer, PPMissingLayer) or not isinstance(
                 layer.self_attn, KimiK3DeltaAttention
@@ -3354,9 +3564,14 @@ class KimiK3LinearForCausalLM(nn.Module):
                 precompile_k3_recompute_w_u_kernel,
             )
 
+            o_dtype = layer.self_attn.o_proj.weight.dtype
+            if _k3_ptpc_fp8_enabled() or getattr(
+                layer.self_attn.o_proj, "_k3_ptpc_per_token", False
+            ):
+                o_dtype = torch.bfloat16
             if precompile_k3_recompute_w_u_kernel(
                 num_heads=layer.self_attn.local_num_heads,
-                dtype=layer.self_attn.o_proj.weight.dtype,
+                dtype=o_dtype,
                 device=layer.self_attn.dt_bias.device,
             ):
                 rank0_log("Precompiled the Kimi-K3 KDA prefill kernel.")
