@@ -2335,5 +2335,30 @@ class TestDcpKvEventContract(CustomTestCase):
         self.assertEqual(args.kv_event_block_size, 8)
 
 
+class TestAiterLongContextMemFraction(CustomTestCase):
+    def test_split_aiter_decode_keeps_explicit_mem_fraction(self):
+        # K3 production: triton base + aiter prefill/decode. The split-backend
+        # alias makes resolved attention_backend aiter; the haircut must still
+        # see the pinned triton field so 0.85 is not scaled to 0.7225.
+        self.assertEqual(
+            ServerArgs._aiter_long_context_mem_fraction_factor("triton", 262144),
+            1.0,
+        )
+        self.assertEqual(
+            ServerArgs._aiter_long_context_mem_fraction_factor(None, 262144),
+            1.0,
+        )
+
+    def test_pinned_aiter_applies_haircut(self):
+        self.assertEqual(
+            ServerArgs._aiter_long_context_mem_fraction_factor("aiter", 262144),
+            0.85,
+        )
+        self.assertEqual(
+            ServerArgs._aiter_long_context_mem_fraction_factor("aiter", 8192),
+            1.0,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
