@@ -103,6 +103,8 @@ def run(
     norm_weight: torch.Tensor,
     norm_eps: float,
     out: torch.Tensor | None = None,
+    quant_out: torch.Tensor | None = None,
+    quant_scale: torch.Tensor | None = None,
 ) -> torch.Tensor:
     op, _ = _ops()
     if op is None:
@@ -124,6 +126,8 @@ def run(
         norm_weight=norm_weight,
         norm_eps=norm_eps,
         out=out,
+        quant_out=quant_out,
+        quant_scale=quant_scale,
     )
 
 

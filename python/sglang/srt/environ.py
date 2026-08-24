@@ -1482,6 +1482,41 @@ class Envs:
     # them only for large token batches. BF16 weights remain live as fallback.
     SGLANG_K3_MOE_LATENT_MXFP4 = EnvBool(False)
     SGLANG_K3_MOE_LATENT_MXFP4_MIN_TOKENS = EnvInt(2048)
+    # PTPC FP8 (per-token activation, per-channel weight) for the BF16 decode
+    # projections the checkpoint leaves unquantized. Halves the weight bytes
+    # those HBM-bound GEMMs stream. The router gate stays BF16 -- FP8 logits
+    # move the top-k selection.
+    SGLANG_K3_PTPC_FP8 = EnvBool(False)
+    SGLANG_K3_PTPC_FP8_MAX_TOKENS = EnvInt(256)
+    SGLANG_K3_PTPC_FP8_SHARED_DOWN = EnvBool(False)
+    # Below this batch the projections are launch-latency bound rather than
+    # weight-bandwidth bound, so the extra activation-quant launch costs more
+    # than the halved weight traffic saves.
+    SGLANG_K3_PTPC_FP8_MIN_TOKENS = EnvInt(8)
+    # PTPC FP8 for the attention output projection, [7168, 1536] per rank under
+    # TP8 and run once per attention layer for all 93 layers. In isolation this
+    # wins: 6.02 -> 5.44 us at two tokens, standalone activation quant included,
+    # because a 1536-wide quant is cheap enough to fit the margin where the wider
+    # projections' is not.
+    #
+    # Off by default because it does not survive end to end -- neutral at c1 and
+    # c2, 1.9% slower at c8. The GEMM saving is ~66 us of a 19.5 ms step while the
+    # FP8 copy costs ~1 GB per rank on top of the BF16 weight it does not replace,
+    # which is KV cache given up. Keep for re-testing if the packed weight can
+    # replace the original rather than accompany it.
+    SGLANG_K3_PTPC_FP8_O_PROJ = EnvBool(False)
+    SGLANG_K3_PTPC_FP8_O_PROJ_MAX_TOKENS = EnvInt(32)
+    # The one dense layer's TP8 gate_up is [8448, 7168]. Tuned PTPC is 1.7-1.9x
+    # faster than tuned BF16, but K3 has exactly one such layer, so the full-step
+    # ceiling is ~0.1%. Kept independently switchable for an honest E2E A/B.
+    SGLANG_K3_PTPC_FP8_DENSE_GATE_UP = EnvBool(False)
+    SGLANG_K3_PTPC_FP8_DENSE_GATE_UP_MAX_TOKENS = EnvInt(256)
+    # KDA recurrence epilogue emits one E4M3 scale per 128-wide head, then a
+    # blockscale o_proj GEMM consumes it. Quantization stays inside the existing
+    # recurrence + sigmoid-gated RMSNorm launch. Experimental until E2E proves
+    # the ~0.4% tuned-kernel ceiling survives the extra packed weight.
+    SGLANG_K3_KDA_O_PROJ_BLOCK_FP8 = EnvBool(False)
+    SGLANG_K3_KDA_O_PROJ_BLOCK_FP8_MAX_TOKENS = EnvInt(32)
     # Master switch for the ROCm AITER K3 decode path: the MXFP4 SiTU MoE
     # runner, the fused MoE front and the AITER-backed attention projections.
     SGLANG_AITER_K3_OPT = EnvBool(False)

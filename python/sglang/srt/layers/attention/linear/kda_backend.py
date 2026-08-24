@@ -466,6 +466,29 @@ class KDAAttnBackend(MambaAttnBackendBase):
                 out = mixed_qkv.new_empty(
                     (1, mixed_qkv.shape[0], layer.num_v_heads, layer.head_v_dim)
                 )
+                quantize_o_proj = bool(getattr(layer, "_k3_quantize_o_proj", False))
+                quant_out = (
+                    torch.empty(
+                        (
+                            mixed_qkv.shape[0],
+                            layer.num_v_heads,
+                            layer.head_v_dim,
+                        ),
+                        dtype=torch.float8_e4m3fn,
+                        device=mixed_qkv.device,
+                    )
+                    if quantize_o_proj
+                    else None
+                )
+                quant_scale = (
+                    torch.empty(
+                        (mixed_qkv.shape[0], layer.num_v_heads),
+                        dtype=torch.float32,
+                        device=mixed_qkv.device,
+                    )
+                    if quantize_o_proj
+                    else None
+                )
                 if fused_backend == "aiter" and kda_fused_decode_aiter_hip.covered(
                     a,
                     f_b_weight,
@@ -493,6 +516,8 @@ class KDAAttnBackend(MambaAttnBackendBase):
                         norm_weight=norm_weight,
                         norm_eps=norm_eps,
                         out=out,
+                        quant_out=quant_out,
+                        quant_scale=quant_scale,
                     )
                 else:
                     core_attn_out = None
@@ -515,6 +540,11 @@ class KDAAttnBackend(MambaAttnBackendBase):
 
                 if core_attn_out is not None:
                     layer._k3_onorm_consumed = True
+                    if quantize_o_proj:
+                        layer._k3_o_proj_prequant = (
+                            quant_out.flatten(-2),
+                            quant_scale,
+                        )
                     self._track_mamba_state_decode(
                         forward_batch,
                         conv_states,

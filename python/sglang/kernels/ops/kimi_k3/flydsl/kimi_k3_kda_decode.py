@@ -9,6 +9,7 @@ import functools
 from collections.abc import Iterable
 
 import torch
+from aiter.ops.flydsl.kernels.tensor_shim import _run_compiled
 
 from .kernels.kimi_k3_kda_decode import (
     create_kimi_k3_kda_decode_kernel,
@@ -16,7 +17,6 @@ from .kernels.kimi_k3_kda_decode import (
 from .kernels.kimi_k3_kda_decode_fb import (
     create_kimi_k3_kda_decode_fb_kernel,
 )
-from aiter.ops.flydsl.kernels.tensor_shim import _run_compiled
 
 _HEADS = 12
 _DIM = 128
@@ -376,6 +376,8 @@ def flydsl_kimi_k3_kda_decode_with_f_b(
     norm_weight: torch.Tensor,
     norm_eps: float,
     out: torch.Tensor | None = None,
+    quant_out: torch.Tensor | None = None,
+    quant_scale: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Run the explicit gfx950 Kimi-K3 f_b plus KDA decode specialization.
 
@@ -426,10 +428,36 @@ def flydsl_kimi_k3_kda_decode_with_f_b(
         norm_weight=norm_weight,
         out=out,
     )
+    quantize_output = quant_out is not None
+    if quantize_output != (quant_scale is not None):
+        raise ValueError("quant_out and quant_scale must be provided together")
+    if quantize_output:
+        _check_tensor(
+            "quant_out",
+            quant_out,
+            shape=(batch, _HEADS, _DIM),
+            dtype=torch.float8_e4m3fn,
+            device=device,
+            inner_strides=(_DIM, 1),
+        )
+        _check_tensor(
+            "quant_scale",
+            quant_scale,
+            shape=(batch, _HEADS),
+            dtype=torch.float32,
+            device=device,
+            inner_strides=(1,),
+        )
+    else:
+        # Compiled kernels need real pointers for every argument. The constexpr
+        # flag keeps these dummy buffers unread.
+        quant_out = torch.empty(1, device=device, dtype=torch.float8_e4m3fn)
+        quant_scale = torch.empty(1, device=device, dtype=torch.float32)
 
     executable = create_kimi_k3_kda_decode_fb_kernel(
         float(norm_eps),
         float(lower_bound),
+        quantize_output=quantize_output,
         **_fb_build_options(batch),
     )
     with torch.cuda.device(device):
@@ -449,6 +477,8 @@ def flydsl_kimi_k3_kda_decode_with_f_b(
             output_gate,
             norm_weight,
             out,
+            quant_out,
+            quant_scale,
             batch,
             f_a.stride(0),
             f_b_weight.stride(0),

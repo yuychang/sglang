@@ -8,23 +8,21 @@ import math
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
-from flydsl._mlir import ir
-from flydsl._mlir.dialects import gpu as mlir_gpu
-from flydsl._mlir.dialects import llvm
-from flydsl._mlir.dialects import scf
-from flydsl._mlir.dialects import vector as mlir_vector
-from flydsl.expr import arith, const_expr, range_constexpr
-from flydsl.expr.arith import ArithValue
-from flydsl.expr.typing import T
-
-from aiter.ops.flydsl.kernels import vector
-
+from aiter.ops.flydsl.kernels import buffer_ops, vector
 from aiter.ops.flydsl.kernels.tensor_shim import (
     AITER_FLYDSL_KERNARG_PRELOAD,
     AITER_FLYDSL_KERNARG_PRELOAD_COUNT,
     GTensor,
     _to_raw,
 )
+from flydsl._mlir import ir
+from flydsl._mlir.dialects import gpu as mlir_gpu
+from flydsl._mlir.dialects import llvm, scf
+from flydsl._mlir.dialects import vector as mlir_vector
+from flydsl.expr import arith, const_expr, range_constexpr
+from flydsl.expr.arith import ArithValue
+from flydsl.expr.rocdl import cvt_pk_fp8_f32
+from flydsl.expr.typing import T
 
 _HEADS = 12
 _DIM = 128
@@ -55,6 +53,7 @@ def create_kimi_k3_kda_decode_fb_kernel(
     parallel_front: bool = False,
     fused_norm_reduce: bool = False,
     projection_fdot2: bool = False,
+    quantize_output: bool = False,
 ):
     """Build the fixed gfx950 BF16 f_b plus KDA decode specialization."""
     conv_tid_offset = _DIM if parallel_front else 0
@@ -89,6 +88,7 @@ def create_kimi_k3_kda_decode_fb_kernel(
         or parallel_front
         or fused_norm_reduce
         or projection_fdot2
+        or quantize_output
         or waves_per_eu != _DEFAULT_WAVES_PER_EU
     ):
         kernel_name += (
@@ -96,6 +96,7 @@ def create_kimi_k3_kda_decode_fb_kernel(
             f"_pf{int(parallel_front)}"
             f"_fnr{int(fused_norm_reduce)}"
             f"_fd2{int(projection_fdot2)}"
+            f"_qout{int(quantize_output)}"
         )
 
     @flyc.kernel(
@@ -116,6 +117,8 @@ def create_kimi_k3_kda_decode_fb_kernel(
         output_gate_mem: fx.Tensor,
         norm_weight_mem: fx.Tensor,
         out_mem: fx.Tensor,
+        quant_out_mem: fx.Tensor,
+        quant_scale_mem: fx.Tensor,
         batch_size: fx.Int32,
         stride_f_a_token: fx.Int32,
         stride_f_b_head: fx.Int32,
@@ -148,6 +151,8 @@ def create_kimi_k3_kda_decode_fb_kernel(
         output_gate = GTensor(output_gate_mem, dtype=T.bf16, shape=(-1,))
         norm_weight = GTensor(norm_weight_mem, dtype=T.bf16, shape=(-1,))
         out = GTensor(out_mem, dtype=T.bf16, shape=(-1,))
+        quant_out_words = GTensor(quant_out_mem, dtype=T.i32, shape=(-1,))
+        quant_scale = GTensor(quant_scale_mem, dtype=T.f32, shape=(-1,))
 
         shared = fx.SharedAllocator().allocate(SharedStorage).peek()
         f_a_lds = shared.f_a.ptr if cooperative_f_a else shared.q.ptr
@@ -205,9 +210,7 @@ def create_kimi_k3_kda_decode_fb_kernel(
                 f_a_base = batch * stride_f_a_token
                 f_b_base = head * stride_f_b_head + tid * stride_f_b_output
                 for projection_iter in range_constexpr(_PROJECTION_ITERS):
-                    projection_offset = fx.Int32(
-                        projection_iter * _PROJECTION_VECTOR
-                    )
+                    projection_offset = fx.Int32(projection_iter * _PROJECTION_VECTOR)
                     if const_expr(cooperative_f_a):
                         f_a_values = fx.ptr_load(
                             f_a_lds + projection_offset,
@@ -598,9 +601,7 @@ def create_kimi_k3_kda_decode_fb_kernel(
                 global_v = global_v_start + fx.Int32(vi * _V_GROUP_TILE)
                 for ki in range_constexpr(_K_ITERS):
                     k_base = k_vec_start + fx.Int32(ki * _WARP_TILE_K)
-                    state_off = (
-                        state_head_base + global_v * fx.Int32(_DIM) + k_base
-                    )
+                    state_off = state_head_base + global_v * fx.Int32(_DIM) + k_base
                     state_vecs.append(state.vec_load((state_off,), 4))
             for vi in range_constexpr(_V_ITERS):
                 norm_accum = norm_accum + process_state_row(
@@ -683,11 +684,111 @@ def create_kimi_k3_kda_decode_fb_kernel(
                     fx.Float32(1.0) + fx.math.exp2(-gate_value * fx.Float32(_LOG2E))
                 )
                 result = recurrent_f32 * inv_rms * norm_w * output_sigmoid
+                rounded_result = result.to(fx.BFloat16)
                 out.store(
                     batch * stride_out_token + head * stride_out_head + tid,
-                    result.to(fx.BFloat16),
+                    rounded_result,
                 )
+                if const_expr(quantize_output):
+                    local_max = abs(fx.Float32(rounded_result))
+                    for offset in (32, 16, 8, 4, 2, 1):
+                        peer = fx.Float32(
+                            mlir_gpu.ShuffleOp(
+                                _to_raw(local_max),
+                                _to_raw(fx.Int32(offset)),
+                                _to_raw(width),
+                                mode="xor",
+                            ).shuffleResult
+                        )
+                        local_max = local_max.maximumf(peer)
+                    if lane == fx.Int32(0):
+                        # tid<128 spans exactly the first two waves.
+                        fx.ptr_store(local_max, norm_lds + warp)
                 scf.YieldOp([])
+
+            if const_expr(quantize_output):
+                fx.gpu.barrier()
+                scale_store_if = scf.IfOp(
+                    _to_raw(tid == fx.Int32(0)),
+                    results_=[],
+                    has_else=False,
+                )
+                with ir.InsertionPoint(scale_store_if.then_block):
+                    row_max = fx.Float32(fx.ptr_load(norm_lds))
+                    row_max = row_max.maximumf(
+                        fx.Float32(fx.ptr_load(norm_lds + fx.Int32(1)))
+                    )
+                    row_scale = (row_max / fx.Float32(448.0)).maximumf(
+                        fx.Float32(1.17549435e-38)
+                    )
+                    fx.ptr_store(row_scale, norm_lds)
+                    quant_scale[batch * fx.Int32(_HEADS) + head] = row_scale
+                    scf.YieldOp([])
+                fx.gpu.barrier()
+
+                quant_store_if = scf.IfOp(
+                    _to_raw(tid < fx.Int32(_DIM)),
+                    results_=[],
+                    has_else=False,
+                )
+                with ir.InsertionPoint(quant_store_if.then_block):
+                    output_index = (
+                        batch * stride_out_token + head * stride_out_head + tid
+                    )
+                    rounded = fx.Float32(out[output_index])
+                    row_scale = fx.Float32(fx.ptr_load(norm_lds))
+                    scaled = rounded / row_scale
+                    scaled_1 = mlir_gpu.ShuffleOp(
+                        _to_raw(scaled),
+                        _to_raw(fx.Int32(1)),
+                        _to_raw(width),
+                        mode="xor",
+                    ).shuffleResult
+                    scaled_2 = mlir_gpu.ShuffleOp(
+                        _to_raw(scaled),
+                        _to_raw(fx.Int32(2)),
+                        _to_raw(width),
+                        mode="xor",
+                    ).shuffleResult
+                    scaled_3 = mlir_gpu.ShuffleOp(
+                        _to_raw(scaled),
+                        _to_raw(fx.Int32(3)),
+                        _to_raw(width),
+                        mode="xor",
+                    ).shuffleResult
+                    zero_i32 = arith.constant(0, type=T.i32)
+                    packed = cvt_pk_fp8_f32(
+                        res=T.i32,
+                        src_a=_to_raw(scaled),
+                        src_b=scaled_1,
+                        old=_to_raw(zero_i32),
+                        word_sel=False,
+                    )
+                    packed = cvt_pk_fp8_f32(
+                        res=T.i32,
+                        src_a=scaled_2,
+                        src_b=scaled_3,
+                        old=packed,
+                        word_sel=True,
+                    )
+                    pack_store_if = scf.IfOp(
+                        _to_raw((tid % fx.Int32(4)) == fx.Int32(0)),
+                        results_=[],
+                        has_else=False,
+                    )
+                    with ir.InsertionPoint(pack_store_if.then_block):
+                        quant_index = (
+                            batch * fx.Int32(_HEADS * _DIM)
+                            + head * fx.Int32(_DIM)
+                            + tid
+                        )
+                        buffer_ops.buffer_store(
+                            packed,
+                            quant_out_words.rsrc,
+                            quant_index // fx.Int32(4),
+                        )
+                        scf.YieldOp([])
+                    scf.YieldOp([])
             scf.YieldOp([])
         with ir.InsertionPoint(valid_if.else_block):
             zero_if = scf.IfOp(
@@ -700,7 +801,34 @@ def create_kimi_k3_kda_decode_fb_kernel(
                     batch * stride_out_token + head * stride_out_head + tid,
                     fx.BFloat16(0.0),
                 )
+                if const_expr(quantize_output):
+                    zero_pack_if = scf.IfOp(
+                        _to_raw((tid % fx.Int32(4)) == fx.Int32(0)),
+                        results_=[],
+                        has_else=False,
+                    )
+                    with ir.InsertionPoint(zero_pack_if.then_block):
+                        quant_index = (
+                            batch * fx.Int32(_HEADS * _DIM)
+                            + head * fx.Int32(_DIM)
+                            + tid
+                        )
+                        buffer_ops.buffer_store(
+                            arith.constant(0, type=T.i32),
+                            quant_out_words.rsrc,
+                            quant_index // fx.Int32(4),
+                        )
+                        scf.YieldOp([])
                 scf.YieldOp([])
+            if const_expr(quantize_output):
+                zero_scale_if = scf.IfOp(
+                    _to_raw(tid == fx.Int32(0)),
+                    results_=[],
+                    has_else=False,
+                )
+                with ir.InsertionPoint(zero_scale_if.then_block):
+                    quant_scale[batch * fx.Int32(_HEADS) + head] = fx.Float32(1.0)
+                    scf.YieldOp([])
             scf.YieldOp([])
 
     @flyc.jit
@@ -718,6 +846,8 @@ def create_kimi_k3_kda_decode_fb_kernel(
         output_gate_mem: fx.Tensor,
         norm_weight_mem: fx.Tensor,
         out_mem: fx.Tensor,
+        quant_out_mem: fx.Tensor,
+        quant_scale_mem: fx.Tensor,
         batch_size: fx.Int32,
         stride_f_a_token: fx.Int32,
         stride_f_b_head: fx.Int32,
@@ -750,6 +880,8 @@ def create_kimi_k3_kda_decode_fb_kernel(
             output_gate_mem,
             norm_weight_mem,
             out_mem,
+            quant_out_mem,
+            quant_scale_mem,
             batch_size,
             stride_f_a_token,
             stride_f_b_head,
