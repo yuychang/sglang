@@ -1476,6 +1476,7 @@ class Envs:
     SGLANG_K3_AITER_MLA_GATE = EnvBool(False)
     SGLANG_K3_AITER_KDA_GROUP64 = EnvBool(False)
     SGLANG_K3_AITER_MOE_PREROUTE_FP8 = EnvBool(False)
+    SGLANG_K3_AITER_LATENT_TAIL_FP8 = EnvBool(False)
     # Extend the KDA and MoE pre-route fusions from the single-token bucket to
     # two tokens. Superseded by SGLANG_K3_PREROUTE_PREACTIVATED_SHARED for MoE.
     SGLANG_K3_AITER_B2_FUSIONS = EnvBool(False)
