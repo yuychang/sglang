@@ -1473,6 +1473,7 @@ class Envs:
     # Per-operator opt-ins for the gfx950 FlyDSL specializations. Each one
     # fail-closes to the split GEMM chain when the chip, shape or AITER build
     # cannot service it, so enabling one on unsupported hardware is a no-op.
+    SGLANG_K3_AITER_MLA_GATE = EnvBool(False)
     SGLANG_K3_AITER_KDA_GROUP64 = EnvBool(False)
     # Extend the validated KDA group64 fusion from the single-token bucket to
     # two tokens.
