@@ -10,8 +10,17 @@ from .kimi_k3_kda_decode import (
     is_flydsl_kimi_k3_kda_decode_supported,
 )
 
+from .kimi_k3_kda_input_group64 import (
+    kimi_k3_kda_input_group64,
+    quantize_kimi_k3_kda_input_group64,
+    supports_kimi_k3_kda_input_group64,
+)
+
 __all__ = [
     "flydsl_kimi_k3_kda_decode",
     "flydsl_kimi_k3_kda_decode_with_f_b",
     "is_flydsl_kimi_k3_kda_decode_supported",
+    "kimi_k3_kda_input_group64",
+    "quantize_kimi_k3_kda_input_group64",
+    "supports_kimi_k3_kda_input_group64",
 ]
