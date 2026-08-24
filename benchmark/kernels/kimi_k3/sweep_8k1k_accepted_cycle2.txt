@@ -1,0 +1,7 @@
+tag=accepted_cycle2 isl=8192 osl=1024 waves=4
+c2   TPOT_med=13.20    TTFT_med=915.36     E2EL_med=14414.70   TTT=1276.75   out_tok_s=141.86
+c4   TPOT_med=15.54    TTFT_med=1587.95    E2EL_med=17448.38   TTT=2112.03   out_tok_s=234.67
+c8   TPOT_med=19.35    TTFT_med=2471.36    E2EL_med=22260.36   TTT=3311.23   out_tok_s=367.91
+c16  TPOT_med=24.42    TTFT_med=4304.01    E2EL_med=29278.55   TTT=5034.39   out_tok_s=559.38
+c32  TPOT_med=33.05    TTFT_med=7934.75    E2EL_med=41516.97   TTT=7100.86   out_tok_s=788.98
+c64  TPOT_med=49.03    TTFT_med=15211.05   E2EL_med=65155.23   TTT=9050.55   out_tok_s=1005.62

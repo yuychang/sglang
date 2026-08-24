@@ -1,0 +1,7 @@
+tag=v2_base isl=8192 osl=1024 waves=4
+c2   TPOT_med=14.50    TTFT_med=920.26     E2EL_med=15750.14   TTT=1169.10   out_tok_s=129.90
+c4   TPOT_med=16.53    TTFT_med=1576.90    E2EL_med=18425.23   TTT=1999.02   out_tok_s=222.11
+c8   TPOT_med=20.11    TTFT_med=2492.86    E2EL_med=23052.80   TTT=3197.68   out_tok_s=355.30
+c16  TPOT_med=25.16    TTFT_med=4318.80    E2EL_med=30052.82   TTT=4907.35   out_tok_s=545.26
+c32  TPOT_med=33.67    TTFT_med=7969.05    E2EL_med=42186.80   TTT=6988.08   out_tok_s=776.45
+c64  TPOT_med=49.35    TTFT_med=15283.07   E2EL_med=65529.17   TTT=8999.74   out_tok_s=999.97
