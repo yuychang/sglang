@@ -1562,6 +1562,9 @@ class Envs:
     # Restore the pre-tuning (rows_per_wave, weight_cache_modifier) pair for the
     # KDA group64 projection, so the per-bucket tuning can be A/B'd in place.
     SGLANG_K3_KDA_GROUP64_LEGACY_LAUNCH = EnvBool(False)
+    # Per-bank-depth num_warps / waves_per_eu for the ROCm attention-residual
+    # kernels. Default on; set 0 for the untuned launch.
+    SGLANG_K3_ATTN_RES_TUNED_LAUNCH = EnvBool(True)
     # Prepend an SGLang-shipped BF16 tuned-GEMM profile for M=16384 to AITER's
     # config search path. Read before any import can initialize AITER_CONFIGS.
     SGLANG_K3_AITER_M16384_PROFILE = EnvBool(False)
