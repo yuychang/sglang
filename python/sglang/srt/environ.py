@@ -1534,6 +1534,13 @@ class Envs:
     # Master switch for the ROCm AITER K3 decode path: the MXFP4 SiTU MoE
     # runner, the fused MoE front and the AITER-backed attention projections.
     SGLANG_AITER_K3_OPT = EnvBool(False)
+    # Alignment of the AITER MXFP4 MoE expert-intermediate axis. 0 = pick from
+    # SGLANG_AITER_K3_OPT (128 when set, else 256). Set explicitly to 256 to run
+    # the AITER mxmoe (a4w4) decode kernels on K3: they carry their gemm1 ->
+    # gemm2 intermediate in MXFP4 and are only numerically correct when
+    # intermediate_size_per_partition is a multiple of 256, which for TP8
+    # (3072/8 = 384) means padding to 512 at the cost of ~33% expert memory.
+    SGLANG_AITER_MXFP4_MOE_INTER_ALIGN = EnvInt(0)
     # Per-operator opt-ins for the gfx950 FlyDSL specializations. Each one
     # fail-closes to the split GEMM chain when the chip, shape or AITER build
     # cannot service it, so enabling one on unsupported hardware is a no-op.
