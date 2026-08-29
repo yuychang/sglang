@@ -26,6 +26,13 @@ _INITIALIZED = False
 _ENABLED = False
 
 
+def _hip_gemm_ar_available() -> bool:
+    from sglang.kernels.jit.utils import is_hip_runtime
+    from sglang.srt.utils import is_gfx95_supported
+
+    return is_hip_runtime() and is_gfx95_supported()
+
+
 def _init() -> bool:
     global _INITIALIZED, _ENABLED
     if _INITIALIZED:
@@ -39,8 +46,16 @@ def _init() -> bool:
     if not (2 <= world_size <= 8):
         logger.warning("SGLANG_K3_GEMM_AR requires 2 <= TP <= 8; disabled.")
         return False
+    if _hip_gemm_ar_available():
+        _ENABLED = True
+        logger.info(
+            "K3 fused o_proj GEMM+AR enabled on HIP gfx950 (world_size=%d; "
+            "phase-1 baseline — fused kernel pending)",
+            world_size,
+        )
+        return True
     if torch.cuda.get_device_capability() < (10, 0):
-        logger.warning("SGLANG_K3_GEMM_AR requires SM100+; disabled.")
+        logger.warning("SGLANG_K3_GEMM_AR requires SM100+ or HIP gfx950; disabled.")
         return False
     _ENABLED = True
     logger.info("K3 fused o_proj GEMM+AR enabled (world_size=%d)", world_size)
@@ -55,7 +70,6 @@ def maybe_wrap_o_proj(o_proj: RowParallelLinear) -> None:
     ready-to-launch path."""
     if not _init():
         return
-    from sglang.kernels.ops.kimi_k3 import gemm_ar as mod
     from sglang.srt.distributed.parallel_state import get_tp_group
     from sglang.srt.runtime_context import get_parallel
 
@@ -66,19 +80,30 @@ def maybe_wrap_o_proj(o_proj: RowParallelLinear) -> None:
     weight = o_proj.weight
     if not (
         isinstance(weight, torch.Tensor)
-        and weight.shape[0] == mod.N
+        and weight.shape[0] == 7168
         and weight.shape[1] % 128 == 0
     ):
         return
 
-    mod.init(
-        world_size=world_size,
-        rank=parallel.tp_rank,
-        group=get_tp_group().cpu_group,
-        k=weight.shape[1],
-    )
-    # per-K compile + base-address stash, pre-capture
-    mod._module_with_bases(weight.shape[1], world_size)
+    if _hip_gemm_ar_available():
+        from sglang.kernels.ops.kimi_k3 import gemm_ar_hip as mod
+
+        mod.init(
+            world_size=world_size,
+            rank=parallel.tp_rank,
+            k=weight.shape[1],
+        )
+    else:
+        from sglang.kernels.ops.kimi_k3 import gemm_ar as mod
+
+        mod.init(
+            world_size=world_size,
+            rank=parallel.tp_rank,
+            group=get_tp_group().cpu_group,
+            k=weight.shape[1],
+        )
+        # per-K compile + base-address stash, pre-capture
+        mod._module_with_bases(weight.shape[1], world_size)
 
     inner = o_proj.forward
 
