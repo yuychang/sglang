@@ -50,7 +50,7 @@ def _init() -> bool:
         _ENABLED = True
         logger.info(
             "K3 fused o_proj GEMM+AR enabled on HIP gfx950 (world_size=%d; "
-            "phase-1 baseline — fused kernel pending)",
+            "phase-2 registered-buffer GEMM+AR — single-kernel fusion pending)",
             world_size,
         )
         return True
