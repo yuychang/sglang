@@ -1233,6 +1233,62 @@ class KimiK3MoE(nn.Module):
                 return fused[0]
         return self._latent_norm(tensor_model_parallel_all_reduce(latent))
 
+    @cached_property
+    def _shared_output_needs_tp_ar(self) -> bool:
+        return (
+            self.tp_size > 1
+            and not self._shared_experts_tp1
+            and not self._shared_experts_attn_tp_comm
+        )
+
+    def _tp_allreduce_latent_shared_buf(
+        self,
+        buf: torch.Tensor,
+        num_tokens: int,
+        hidden_size: int,
+        *,
+        use_latent_tail: bool = False,
+    ) -> tuple[torch.Tensor, Optional[torch.Tensor], bool]:
+        """One TP all-reduce over flat [latent | shared] (fused-front layout).
+
+        Returns (buf, fused_normed_latent_or_none, fused_norm_applied). Mirrors
+        the HIP / non-MNNVL tail in ``_forward_fused`` so the unfused MoE path
+        can drop a separate shared-expert AR (~1 launch/layer).
+        """
+        fused_norm = False
+        fused_normed_latent: Optional[torch.Tensor] = None
+        if k3_ar_fusion.enabled():
+            if self.fuse_ar_norm and not use_latent_tail:
+                fused_norm = True
+                k3_ar_fusion.all_reduce_norm(
+                    buf.view(-1, k3_ar_fusion.NORM_DIM),
+                    *self._get_fused_norm_params(),
+                    num_tokens=num_tokens,
+                )
+            else:
+                k3_ar_fusion.all_reduce(buf)
+        else:
+            if self.fuse_ar_norm and not use_latent_tail:
+                from sglang.srt.layers.k3_fused_ar_rmsnorm import try_fused_ar_rmsnorm
+
+                weight, eps = self._get_fused_norm_params()
+                view = buf.view(-1, k3_ar_fusion.NORM_DIM)
+                fused = try_fused_ar_rmsnorm(
+                    view,
+                    weight,
+                    eps,
+                    num_norm_rows=num_tokens,
+                )
+                if fused is not None:
+                    normed, reduced = fused
+                    if reduced.data_ptr() != view.data_ptr():
+                        buf.copy_(reduced.reshape(-1))
+                    fused_normed_latent = normed[:num_tokens]
+                    fused_norm = True
+            if fused_normed_latent is None:
+                buf = tensor_model_parallel_all_reduce(buf)
+        return buf, fused_normed_latent, fused_norm
+
     def _forward_shared_experts(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """Run TP-sharded shared experts while DeepEP tokens stay scattered."""
         if not self._shared_experts_attn_tp_comm:
@@ -1336,6 +1392,31 @@ class KimiK3MoE(nn.Module):
             # source-side empty result while avoiding empty RMSNorm/up-proj
             # launches; the collective itself has already completed above.
             out = hidden_states.new_empty((0, hidden_states.shape[1]))
+        elif (
+            shared_output is not None
+            and self._routed_needs_reduce
+            and self._shared_output_needs_tp_ar
+        ):
+            if shared_event is not None:
+                torch.cuda.current_stream().wait_event(shared_event)
+            num_tokens = expert_output.shape[0]
+            hidden_size = shared_output.shape[1]
+            latent_numel = num_tokens * self.moe_hidden_size
+            buf = expert_output.new_empty(latent_numel + num_tokens * hidden_size)
+            buf[:latent_numel].copy_(expert_output.reshape(-1))
+            buf[latent_numel:].copy_(shared_output.reshape(-1))
+            buf, fused_normed_latent, fused_norm = self._tp_allreduce_latent_shared_buf(
+                buf, num_tokens, hidden_size
+            )
+            latent = buf[:latent_numel].view(num_tokens, self.moe_hidden_size)
+            shared_output = buf[latent_numel:].view(num_tokens, hidden_size)
+            if fused_normed_latent is not None:
+                latent = fused_normed_latent
+            elif not fused_norm:
+                latent = self._latent_norm(latent)
+            out, _ = self.routed_expert_up_proj(latent)
+            out = _add3(out, shared_output, prefix_sum)
+            return out
         else:
             latent = self._reduce_latent(expert_output)
             # up_proj is replicated, so the routed output is now fully reduced.
@@ -1346,12 +1427,8 @@ class KimiK3MoE(nn.Module):
             torch.cuda.current_stream().wait_event(shared_event)
         if shared_output is not None:
             # tp1 shared experts (SP-MoE) are complete per-rank; TP-sharded
-            # ones need the partial-sum reduction.
-            if (
-                self.tp_size > 1
-                and not self._shared_experts_tp1
-                and not self._shared_experts_attn_tp_comm
-            ):
+            # ones need the partial-sum reduction (unless combined above).
+            if self._shared_output_needs_tp_ar:
                 shared_output = tensor_model_parallel_all_reduce(shared_output)
             out = _add3(out, shared_output, prefix_sum)
             return out
@@ -1712,27 +1789,12 @@ class KimiK3MoE(nn.Module):
             elif k3_ar_fusion.enabled():
                 k3_ar_fusion.all_reduce(buf)
             else:
-                if self.fuse_ar_norm and not use_latent_tail:
-                    from sglang.srt.layers.k3_fused_ar_rmsnorm import (
-                        try_fused_ar_rmsnorm,
-                    )
-
-                    weight, eps = self._get_fused_norm_params()
-                    view = buf.view(-1, k3_ar_fusion.NORM_DIM)
-                    fused = try_fused_ar_rmsnorm(
-                        view,
-                        weight,
-                        eps,
-                        num_norm_rows=num_tokens,
-                    )
-                    if fused is not None:
-                        normed, reduced = fused
-                        if reduced.data_ptr() != view.data_ptr():
-                            buf.copy_(reduced.reshape(-1))
-                        fused_normed_latent = normed[:num_tokens]
-                        fused_norm = True
-                if fused_normed_latent is None:
-                    buf = tensor_model_parallel_all_reduce(buf)
+                buf, fused_normed_latent, fused_norm = self._tp_allreduce_latent_shared_buf(
+                    buf,
+                    num_tokens,
+                    hidden_size,
+                    use_latent_tail=use_latent_tail,
+                )
 
         latent = buf[:latent_numel].view(num_tokens, self.moe_hidden_size)
         shared_output = buf[latent_numel:].view(num_tokens, hidden_size)
