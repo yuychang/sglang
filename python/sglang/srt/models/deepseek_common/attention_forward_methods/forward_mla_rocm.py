@@ -898,11 +898,13 @@ class DeepseekMLARocmForwardMixin:
         Skip rope in prepare and let the fused kernel in forward_absorb_rocm_core handle it,
         when running aiter-backend MLA on gfx95 (i.e., the `else` branch in
         forward_absorb_rocm_core that calls fused_qk_rope_cat_and_cache_mla).
+
+        A layer without a rotary_emb has nothing to fuse: that branch reads
+        rotary_emb.cos_cache, so skipping the standalone rope there ends in
+        AttributeError on None. Kimi-K3 has such layers.
         """
-        # NoPE models (rotary_emb=None, e.g. Kimi-K3) have no rope for the
-        # fused kernel to apply and no cos/sin cache to pass to it.
         return (
-            self.rotary_emb is not None
-            and _use_aiter_gfx95
+            _use_aiter_gfx95
             and self.current_attention_backend == "aiter"
+            and self.rotary_emb is not None
         )
