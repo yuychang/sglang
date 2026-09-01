@@ -26,6 +26,7 @@ from sglang.srt.arg_groups.overrides import (
     resolved_view,
     resolving_view,
     run_post_process_pass,
+    scale_auto_mem_fraction,
     use_mla_backend,
 )
 from sglang.srt.connector import ConnectorType
@@ -42,6 +43,24 @@ from sglang.srt.utils.common import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def aiter_long_context_mem_fraction_factor(
+    attention_backend: Any, context_len: int
+) -> float:
+    """Workspace haircut for AITER long-context launches.
+
+    Keyed on the *resolved* backend, which is the one that describes the
+    hardware: a split launch such as ``--attention-backend triton
+    --prefill-attention-backend aiter --decode-attention-backend aiter``
+    allocates the AITER workspace, and ``_attention_backend_default`` aliasing
+    the base field to aiter is that fact showing through, not a mistake to route
+    around. Whether the budget the haircut comes out of may be reduced at all is
+    a separate question, and ``scale_auto_mem_fraction`` answers it.
+    """
+    if attention_backend == "aiter" and context_len > 8192:
+        return 0.85
+    return 1.0
 
 
 def handle_attention_backend_compatibility(server_args: Any):
@@ -178,14 +197,15 @@ def handle_attention_backend_compatibility(server_args: Any):
 
     run_post_process_pass(server_args, _fa4_page_constraint)
 
-    # AMD platforms backends
-    if resolved_view(server_args).attention_backend == "aiter":
-        if model_config.context_len > 8192:
-            declare_resolution(
-                server_args,
-                "_handle_attention_backend_compatibility",
-                mem_fraction_static=cfg.mem_fraction_static * 0.85,
-            )
+    # AMD platforms backends.
+    scale_auto_mem_fraction(
+        server_args,
+        "_handle_attention_backend_compatibility",
+        aiter_long_context_mem_fraction_factor(
+            resolved_view(server_args).attention_backend, model_config.context_len
+        ),
+        "AITER long-context workspace",
+    )
 
     # Other platforms backends
     run_post_process_pass(server_args, _attention_backend_platform_fallbacks)

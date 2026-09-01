@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import sglang.srt.server_args as server_args_module
 from sglang.srt.arg_groups import parallel_hook, pd_disaggregation_hook, serving_hook
 from sglang.srt.arg_groups.attention_hook import (
+    aiter_long_context_mem_fraction_factor,
     handle_attention_backend_compatibility,
     handle_deterministic_inference,
 )
@@ -39,6 +40,7 @@ from sglang.srt.arg_groups.moe_hook import (
 )
 from sglang.srt.arg_groups.overrides import (
     cutedsl_moe_max_num_tokens,
+    declare_resolution,
     resolution_result,
 )
 from sglang.srt.arg_groups.parallel_hook import (
@@ -2840,28 +2842,67 @@ class TestDcpKvEventContract(CustomTestCase):
 
 
 class TestAiterLongContextMemFraction(CustomTestCase):
-    def test_split_aiter_decode_keeps_explicit_mem_fraction(self):
-        # K3 production: triton base + aiter prefill/decode. The split-backend
-        # alias makes resolved attention_backend aiter; the haircut must still
-        # see the pinned triton field so 0.85 is not scaled to 0.7225.
-        self.assertEqual(
-            ServerArgs._aiter_long_context_mem_fraction_factor("triton", 262144),
-            1.0,
-        )
-        self.assertEqual(
-            ServerArgs._aiter_long_context_mem_fraction_factor(None, 262144),
-            1.0,
-        )
+    """The AITER long-context haircut asks the backend whether to reserve, and
+    ``scale_auto_mem_fraction`` whether it may reserve out of this budget."""
 
-    def test_pinned_aiter_applies_haircut(self):
-        self.assertEqual(
-            ServerArgs._aiter_long_context_mem_fraction_factor("aiter", 262144),
-            0.85,
-        )
-        self.assertEqual(
-            ServerArgs._aiter_long_context_mem_fraction_factor("aiter", 8192),
-            1.0,
-        )
+    def _make_args(self, attention_backend, prefill=None, decode=None, mem=None):
+        args = ServerArgs(model_path="dummy")
+        args.attention_backend = attention_backend
+        args.prefill_attention_backend = prefill
+        args.decode_attention_backend = decode
+        args.mem_fraction_static = mem
+        # Short-circuit model_config_of(): the haircut needs context_len and
+        # nothing else off the model.
+        args._model_config = MagicMock()
+        args._model_config.context_len = 262144
+        args._model_config.hf_config.dual_chunk_attention_config = None
+        return args
+
+    def test_factor_reads_the_resolved_backend(self):
+        # The resolved backend describes the hardware: under K3's split launch
+        # the alias reports aiter because the AITER workspace is really there.
+        self.assertEqual(aiter_long_context_mem_fraction_factor("aiter", 262144), 0.85)
+        self.assertEqual(aiter_long_context_mem_fraction_factor("triton", 262144), 1.0)
+        self.assertEqual(aiter_long_context_mem_fraction_factor(None, 262144), 1.0)
+        # Short context does not carry the workspace.
+        self.assertEqual(aiter_long_context_mem_fraction_factor("aiter", 8192), 1.0)
+
+    def test_pinned_mem_fraction_survives_the_split_backend_launch(self):
+        # K3 production: triton base + aiter prefill/decode, --mem-fraction-static
+        # 0.85. Scaling that to 0.7225 puts the budget under the KV pool floor
+        # once the MoE weights are resident, and every scheduler dies at startup.
+        args = self._make_args("triton", prefill="aiter", decode="aiter", mem=0.85)
+
+        handle_attention_backend_compatibility(args)
+
+        from sglang.srt.arg_groups.overrides import resolved_view
+
+        self.assertEqual(resolved_view(args).attention_backend, "aiter")
+        self.assertEqual(resolved_view(args).mem_fraction_static, 0.85)
+
+    def test_pinned_mem_fraction_survives_pinned_aiter(self):
+        # The budget is the subject, not the backend: an explicit
+        # --mem-fraction-static is honoured however aiter was asked for.
+        args = self._make_args("aiter", mem=0.85)
+
+        handle_attention_backend_compatibility(args)
+
+        from sglang.srt.arg_groups.overrides import resolved_view
+
+        self.assertEqual(resolved_view(args).mem_fraction_static, 0.85)
+
+    def test_derived_mem_fraction_still_takes_the_haircut(self):
+        # Nothing was pinned, so the sized budget is the pipeline's own and the
+        # workspace reserve belongs in it. handle_gpu_memory_settings resolves
+        # mem_fraction_static before this hook runs; stand in for it.
+        args = self._make_args("aiter")
+        declare_resolution(args, "test_sizing", mem_fraction_static=0.88)
+
+        handle_attention_backend_compatibility(args)
+
+        from sglang.srt.arg_groups.overrides import resolved_view
+
+        self.assertAlmostEqual(resolved_view(args).mem_fraction_static, 0.88 * 0.85)
 
 
 if __name__ == "__main__":

@@ -404,6 +404,65 @@ def declare_direct_writes(
     return result
 
 
+def raw_input_of(server_args: Any, field: str, default: Any = None) -> Any:
+    """What the caller supplied for ``field``, before any handler ran.
+
+    The mirror of :func:`resolution_result`: that one answers with the
+    decision, this one with the input the decision was made from. A resolver
+    wants this only when the operator's own word is the subject rather than the
+    value in force -- see :func:`scale_auto_mem_fraction`, which asks whether a
+    budget was pinned, not what it came out as.
+
+    Reads the snapshot the pipeline takes at entry rather than the field, so a
+    residual imperative write does not show through. A record that never
+    entered the pipeline (a mock, a partial fixture) carries no snapshot; its
+    fields are all it has.
+    """
+    raw = getattr(server_args, "_raw_input", None)
+    if raw is not None and field in raw:
+        return raw[field]
+    return getattr(server_args, field, default)
+
+
+def scale_auto_mem_fraction(
+    server_args: Any, source: str, factor: float, reason: str
+) -> None:
+    """Take a workspace haircut out of ``mem_fraction_static``, unless it was pinned.
+
+    ``--mem-fraction-static`` is either the operator's number or the pipeline's:
+    ``handle_gpu_memory_settings`` derives one only when the caller left it
+    unset. A haircut reserves headroom that a backend is about to take, and
+    taking it out of a derived budget is part of deriving that budget; taking it
+    out of a pinned one silently overrules the operator, multiplicatively, in a
+    field whose whole purpose is to be told. K3 launches with
+    ``--mem-fraction-static 0.85`` and reached the scheduler holding 0.7225 --
+    under the KV pool floor once the MoE weights were resident, with nothing in
+    the log to connect the two numbers.
+
+    So a pinned budget is honoured and the decline is logged: the operator keeps
+    what they asked for, and if that budget is genuinely too large the OOM that
+    follows names the knob that caused it. ``adjust_mem_fraction_for_vlm`` keeps
+    the same invariant structurally, by running only in the derived branch.
+    """
+    if factor == 1.0:
+        return
+    pinned = raw_input_of(server_args, "mem_fraction_static")
+    if pinned is not None:
+        logger.info(
+            "%s: keeping --mem-fraction-static=%s as given; skipping the %s "
+            "haircut (x%s). Unset --mem-fraction-static to have it sized here.",
+            source,
+            pinned,
+            reason,
+            factor,
+        )
+        return
+    current = resolving_view(server_args).mem_fraction_static
+    if current is None:
+        return
+    declare_resolution(server_args, source, mem_fraction_static=current * factor)
+
+
 def resolution_result(server_args: Any, field: str, default: Any = None) -> Any:
     """What resolution decided for ``field``: the declaration if there is one,
     otherwise what the caller supplied.
