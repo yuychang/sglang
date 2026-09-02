@@ -652,6 +652,7 @@ class KimiK3MoE(nn.Module):
         self._shared_down_fp8_w = None
         self._shared_down_fp8_s = None
         self._shared_down_fp8_n = 0
+        self._correction_bias_fp32 = None
         self._front_head = None
         self._front_down_w4 = None
         self._front_down_scale4 = None
@@ -1225,7 +1226,7 @@ class KimiK3MoE(nn.Module):
         self.alt_stream.wait_stream(current_stream)
         with torch.cuda.stream(self.alt_stream):
             router_logits = self.gate(hidden_states)
-            topk_output = self.topk(hidden_states, router_logits)
+            topk_output = self._run_topk(hidden_states, router_logits)
 
         routed_input, _ = self.routed_expert_down_proj(hidden_states)
         current_stream.wait_stream(self.alt_stream)
@@ -1313,7 +1314,7 @@ class KimiK3MoE(nn.Module):
             # or dsv3_router_gemm); non-CUDA falls back to F.linear (bf16). The
             # fp32 logits reach the radix router from moe_fused_gate.
             router_logits = self.gate(hidden_states)
-            topk_output = self.topk(hidden_states, router_logits)
+            topk_output = self._run_topk(hidden_states, router_logits)
         issue_shared()
 
         if not self.use_latent_moe:
@@ -1426,7 +1427,7 @@ class KimiK3MoE(nn.Module):
         if self._route_quant_fuse_eligible:
             route_quant_handoff.stage(routed_input)
         try:
-            topk_output = self.topk(hidden_states, router_logits)
+            topk_output = self._run_topk(hidden_states, router_logits)
             with zero_copy_context.set_moe_output(latent):
                 expert_output = self.experts(routed_input, topk_output)
         finally:
@@ -1442,10 +1443,26 @@ class KimiK3MoE(nn.Module):
         if self._route_quant_fuse_eligible:
             route_quant_handoff.stage(routed_input)
         try:
-            topk_output = self.topk(hidden_states, router_logits)
+            topk_output = self._run_topk(hidden_states, router_logits)
             return self.experts.forward_deferred_finalize(routed_input, topk_output)
         finally:
             route_quant_handoff.clear()
+
+    def _run_topk(self, hidden_states, router_logits):
+        """Select the prepacked correction bias matching the router dtype.
+
+        Cooperative preroute emits FP32 logits at M=2/4 while the regular
+        AITER front emits BF16. AITER requires equal dtypes and otherwise
+        captures a BF16->FP32 copy in every layer's decode graph.
+        """
+        bias = self.gate.e_score_correction_bias
+        if (
+            router_logits.dtype == torch.float32
+            and self._correction_bias_fp32 is not None
+        ):
+            bias = self._correction_bias_fp32
+        self.topk.topk_config.correction_bias = bias
+        return self.topk(hidden_states, router_logits)
 
     def _run_shared_down(self, x: torch.Tensor, out: torch.Tensor) -> None:
         shared = self.shared_experts
@@ -4040,6 +4057,14 @@ class KimiK3LinearForCausalLM(nn.Module):
                 )
                 if bias.dtype != _bias_dtype:
                     bias.data = bias.data.to(_bias_dtype)
+                # Cooperative M=2/4 preroute emits FP32 router logits. Keep
+                # the matching static bias ready before graph capture so
+                # AITER top-k does not capture one BF16->FP32 copy per layer.
+                layer.mlp._correction_bias_fp32 = (
+                    bias
+                    if bias.dtype == torch.float32
+                    else bias.to(dtype=torch.float32)
+                )
             if isinstance(layer.self_attn, KimiK3DeltaAttention):
                 layer.self_attn._merge_bfa_weights()
                 layer.self_attn._prepare_group64_projection()
