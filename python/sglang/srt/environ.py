@@ -1599,6 +1599,10 @@ class Envs:
     # intermediate_size_per_partition is a multiple of 256, which for TP8
     # (3072/8 = 384) means padding to 512 at the cost of ~33% expert memory.
     SGLANG_AITER_MXFP4_MOE_INTER_ALIGN = EnvInt(0)
+    # Route Kimi-K3-style h12 + fp8 MLA decode through aiter Triton Gluon when
+    # import and Triton cga_layout prerequisites hold. Set to 0 to force the
+    # zero-pad mla_decode_fwd fallback.
+    SGLANG_AITER_MLA_GLUON = EnvBool(True)
     # Per-operator opt-ins for the gfx950 FlyDSL specializations. Each one
     # fail-closes to the split GEMM chain when the chip, shape or AITER build
     # cannot service it, so enabling one on unsupported hardware is a no-op.
