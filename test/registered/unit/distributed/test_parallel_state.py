@@ -89,6 +89,51 @@ def test_custom_allreduce_precedes_symmetric_memory_pynccl():
     coordinator.pynccl_comm.all_reduce.assert_not_called()
 
 
+def _make_aiter_ag_coordinator(*, enable_register_for_capturing: bool):
+    """Coordinator wired for the aiter custom all-gather capture path."""
+    coordinator = parallel_state.GroupCoordinator.__new__(
+        parallel_state.GroupCoordinator
+    )
+    coordinator.world_size = 8
+    coordinator.unique_name = "test"
+    coordinator.ca_comm = Mock(
+        disabled=False,
+        _IS_CAPTURING=True,
+        enable_register_for_capturing=enable_register_for_capturing,
+    )
+    coordinator.ca_comm.should_custom_ag.return_value = True
+    return coordinator
+
+
+@pytest.mark.parametrize("enable_register_for_capturing", [True, False])
+def test_aiter_all_gather_capture_honors_register_flag(enable_register_for_capturing):
+    """aiter clears enable_register_for_capturing when PyTorch expandable_segments
+    is on, because those VMM pointers cannot be exported with hipIpcGetMemHandle.
+    Calling all_gather_reg anyway makes aiter abort the process while flushing the
+    graph buffers after capture (ROCm/aiter #4174)."""
+    import torch
+
+    coordinator = _make_aiter_ag_coordinator(
+        enable_register_for_capturing=enable_register_for_capturing
+    )
+    input_ = torch.zeros(8, 16, dtype=torch.bfloat16)
+    output = torch.zeros(64, 16, dtype=torch.bfloat16)
+
+    with (
+        patch.object(parallel_state, "is_hip", return_value=True),
+        patch.object(torch.cuda, "is_current_stream_capturing", return_value=True),
+    ):
+        coordinator._all_gather_into_tensor(output, input_)
+
+    ca_comm = coordinator.ca_comm
+    if enable_register_for_capturing:
+        ca_comm.all_gather_reg.assert_called_once_with(input_, out=output, dim=0)
+        ca_comm.all_gather_unreg.assert_not_called()
+    else:
+        ca_comm.all_gather_unreg.assert_called_once_with(input_, out=output, dim=0)
+        ca_comm.all_gather_reg.assert_not_called()
+
+
 def test_parallel_group_construction_tp8_attn_cp2():
     """
     Test parallel group construction for 8 GPU configuration with:

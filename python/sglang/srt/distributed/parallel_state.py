@@ -1139,6 +1139,25 @@ class GroupCoordinator:
             and hasattr(ca_comm, "reduce_scatter")
         )
 
+    def _aiter_capture_can_register(self) -> bool:
+        """Whether capture-time aiter collectives may bind the caller's own
+        pointer (the `_reg` variants) instead of copying into the pre-registered
+        pool.
+
+        Two things veto it. torch_memory_saver CUDA graphs remap the pointers
+        after capture, and PyTorch `expandable_segments` hands out VMM-backed
+        pointers that `hipIpcGetMemHandle` cannot export (ROCm/aiter #4174).
+        Aiter detects the latter itself and reports it through
+        `enable_register_for_capturing`; ignoring that flag here makes the
+        registered path collect an unexportable address that aborts the whole
+        process when aiter flushes the graph buffers at the end of capture.
+        Communicators without the attribute (sglang's own CustomAllreduce) keep
+        the previous behaviour.
+        """
+        if envs.SGLANG_MEMORY_SAVER_CUDA_GRAPH.get():
+            return False
+        return bool(getattr(self.ca_comm, "enable_register_for_capturing", True))
+
     def _maybe_aiter_reduce_scatter(
         self, output: torch.Tensor, input: torch.Tensor
     ) -> bool:
@@ -1167,10 +1186,9 @@ class GroupCoordinator:
             return False
         if getattr(ca_comm, "_IS_CAPTURING", False):
             if torch.cuda.is_current_stream_capturing():
-                if envs.SGLANG_MEMORY_SAVER_CUDA_GRAPH.get():
-                    ca_comm.reduce_scatter(input, output, registered=False)
-                else:
-                    ca_comm.reduce_scatter(input, output, registered=True)
+                ca_comm.reduce_scatter(
+                    input, output, registered=self._aiter_capture_can_register()
+                )
             elif is_in_tc_piecewise_cuda_graph():
                 ca_comm.reduce_scatter(input, output, registered=False)
             else:
@@ -1256,10 +1274,10 @@ class GroupCoordinator:
         ):
             if getattr(ca_comm, "_IS_CAPTURING", False):
                 if torch.cuda.is_current_stream_capturing():
-                    if envs.SGLANG_MEMORY_SAVER_CUDA_GRAPH.get():
-                        ca_comm.all_gather_unreg(input, out=output, dim=0)
-                    else:
+                    if self._aiter_capture_can_register():
                         ca_comm.all_gather_reg(input, out=output, dim=0)
+                    else:
+                        ca_comm.all_gather_unreg(input, out=output, dim=0)
                 elif is_in_tc_piecewise_cuda_graph():
                     ca_comm.all_gather_unreg(input, out=output, dim=0)
                 else:

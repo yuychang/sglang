@@ -1007,6 +1007,7 @@ class AiterAttnBackend(AttentionBackend):
                 head_pad_mode=getattr(self, "head_pad_mode", "none"),
                 num_head=getattr(self, "num_head", layer.tp_q_head_num),
                 kv_cache_dtype=self.kv_cache_dtype,
+                q_dtype=q_mla.dtype,
             )
             and max_q_len == 1
         ):

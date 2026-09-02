@@ -29,6 +29,9 @@ logger = logging.getLogger(__name__)
 _mla_gluon_fn = None
 _mla_gluon_import_failed = False
 _capability_cache: Optional[MlaGluonCapability] = None
+# Failure signatures already warned about; keeps a per-step fallback from
+# flooding the server log (see mla_gluon_decode).
+_reported_decode_failures: set = set()
 
 
 @dataclass(frozen=True)
@@ -215,27 +218,46 @@ def mla_gluon_decode(
         )
         return o
     except Exception as exc:
-        logger.warning(
-            "mla_gluon decode failed (num_head=%s, kv_dtype=%s, batch=%s): %s; "
-            "falling back to zero-pad mla_decode_fwd",
-            layer.tp_q_head_num,
-            k_buffer.dtype,
-            batch_size,
-            exc,
-        )
+        # Once per distinct failure signature: this runs per layer per decode
+        # step, and an unconditional warning turned a single failed launch into
+        # ~20k log lines (a 4.7 MB server.log) on the K3 TP8 run.
+        key = (layer.tp_q_head_num, k_buffer.dtype, q.dtype, str(exc))
+        if key not in _reported_decode_failures:
+            _reported_decode_failures.add(key)
+            logger.warning(
+                "mla_gluon decode failed (num_head=%s, kv_dtype=%s, q_dtype=%s, "
+                "batch=%s): %s; falling back to zero-pad mla_decode_fwd "
+                "(further identical failures are not logged)",
+                layer.tp_q_head_num,
+                k_buffer.dtype,
+                q.dtype,
+                batch_size,
+                exc,
+            )
         return None
 
 
 def prefer_mla_gluon_decode(
-    *, head_pad_mode: str, num_head: int, kv_cache_dtype: torch.dtype
+    *,
+    head_pad_mode: str,
+    num_head: int,
+    kv_cache_dtype: torch.dtype,
+    q_dtype: Optional[torch.dtype] = None,
 ) -> bool:
     """Route Kimi-style h12 zero-pad MLA decode through Gluon when FP8 KV holds.
 
     ``head_pad_mode == "zero"`` selects the legacy ``mla_decode_fwd`` padding
     topology (N heads padded to 16). Gluon is only validated for ``num_head == 12``
     today; other zero-pad head counts must stay on zero-pad + ``mla_decode_fwd``.
+
+    ``q_dtype`` is the caller's fused Q dtype. Every aiter ``mla_gluon`` regime
+    asserts bf16 Q (only KV is quantized), so an FP8 Q -- what the K3 latent-tail
+    /Q-cache fusions produce -- can only raise inside the kernel. Gate on it here
+    instead of paying an exception plus a warning on every decode step.
     """
     if not _mla_gluon_enabled():
+        return False
+    if q_dtype is not None and q_dtype != torch.bfloat16:
         return False
     if head_pad_mode == "zero" and num_head == 12 and kv_cache_dtype == fp8_dtype:
         return _gluon_runtime_ok()
@@ -248,3 +270,4 @@ def reset_mla_gluon_state_for_test() -> None:
     _mla_gluon_fn = None
     _mla_gluon_import_failed = False
     _capability_cache = None
+    _reported_decode_failures.clear()
