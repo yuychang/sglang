@@ -79,6 +79,49 @@ class TestK3HipArResidual(CustomTestCase):
         self.assertIs(got, out)
         ca_comm.custom_all_reduce_residual.assert_called_once_with(x, residual)
 
+    def test_helper_skips_m8_and_above(self):
+        x = torch.zeros(8, 7168, dtype=torch.bfloat16)
+        residual = torch.ones_like(x)
+        ca_comm = Mock()
+        ca_comm.disabled = False
+        group = Mock()
+        group.ca_comm = ca_comm
+        with (
+            patch("sglang.srt.layers.k3_hip_ar_residual.is_hip", return_value=True),
+            patch(
+                "sglang.srt.layers.k3_hip_ar_residual.envs.SGLANG_K3_HIP_AR_RESIDUAL.get",
+                return_value=True,
+            ),
+            patch(
+                "sglang.srt.distributed.parallel_state.get_tp_group",
+                return_value=group,
+            ),
+        ):
+            self.assertIsNone(try_all_reduce_add(x, residual))
+        ca_comm.custom_all_reduce_residual.assert_not_called()
+
+    def test_helper_covers_m4(self):
+        x = torch.zeros(4, 7168, dtype=torch.bfloat16)
+        residual = torch.ones_like(x)
+        out = torch.full_like(x, 3)
+        ca_comm = Mock()
+        ca_comm.disabled = False
+        ca_comm.custom_all_reduce_residual.return_value = out
+        group = Mock()
+        group.ca_comm = ca_comm
+        with (
+            patch("sglang.srt.layers.k3_hip_ar_residual.is_hip", return_value=True),
+            patch(
+                "sglang.srt.layers.k3_hip_ar_residual.envs.SGLANG_K3_HIP_AR_RESIDUAL.get",
+                return_value=True,
+            ),
+            patch(
+                "sglang.srt.distributed.parallel_state.get_tp_group",
+                return_value=group,
+            ),
+        ):
+            self.assertIs(try_all_reduce_add(x, residual), out)
+
     def test_none_residual_uses_plain_custom_ar(self):
         x = torch.zeros(2, 7168, dtype=torch.bfloat16)
         out = torch.ones_like(x)
