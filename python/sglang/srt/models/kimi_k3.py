@@ -643,6 +643,8 @@ class KimiK3MoE(nn.Module):
         self._shared_down_fp8_w = None
         self._shared_down_fp8_s = None
         self._shared_down_fp8_n = 0
+        self._shared_down_fused_w = None
+        self._shared_down_fused_s = None
         self._front_head = None
         self._front_down_w4 = None
         self._front_down_scale4 = None
@@ -943,6 +945,35 @@ class KimiK3MoE(nn.Module):
             in_features,
             token_buckets=(8, 16, 32, 64, 128, 256),
         )
+        self._prepare_shared_down_fused_ptpc_fp8(weight)
+
+    def _prepare_shared_down_fused_ptpc_fp8(self, weight: torch.Tensor) -> None:
+        """Row-major FP8 copy for the single-launch quant+GEMM shared down.
+
+        The fused kernel reads the weight row-major, so it needs its own copy
+        rather than the bpreshuffled one; that is 5.5 MiB per layer per rank
+        on top of the packed tensor, which is why it is only built for the
+        buckets the sweep actually enabled.
+        """
+        try:
+            from sglang.kernels.ops.kimi_k3.flydsl.shared_down_ptpc_fp8 import (
+                enabled_token_buckets,
+                is_available,
+                quantize_shared_down_weight,
+                warmup,
+            )
+        except (ImportError, ModuleNotFoundError):
+            return
+        buckets = enabled_token_buckets()
+        if not buckets or not is_available():
+            return
+        try:
+            packed, scale = quantize_shared_down_weight(weight.contiguous())
+        except ValueError:
+            return
+        self._shared_down_fused_w = packed
+        self._shared_down_fused_s = scale
+        warmup(packed, scale, token_buckets=buckets)
 
     def _prepare_latent_tail_fp8(self) -> None:
         if (
@@ -1433,6 +1464,24 @@ class KimiK3MoE(nn.Module):
     def _run_shared_down(self, x: torch.Tensor, out: torch.Tensor) -> None:
         shared = self.shared_experts
         assert shared is not None
+        if self._shared_down_fused_w is not None:
+            from sglang.kernels.ops.kimi_k3.flydsl.shared_down_ptpc_fp8 import (
+                kimi_k3_shared_down_ptpc_fp8,
+                supports_kimi_k3_shared_down_ptpc_fp8,
+            )
+
+            if supports_kimi_k3_shared_down_ptpc_fp8(
+                x,
+                self._shared_down_fused_w,
+                self._shared_down_fused_s,
+            ):
+                kimi_k3_shared_down_ptpc_fp8(
+                    x,
+                    self._shared_down_fused_w,
+                    self._shared_down_fused_s,
+                    out=out,
+                )
+                return
         if self._shared_down_fp8_w is not None and _k3_ptpc_fp8_batch_ok(x.shape[0]):
             from sglang.kernels.ops.kimi_k3 import ptpc_fp8_aiter_hip
 

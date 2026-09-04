@@ -1533,6 +1533,20 @@ class Envs:
     SGLANG_K3_PTPC_FP8 = EnvBool(False)
     SGLANG_K3_PTPC_FP8_MAX_TOKENS = EnvInt(256)
     SGLANG_K3_PTPC_FP8_SHARED_DOWN = EnvBool(False)
+    # HIP: fuse the shared-down PTPC activation quant into the projection so
+    # the pair costs one launch instead of two. The fused kernel is a
+    # wave-per-row FP32 dot product with no MFMA, so its cost grows with the
+    # batch while the tuned bpreshuffle GEMM stays flat. Standalone CUDA-graph
+    # microbench, fused vs `per_token_quant_hip` + GEMM, per layer:
+    #   M=1  9.26 vs 11.67 us   M=2  9.23 vs 11.85   M=4 10.90 vs 11.98
+    #   M=8 15.72 vs 12.00      M=16 25.06 vs 12.06
+    # so it only owns M in {1, 2, 4}, and a rows_per_wave / cache-modifier
+    # sweep does not recover M=8 (best 15.48). Requires
+    # SGLANG_K3_PTPC_FP8_SHARED_DOWN, and costs a second 5.5 MiB row-major
+    # FP8 weight copy per layer per rank because the fused kernel cannot read
+    # the bpreshuffled layout coalesced. Comma-separated buckets, empty to
+    # disable.
+    SGLANG_K3_PTPC_FUSED_SHARED_DOWN_TOKENS = EnvStr("1,2,4")
     # Below this batch the projections are launch-latency bound rather than
     # weight-bandwidth bound, so the extra activation-quant launch costs more
     # than the halved weight traffic saves.

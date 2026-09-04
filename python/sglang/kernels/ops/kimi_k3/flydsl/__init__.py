@@ -22,6 +22,10 @@ from .kimi_k3_moe_preroute_fp8 import (
     supports_kimi_k3_shared_down_fp8,
     supports_kimi_k3_shared_down_fp8_weight,
 )
+from .shared_down_ptpc_fp8 import (
+    kimi_k3_shared_down_ptpc_fp8,
+    supports_kimi_k3_shared_down_ptpc_fp8,
+)
 from .latent_moe_tail_fp8 import (
     latent_moe_tail_fp8,
     quantize_latent_moe_tail_weight,
@@ -36,6 +40,7 @@ __all__ = [
     "kimi_k3_mla_gate",
     "kimi_k3_moe_tri_projection_fp8",
     "kimi_k3_shared_down_fp8",
+    "kimi_k3_shared_down_ptpc_fp8",
     "latent_moe_tail_fp8",
     "quantize_kimi_k3_kda_input_group64",
     "quantize_latent_moe_tail_weight",
@@ -44,5 +49,6 @@ __all__ = [
     "supports_kimi_k3_moe_tri_projection_fp8",
     "supports_kimi_k3_shared_down_fp8",
     "supports_kimi_k3_shared_down_fp8_weight",
+    "supports_kimi_k3_shared_down_ptpc_fp8",
     "supports_latent_moe_tail_fp8",
 ]
