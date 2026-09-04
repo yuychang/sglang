@@ -132,22 +132,6 @@ def test_fused_mla_q_cache_graph_replay_uses_changed_inputs():
     torch.testing.assert_close(values["kv_cache"][:64], expected_k)
 
 
-def test_fused_mla_q_cache_writes_padded_q_out():
-    values = _inputs(2, dtypes.fp8, dtypes.fp8)
-    padded = torch.full(
-        (2, 16, 576), 7, device="cuda", dtype=values["out"].dtype
-    )
-    values["out"] = padded
-    assert mla_q_cache_aiter_hip.covered(**values)
-    expected_q, _ = _reference(values)
-    actual = mla_q_cache_aiter_hip.run(**values)
-    torch.cuda.synchronize()
-    torch.testing.assert_close(
-        actual[:, :12].float(), expected_q.float(), atol=0.02, rtol=0.02
-    )
-    assert torch.equal(actual[:, 12:, :].view(torch.uint8), padded[:, 12:, :].view(torch.uint8))
-
-
 def test_fused_mla_q_cache_support_is_narrow():
     values = _inputs(1)
     assert mla_q_cache_aiter_hip.covered(**values)

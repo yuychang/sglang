@@ -103,14 +103,10 @@ def covered(
         and sin_cache.dtype == torch.bfloat16
         and cos_cache.device == q_nope.device
         and sin_cache.device == q_nope.device
-        and out.ndim == 3
-        and out.shape[0] == tokens
-        and out.shape[1] >= heads
-        and out.shape[2] == _HEAD_DIM
+        and out.shape == (tokens, heads, _HEAD_DIM)
         # AITER decode consumes FP8 Q alongside FP8 KV, while Triton decode
         # keeps Q in BF16 and only stores KV as FP8. The AITER fused operator
-        # supports q_out and kv_cache with independent dtypes. Extra out heads
-        # stay untouched so 12-head K3 can write into a 16-head MLA pad buffer.
+        # supports q_out and kv_cache with independent dtypes.
         and out.dtype in (q_nope.dtype, kv_cache.dtype)
         and out.is_contiguous()
     )
