@@ -7,8 +7,8 @@ token-parallel fused AR+RMSNorm 1-stage kernel loses to the element-parallel
 1-stage AR used for c2/c4 decode.
 
 This helper launches that same element-parallel 1-stage kernel with the
-prefix add folded into the fp32 writeback. 2-stage sizes stay on split
-AR + ``_agg_kernel`` HAS_ADD (fail closed).
+prefix add folded into the fp32 writeback. Enabled by default on HIP;
+2-stage sizes stay on split AR + ``_agg_kernel`` HAS_ADD (fail closed).
 
 Aggregation 2 (the MLP-side mixer) is *before* MoE, so it cannot be folded
 into ``latent_tail``. The adjacent MoE-side pair is AR2 then latent_tail;

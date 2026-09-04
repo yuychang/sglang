@@ -1488,9 +1488,10 @@ class Envs:
     SGLANG_K3_FUSED_AR_RMSNORM = EnvBool(True)
     # HIP: fold the K3 attn-res prefix add into AITER's element-parallel
     # 1-stage custom all-reduce (NVIDIA-style AR1 residual, without RMSNorm).
-    # 2-stage sizes stay on split AR + agg HAS_ADD. Default off until the
-    # M=2 CUDA-graph microbench beats AR + HAS_ADD; set 1 to enable.
-    SGLANG_K3_HIP_AR_RESIDUAL = EnvBool(False)
+    # 2-stage sizes stay on split AR + agg HAS_ADD. Default on: M=2 CUDA-graph
+    # microbench of AR+HAS_ADD vs fused AR+res+agg was 17.90 vs 17.01 us.
+    # Set 0 to restore HAS_ADD inside `_agg_kernel`.
+    SGLANG_K3_HIP_AR_RESIDUAL = EnvBool(True)
     # K3 SP-MoE fused residual + reduce-scatter and matching all-gather over
     # CustomAllReduceV2's MNNVL push workspace. Auto-probed for the validated
     # TP8 GB300 configuration; set 0/1 to override. See
