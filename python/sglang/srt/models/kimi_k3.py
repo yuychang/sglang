@@ -2887,11 +2887,12 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
         out_heads = heads
         if not triton_decode and self.current_attention_backend == "aiter":
             backend = get_attn_backend()
+            decode_backend = getattr(backend, "decode_backend", backend)
             if (
-                getattr(backend, "head_pad_mode", None) == "zero"
-                and getattr(backend, "num_head_padded", heads) > heads
+                getattr(decode_backend, "head_pad_mode", None) == "zero"
+                and getattr(decode_backend, "num_head_padded", heads) > heads
             ):
-                out_heads = int(backend.num_head_padded)
+                out_heads = int(decode_backend.num_head_padded)
         out = self._mla_q_out_buffer(
             tokens,
             out_heads,
