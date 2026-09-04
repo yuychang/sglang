@@ -2899,6 +2899,12 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
             q_nope_out.device,
             zero_unused_heads=out_heads > heads,
         )
+        # The AITER decode assembly may reuse Q as scratch, so dummy pad heads
+        # cannot rely on allocation-time initialization across graph replays.
+        # Refresh only the four unused heads before the fused producer writes
+        # the twelve real heads.
+        if out_heads > heads:
+            out[:, heads:, :].zero_()
         if not mla_q_cache_aiter_hip.covered(
             q_nope_out,
             q_pe,
