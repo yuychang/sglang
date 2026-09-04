@@ -1538,10 +1538,12 @@ class Envs:
     # wave-per-row FP32 dot product with no MFMA, so its cost grows with the
     # batch while the tuned bpreshuffle GEMM stays flat. Standalone CUDA-graph
     # microbench, fused vs `per_token_quant_hip` + GEMM, per layer:
-    #   M=1  9.26 vs 11.67 us   M=2  9.23 vs 11.85   M=4 10.90 vs 11.98
-    #   M=8 15.72 vs 12.00      M=16 25.06 vs 12.06
+    #   M=1  9.26 vs 11.74 us   M=2  9.29 vs 11.97   M=4 10.82 vs 11.92
+    #   M=8 15.68 vs 11.91      M=16 25.16 vs 12.01
     # so it only owns M in {1, 2, 4}, and a rows_per_wave / cache-modifier
-    # sweep does not recover M=8 (best 15.48). Requires
+    # sweep does not recover M=8 (best 15.48). On the mxmoe 16K recipe that
+    # is c2 TTT/GPU 161.12 vs 160.56 tok/s (+0.35%, TPOT 13.26 vs 13.31 ms)
+    # and c8-c64 flat, with GSM8K 1319q p256 at 0.949 against 0.941. Requires
     # SGLANG_K3_PTPC_FP8_SHARED_DOWN, and costs a second 5.5 MiB row-major
     # FP8 weight copy per layer per rank because the fused kernel cannot read
     # the bpreshuffled layout coalesced. Comma-separated buckets, empty to

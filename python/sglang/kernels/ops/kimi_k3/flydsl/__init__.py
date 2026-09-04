@@ -22,14 +22,14 @@ from .kimi_k3_moe_preroute_fp8 import (
     supports_kimi_k3_shared_down_fp8,
     supports_kimi_k3_shared_down_fp8_weight,
 )
-from .shared_down_ptpc_fp8 import (
-    kimi_k3_shared_down_ptpc_fp8,
-    supports_kimi_k3_shared_down_ptpc_fp8,
-)
 from .latent_moe_tail_fp8 import (
     latent_moe_tail_fp8,
     quantize_latent_moe_tail_weight,
     supports_latent_moe_tail_fp8,
+)
+from .shared_down_ptpc_fp8 import (
+    kimi_k3_shared_down_ptpc_fp8,
+    supports_kimi_k3_shared_down_ptpc_fp8,
 )
 
 __all__ = [
