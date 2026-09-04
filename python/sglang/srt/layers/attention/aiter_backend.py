@@ -932,6 +932,13 @@ class AiterAttnBackend(AttentionBackend):
         q / o must already be shaped (..., num_head, head_dim).
         """
         num_head = layer.tp_q_head_num
+        if q.shape[1] == self.num_head_padded:
+            o = q.new_empty(
+                (q.shape[0], self.num_head_padded, layer.v_head_dim),
+                dtype=self.input_dtype,
+            )
+            mla_decode_fwd(q, k_buffer_flat, o, **kwargs)
+            return o[:, :num_head, :]
         if self.head_pad_mode == "repeat" or (
             self.head_pad_mode == "none" and self.num_head_padded != self.num_head
         ):
@@ -999,7 +1006,10 @@ class AiterAttnBackend(AttentionBackend):
         k_descale,
     ):
         k_buffer = self.token_to_kv_pool.get_key_buffer(layer.layer_id)
-        q_mla = q.view(-1, layer.tp_q_head_num, layer.qk_head_dim)
+        if q.ndim == 3:
+            q_mla = q
+        else:
+            q_mla = q.view(-1, layer.tp_q_head_num, layer.qk_head_dim)
         max_q_len = self.forward_metadata.max_q_len or 1
 
         if (
@@ -2944,7 +2954,15 @@ class AiterAttnBackend(AttentionBackend):
         save_kv_cache=True,
         sinks=None,
     ):
-        q = q.reshape(-1, layer.tp_q_head_num * layer.qk_head_dim)
+        q_pre_padded = (
+            self.use_mla
+            and getattr(self, "head_pad_mode", "none") == "zero"
+            and q.ndim == 3
+            and q.shape[1] == getattr(self, "num_head_padded", -1)
+            and q.shape[-1] == layer.qk_head_dim
+        )
+        if not q_pre_padded:
+            q = q.reshape(-1, layer.tp_q_head_num * layer.qk_head_dim)
 
         k_descale = None
         v_descale = None

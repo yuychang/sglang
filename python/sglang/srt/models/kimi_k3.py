@@ -2855,7 +2855,10 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
             return None
 
         from sglang.kernels.ops.kimi_k3 import mla_q_cache_aiter_hip
-        from sglang.srt.model_executor.forward_context import get_token_to_kv_pool
+        from sglang.srt.model_executor.forward_context import (
+            get_attn_backend,
+            get_token_to_kv_pool,
+        )
 
         kv_cache = get_token_to_kv_pool().get_key_buffer(self.attn_mqa.layer_id)
         scale = self.attn_mqa.k_scale
@@ -2873,12 +2876,29 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
 
         # AITER decode uses FP8 Q when the cache is FP8. Triton decode keeps
         # Q/Q-PE in BF16 while sharing the same fused FP8 cache write.
+        # Head-pad mode "zero" (12 -> 16) used to allocate a fresh padded
+        # buffer per layer (`new_zeros` + float8_copy). Write the fused Q
+        # directly into a persistent 16-head buffer instead; dummy heads stay
+        # zero after the first alloc.
         triton_decode = self.current_attention_backend in ("triton", "triton_mla")
         q_out_dtype = q_nope_out.dtype if triton_decode else kv_cache.dtype
-        out = torch.empty(
-            (*q_nope_out.shape[:-1], self.kv_lora_rank + self.qk_rope_head_dim),
-            dtype=q_out_dtype,
-            device=q_nope_out.device,
+        tokens, heads = q_nope_out.shape[0], q_nope_out.shape[1]
+        head_dim = self.kv_lora_rank + self.qk_rope_head_dim
+        out_heads = heads
+        if not triton_decode and self.current_attention_backend == "aiter":
+            backend = get_attn_backend()
+            if (
+                getattr(backend, "head_pad_mode", None) == "zero"
+                and getattr(backend, "num_head_padded", heads) > heads
+            ):
+                out_heads = int(backend.num_head_padded)
+        out = self._mla_q_out_buffer(
+            tokens,
+            out_heads,
+            head_dim,
+            q_out_dtype,
+            q_nope_out.device,
+            zero_unused_heads=out_heads > heads,
         )
         if not mla_q_cache_aiter_hip.covered(
             q_nope_out,
@@ -2915,6 +2935,30 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
             device=k_nope.device,
         )
         return q, k_placeholder
+
+    def _mla_q_out_buffer(
+        self,
+        tokens: int,
+        heads: int,
+        head_dim: int,
+        dtype: torch.dtype,
+        device: torch.device,
+        zero_unused_heads: bool,
+    ) -> torch.Tensor:
+        """Persistent fused-Q workspace. Dummy MLA pad heads are zeroed once."""
+        buf = getattr(self, "_k3_mla_q_out", None)
+        if (
+            not isinstance(buf, torch.Tensor)
+            or buf.dtype != dtype
+            or buf.device != device
+            or buf.shape[1] != heads
+            or buf.shape[2] != head_dim
+            or buf.shape[0] < tokens
+        ):
+            alloc = torch.zeros if zero_unused_heads else torch.empty
+            buf = alloc((tokens, heads, head_dim), dtype=dtype, device=device)
+            self._k3_mla_q_out = buf
+        return buf[:tokens]
 
     @staticmethod
     def _split_kv_b_weight_loader(param, loaded_weight) -> None:
