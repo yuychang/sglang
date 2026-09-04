@@ -1486,6 +1486,11 @@ class Envs:
     # (>= 80 KiB on TP8). 1-stage sizes stay on split AR + RMSNorm / latent-tail.
     # Default on; set 0 to restore the unfused path.
     SGLANG_K3_FUSED_AR_RMSNORM = EnvBool(True)
+    # HIP: fold the K3 attn-res prefix add into AITER's element-parallel
+    # 1-stage custom all-reduce (NVIDIA-style AR1 residual, without RMSNorm).
+    # 2-stage sizes stay on split AR + agg HAS_ADD. Default off until the
+    # M=2 CUDA-graph microbench beats AR + HAS_ADD; set 1 to enable.
+    SGLANG_K3_HIP_AR_RESIDUAL = EnvBool(False)
     # K3 SP-MoE fused residual + reduce-scatter and matching all-gather over
     # CustomAllReduceV2's MNNVL push workspace. Auto-probed for the validated
     # TP8 GB300 configuration; set 0/1 to override. See
