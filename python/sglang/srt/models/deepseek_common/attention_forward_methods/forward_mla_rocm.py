@@ -125,6 +125,36 @@ if _use_aiter_gfx95:
     from sglang.srt.layers.rocm_linear_utils import fused_qk_rope_cat_and_cache_mla
 
 
+def _is_unit_host_scale(scale) -> bool:
+    """True when ``scale`` is a Python 1.0 (the DeepSeek MLA default).
+
+    A tensor scale must still be applied; do not call ``.item()`` here because
+    this runs inside CUDA-graph capture.
+    """
+    if scale is None:
+        return True
+    if isinstance(scale, torch.Tensor):
+        return False
+    try:
+        return float(scale) == 1.0
+    except (TypeError, ValueError):
+        return False
+
+
+def _bf16_absorb_weight(weight: torch.Tensor, scale) -> torch.Tensor:
+    """``weight.to(bf16) * scale``, skipping the kernel when scale is host 1.0.
+
+    ``DeepseekV2AttentionMLA.w_scale`` defaults to the Python float ``1.0``.
+    ``w.to(bf16) * 1.0`` still launches AUnary ``MulFunctor`` on the full
+    absorbed weight every layer; CUDA graphs capture it (~4.5 us × 2 BMMs per
+    MLA layer on MI355X decode).
+    """
+    w = weight.to(dtype=torch.bfloat16)
+    if _is_unit_host_scale(scale):
+        return w
+    return w * scale
+
+
 def rocm_absorb_q_bmm(
     attn: DeepseekV2AttentionMLA,
     q_nope: torch.Tensor,
@@ -170,7 +200,7 @@ def rocm_absorb_q_bmm(
         else:
             q_nope_out = torch.bmm(
                 q_nope.to(torch.bfloat16).transpose(0, 1),
-                attn.w_kc.to(torch.bfloat16) * attn.w_scale,
+                _bf16_absorb_weight(attn.w_kc, attn.w_scale),
             )
     return q_nope_out
 
@@ -227,7 +257,7 @@ def rocm_absorb_v_bmm(
         else:
             attn_bmm_output = torch.bmm(
                 attn_output.to(torch.bfloat16).transpose(0, 1),
-                attn.w_vc.to(torch.bfloat16) * attn.w_scale,
+                _bf16_absorb_weight(attn.w_vc, attn.w_scale),
             )
 
     if _bmm_buf is not None:
