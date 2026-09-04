@@ -2885,14 +2885,12 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
         tokens, heads = q_nope_out.shape[0], q_nope_out.shape[1]
         head_dim = self.kv_lora_rank + self.qk_rope_head_dim
         out_heads = heads
-        if not triton_decode and self.current_attention_backend == "aiter":
+        # AITER 12-head decode zero-pads Q to 16 for mla_a8w8_qh16. The fused
+        # kernel indexes q_out by q_nope heads and leaves dummy heads untouched.
+        if heads == 12 and q_out_dtype != torch.bfloat16:
             backend = get_attn_backend()
             decode_backend = getattr(backend, "decode_backend", backend)
-            if (
-                getattr(decode_backend, "head_pad_mode", None) == "zero"
-                and getattr(decode_backend, "num_head_padded", heads) > heads
-            ):
-                out_heads = int(decode_backend.num_head_padded)
+            out_heads = int(getattr(decode_backend, "num_head_padded", 16) or 16)
         out = self._mla_q_out_buffer(
             tokens,
             out_heads,
