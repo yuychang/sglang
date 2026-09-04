@@ -771,6 +771,15 @@ class AiterAttnBackend(AttentionBackend):
         q / o must already be shaped (..., num_head, head_dim).
         """
         n_heads = layer.tp_q_head_num
+        # Fused MLA Q may already occupy the 16-head pad buffer (dummy heads
+        # zeroed by the producer). Skip Fill(fp8)+float8_copy in that case.
+        if q.shape[1] == self.num_head_padded:
+            o = q.new_empty(
+                (q.shape[0], self.num_head_padded, layer.v_head_dim),
+                dtype=self.input_dtype,
+            )
+            mla_decode_fwd(q, k_buffer_flat, o, **kwargs)
+            return o[:, :n_heads, :]
         if n_heads < 16:
             if 16 % n_heads == 0:
                 q_in = q.repeat_interleave(16 // n_heads, dim=1)
@@ -791,6 +800,16 @@ class AiterAttnBackend(AttentionBackend):
             )
             mla_decode_fwd(q, k_buffer_flat, o, **kwargs)
             return o
+
+    def _mla_q_heads(self, q: torch.Tensor, layer) -> torch.Tensor:
+        """Keep a pre-padded (tokens, num_head_padded, dim) Q; else pack to tp heads."""
+        if (
+            q.ndim == 3
+            and q.shape[-1] == layer.qk_head_dim
+            and q.shape[1] in (layer.tp_q_head_num, self.num_head_padded)
+        ):
+            return q
+        return q.view(-1, layer.tp_q_head_num, layer.qk_head_dim)
 
     def mla_fp8_prefill_attn(
         self,
@@ -2530,7 +2549,14 @@ class AiterAttnBackend(AttentionBackend):
         save_kv_cache=True,
         sinks=None,
     ):
-        q = q.reshape(-1, layer.tp_q_head_num * layer.qk_head_dim)
+        q_pre_padded = (
+            self.use_mla
+            and q.ndim == 3
+            and q.shape[1] == getattr(self, "num_head_padded", -1)
+            and q.shape[-1] == layer.qk_head_dim
+        )
+        if not q_pre_padded:
+            q = q.reshape(-1, layer.tp_q_head_num * layer.qk_head_dim)
 
         k_descale = None
         v_descale = None
@@ -2625,7 +2651,7 @@ class AiterAttnBackend(AttentionBackend):
             num_kv_splits = self.forward_metadata.num_kv_splits
 
             o = self._mla_decode_fwd_with_head_pad(
-                q.view(-1, layer.tp_q_head_num, layer.qk_head_dim),
+                self._mla_q_heads(q, layer),
                 k_buffer.view(-1, 1, 1, layer.qk_head_dim),
                 layer,
                 qo_indptr=self.forward_metadata.qo_indptr,

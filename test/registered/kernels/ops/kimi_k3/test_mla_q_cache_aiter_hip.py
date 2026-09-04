@@ -139,6 +139,20 @@ def test_fused_mla_q_cache_support_is_narrow():
     assert not mla_q_cache_aiter_hip.covered(**values)
 
 
+def test_fused_mla_q_cache_writes_into_padded_out():
+    values = _inputs(4, cache_dtype=dtypes.fp8, output_dtype=dtypes.fp8)
+    heads = values["q_nope"].shape[1]
+    padded = torch.empty((4, 16, 576), device="cuda", dtype=dtypes.fp8)
+    padded.view(torch.uint8).fill_(7)
+    values["out"] = padded
+    assert mla_q_cache_aiter_hip.covered(**values)
+    actual = mla_q_cache_aiter_hip.run(**values)
+    torch.cuda.synchronize()
+    expected_q, _ = _reference(values)
+    torch.testing.assert_close(actual[:, :heads].float(), expected_q.float(), atol=0.02, rtol=0.02)
+    assert torch.equal(actual[:, heads:], padded[:, heads:])
+
+
 if __name__ == "__main__":
     import sys
 
