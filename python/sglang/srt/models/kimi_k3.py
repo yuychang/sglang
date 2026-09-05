@@ -2911,6 +2911,7 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
             True,
             q_out=out,
             q_out_dtype=q_out_dtype,
+            compute_all_q_rope=False,
         )
         k_placeholder = torch.empty(
             (k_nope.shape[0], 1, self.kv_lora_rank + self.qk_rope_head_dim),
