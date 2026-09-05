@@ -2845,10 +2845,12 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
         if not self._k3_mla_q_cache_fusion:
             return None
 
-        from sglang.kernels.ops.kimi_k3 import mla_q_cache_aiter_hip
         from sglang.srt.model_executor.forward_context import (
             get_attn_backend,
             get_token_to_kv_pool,
+        )
+        from sglang.srt.layers.rocm_linear_utils import (
+            fused_qk_rope_cat_and_cache_mla,
         )
 
         kv_cache = get_token_to_kv_pool().get_key_buffer(self.attn_mqa.layer_id)
@@ -2891,7 +2893,16 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
         )
         if out_heads > heads:
             out[:, heads:, :].zero_()
-        if not mla_q_cache_aiter_hip.covered(
+        if (
+            q_nope_out.shape != (tokens, heads, self.kv_lora_rank)
+            or q_pe.shape != (tokens, heads, self.qk_rope_head_dim)
+            or k_nope.shape != (tokens, 1, self.kv_lora_rank)
+            or k_pe.shape != (tokens, 1, self.qk_rope_head_dim)
+            or out_cache_loc.shape != (tokens,)
+            or positions.shape != (tokens,)
+        ):
+            return None
+        q, _, _, _ = fused_qk_rope_cat_and_cache_mla(
             q_nope_out,
             q_pe,
             k_nope,
@@ -2899,26 +2910,12 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
             kv_cache,
             out_cache_loc,
             positions,
-            scale,
             cos_cache,
             sin_cache,
-            out,
-            self._k3_mla_q_cache_scale,
-        ):
-            return None
-        q = mla_q_cache_aiter_hip.run(
-            q_nope=q_nope_out,
-            q_pe=q_pe,
-            k_nope=k_nope,
-            k_pe=k_pe,
-            kv_cache=kv_cache,
-            slot_mapping=out_cache_loc,
-            positions=positions,
-            k_scale=scale,
-            cos_cache=cos_cache,
-            sin_cache=sin_cache,
-            out=out,
-            q_scale=self._k3_mla_q_cache_scale,
+            scale,
+            True,
+            q_out=out,
+            q_out_dtype=q_out_dtype,
         )
         k_placeholder = torch.empty(
             (k_nope.shape[0], 1, self.kv_lora_rank + self.qk_rope_head_dim),
