@@ -1028,15 +1028,11 @@ class AiterAttnBackend(AttentionBackend):
     ):
         k_buffer = self.token_to_kv_pool.get_key_buffer(layer.layer_id)
         q_mla = self._mla_q_heads(q, layer)
-        q_scale = (
-            getattr(layer, "_k3_mla_q_scale", k_descale)
-            if q_mla.dtype == fp8_dtype
-            else k_descale
-        )
         max_q_len = self.forward_metadata.max_q_len or 1
 
         if (
-            prefer_mla_gluon_decode(
+            envs.SGLANG_AITER_MLA_GLUON.get()
+            and prefer_mla_gluon_decode(
                 head_pad_mode=getattr(self, "head_pad_mode", "none"),
                 num_head=getattr(self, "num_head", layer.tp_q_head_num),
                 kv_cache_dtype=self.kv_cache_dtype,
@@ -1084,7 +1080,7 @@ class AiterAttnBackend(AttentionBackend):
             reduce_indptr=reduce_indptr,
             reduce_final_map=reduce_final_map,
             reduce_partial_map=reduce_partial_map,
-            q_scale=q_scale,
+            q_scale=k_descale,
             kv_scale=k_descale,
             intra_batch_mode=intra_batch_mode,
             num_kv_splits=num_kv_splits,
