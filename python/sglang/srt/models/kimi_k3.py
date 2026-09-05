@@ -2845,10 +2845,7 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
         if not self._k3_mla_q_cache_fusion:
             return None
 
-        from sglang.srt.model_executor.forward_context import (
-            get_attn_backend,
-            get_token_to_kv_pool,
-        )
+        from sglang.srt.model_executor.forward_context import get_token_to_kv_pool
         from sglang.srt.layers.rocm_linear_utils import (
             fused_qk_rope_cat_and_cache_mla,
         )
@@ -2877,13 +2874,11 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
         q_out_dtype = q_nope_out.dtype if triton_decode else kv_cache.dtype
         tokens, heads = q_nope_out.shape[0], q_nope_out.shape[1]
         head_dim = self.kv_lora_rank + self.qk_rope_head_dim
+        # The upstream Triton producer owns only the real heads. AITER performs
+        # its established 12 -> 16 pad before mla_a8w8; passing a persistent
+        # 16-head producer output faults when the consumer reuses Q as scratch
+        # during CUDA-graph replay.
         out_heads = heads
-        # AITER 12-head decode zero-pads Q to 16 for mla_a8w8_qh16. The fused
-        # kernel indexes q_out by q_nope heads and leaves dummy heads untouched.
-        if heads == 12 and q_out_dtype != torch.bfloat16:
-            backend = get_attn_backend()
-            decode_backend = getattr(backend, "decode_backend", backend)
-            out_heads = int(getattr(decode_backend, "num_head_padded", 16) or 16)
         out = self._mla_q_out_buffer(
             tokens,
             out_heads,
