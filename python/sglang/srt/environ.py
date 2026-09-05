@@ -1635,6 +1635,7 @@ class Envs:
     # move the top-k selection.
     SGLANG_K3_PTPC_FP8 = EnvBool(False)
     SGLANG_K3_PTPC_FP8_MAX_TOKENS = EnvInt(256)
+    SGLANG_K3_PTPC_FP8_SHARED_DOWN = EnvBool(False)
     # Below this batch the projections are launch-latency bound, so the extra
     # activation-quant launch costs more than the halved weight traffic saves.
     SGLANG_K3_PTPC_FP8_MIN_TOKENS = EnvInt(8)

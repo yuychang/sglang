@@ -152,6 +152,7 @@ _moe_latent_mxfp4_min_tokens = envs.SGLANG_K3_MOE_LATENT_MXFP4_MIN_TOKENS.get()
 _k3_ptpc_fp8 = _is_hip and envs.SGLANG_K3_PTPC_FP8.get()
 _k3_ptpc_fp8_max_tokens = envs.SGLANG_K3_PTPC_FP8_MAX_TOKENS.get()
 _k3_ptpc_fp8_min_tokens = envs.SGLANG_K3_PTPC_FP8_MIN_TOKENS.get()
+_k3_ptpc_fp8_shared_down = _is_hip and envs.SGLANG_K3_PTPC_FP8_SHARED_DOWN.get()
 
 
 def _k3_ptpc_fp8_batch_ok(num_tokens: int) -> bool:
@@ -643,6 +644,9 @@ class KimiK3MoE(nn.Module):
         self._latent_up_fp8_w = None
         self._latent_up_fp8_s = None
         self._latent_up_fp8_n = 0
+        self._shared_down_fp8_w = None
+        self._shared_down_fp8_s = None
+        self._shared_down_fp8_n = 0
         self._front_head = None
         self._front_down_w4 = None
         self._front_down_scale4 = None
@@ -916,6 +920,33 @@ class KimiK3MoE(nn.Module):
             in_features,
         )
 
+    def _prepare_shared_down_ptpc_fp8(self) -> None:
+        """Quantize the shared-expert down projection for decode."""
+        if not _k3_ptpc_fp8_shared_down or self.shared_experts is None:
+            return
+        from sglang.kernels.ops.kimi_k3 import ptpc_fp8_aiter_hip
+
+        weight = self.shared_experts.down_proj.weight
+        if (
+            not ptpc_fp8_aiter_hip.available()
+            or not isinstance(weight, torch.Tensor)
+            or weight.dtype != torch.bfloat16
+            or weight.ndim != 2
+        ):
+            return
+        _, in_features = weight.shape
+        (
+            self._shared_down_fp8_w,
+            self._shared_down_fp8_s,
+            self._shared_down_fp8_n,
+        ) = ptpc_fp8_aiter_hip.pack(weight.contiguous())
+        ptpc_fp8_aiter_hip.warmup(
+            self._shared_down_fp8_w,
+            self._shared_down_fp8_s,
+            self._shared_down_fp8_n,
+            in_features,
+            token_buckets=(8, 16, 32, 64, 128, 256),
+        )
 
     def _prepare_latent_tail_fp8(self) -> None:
         if (
@@ -1406,6 +1437,18 @@ class KimiK3MoE(nn.Module):
     def _run_shared_down(self, x: torch.Tensor, out: torch.Tensor) -> None:
         shared = self.shared_experts
         assert shared is not None
+        if self._shared_down_fp8_w is not None and _k3_ptpc_fp8_batch_ok(x.shape[0]):
+            from sglang.kernels.ops.kimi_k3 import ptpc_fp8_aiter_hip
+
+            if ptpc_fp8_aiter_hip.covered(x, self._shared_down_fp8_w):
+                ptpc_fp8_aiter_hip.run(
+                    x,
+                    self._shared_down_fp8_w,
+                    self._shared_down_fp8_s,
+                    self._shared_down_fp8_n,
+                    out=out,
+                )
+                return
         _k3_bf16_gemm(x, shared.down_proj.weight, out=out)
 
     def _forward_shared(
@@ -3984,6 +4027,7 @@ class KimiK3LinearForCausalLM(nn.Module):
                 layer.mlp._prepare_preroute_fp8()
                 layer.mlp._prepare_latent_tail_fp8()
                 layer.mlp._prepare_latent_up_ptpc_fp8()
+                layer.mlp._prepare_shared_down_ptpc_fp8()
                 # Convert the correction bias to whatever dtype the router
                 # wants (fp32, or the gate-logit dtype under aiter) once here,
                 # so topk's per-call cast becomes a no-op. Both are exact.
