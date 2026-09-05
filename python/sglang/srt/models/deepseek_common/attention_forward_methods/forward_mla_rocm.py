@@ -335,11 +335,13 @@ def _fused_rope_cat_and_cache(
     kv_cache_dtype = (
         fp8_dtype if attn.kv_cache_dtype == "fp8_e4m3" else q_nope_out.dtype
     )
-    # Gluon MLA decode (bh16bn128) requires bf16 Q; vLLM #50563.
+    # Gluon MLA decode (bh16bn128) requires BF16 Q. When Gluon is explicitly
+    # disabled, keep Q in FP8 and use the supported A8W8 ASM decode path.
     q_out_dtype = (
         q_nope_out.dtype
         if attn.kv_cache_dtype == "fp8_e4m3"
         and attn.current_attention_backend == "aiter"
+        and envs.SGLANG_AITER_MLA_GLUON.get()
         else kv_cache_dtype
     )
     return fused_qk_rope_cat_and_cache_mla(
