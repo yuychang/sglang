@@ -2866,28 +2866,9 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
 
         # AITER decode uses FP8 Q when the cache is FP8. Triton decode keeps
         # Q/Q-PE in BF16 while sharing the same fused FP8 cache write.
-        # Head-pad 12 -> 16 used to allocate a fresh padded buffer per layer
-        # (`pad` = Fill(fp8)+float8_copy). Write fused Q into a persistent
-        # 16-head buffer instead. Dummy heads cannot stay at allocation-time
-        # zeros: the decode asm may reuse Q as scratch across graph replays.
         triton_decode = self.current_attention_backend in ("triton", "triton_mla")
         q_out_dtype = q_nope_out.dtype if triton_decode else kv_cache.dtype
         tokens, heads = q_nope_out.shape[0], q_nope_out.shape[1]
-        head_dim = self.kv_lora_rank + self.qk_rope_head_dim
-        # The upstream Triton producer owns only the real heads. AITER performs
-        # its established 12 -> 16 pad before mla_a8w8; passing a persistent
-        # 16-head producer output faults when the consumer reuses Q as scratch
-        # during CUDA-graph replay.
-        out_heads = heads
-        out = self._mla_q_out_buffer(
-            tokens,
-            out_heads,
-            head_dim,
-            q_out_dtype,
-            q_nope_out.device,
-        )
-        if out_heads > heads:
-            out[:, heads:, :].zero_()
         if (
             q_nope_out.shape != (tokens, heads, self.kv_lora_rank)
             or q_pe.shape != (tokens, heads, self.qk_rope_head_dim)
@@ -2909,7 +2890,6 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
             sin_cache,
             scale,
             True,
-            q_out=out,
             q_out_dtype=q_out_dtype,
             compute_all_q_rope=False,
         )
