@@ -1,3 +1,4 @@
+import sys
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -80,9 +81,8 @@ def test_situ_routed_moe_returns_published_output_buffer():
             "take",
             return_value=(packed_topk, x_quant, x_scale),
         ),
-        patch.object(
-            mxfp4_module,
-            "trtllm_fp4_block_scale_routed_moe",
+        patch(
+            "sglang.srt.layers.quantization.mxfp4.trtllm_fp4_block_scale_routed_moe",
             side_effect=fake_routed_moe,
             create=True,
         ),
@@ -106,3 +106,7 @@ def test_situ_routed_moe_returns_published_output_buffer():
     assert returned_ptr != latent.data_ptr()
     assert combine_input.hidden_states.data_ptr() == latent.data_ptr()
     torch.testing.assert_close(combine_input.hidden_states, expected, rtol=0, atol=0)
+
+
+if __name__ == "__main__":
+    sys.exit(pytest.main([__file__, "-v"]))

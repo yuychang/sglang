@@ -172,6 +172,13 @@ def _uses_modelopt_fp8_pb_wo(
     return resolver is not None and resolver(prefix) == "FP8_PB_WO"
 
 
+def _uses_split_gguf_kv_b(
+    quant_config: Optional[QuantizationConfig],
+) -> bool:
+    """Whether a K3 checkpoint stores MLA K/V as separate GGUF tensors."""
+    return bool(getattr(quant_config, "supports_kimi_k3_split_gguf_kv_b", False))
+
+
 def _maybe_map_fp8_pb_scale_name(name: str, params_dict: dict) -> str:
     """Map ModelOpt FP8_PB_WO scale keys to SGLang block-FP8 params."""
     if name.endswith(".weight_scale"):
@@ -2602,6 +2609,9 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
         alt_stream: Optional[torch.cuda.Stream] = None,
         gate_alt_stream: Optional[torch.cuda.Stream] = None,
     ) -> None:
+        # ModelSlim can quantize K3 latent projections while still storing
+        # MLA kv_b_proj as one dense tensor; only GGUF expert packs split K/V.
+        split_gguf_kv_b = _uses_split_gguf_kv_b(quant_config)
         self.all_reduce_fusion = all_reduce_fusion
         self.use_output_gate = getattr(config, "mla_use_output_gate", False)
         # The fused Ascend split+RMSNorm path is not numerically equivalent for
@@ -2623,6 +2633,51 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
             reduce_results=not self.all_reduce_fusion,
             alt_stream=alt_stream,
         )
+        if split_gguf_kv_b:
+            del self.fused_qkv_a_proj_with_mqa
+            del self.kv_b_proj
+            self.q_a_proj = ReplicatedLinear(
+                config.hidden_size,
+                config.q_lora_rank,
+                bias=False,
+                quant_config=quant_config,
+                prefix=f"{prefix}.q_a_proj",
+            )
+            self.kv_a_proj_with_mqa = ReplicatedLinear(
+                config.hidden_size,
+                config.kv_lora_rank + config.qk_rope_head_dim,
+                bias=False,
+                quant_config=quant_config,
+                prefix=f"{prefix}.kv_a_proj_with_mqa",
+            )
+            self.has_fused_proj = False
+
+            from sglang.srt.layers.quantization.gguf import GGUFUninitializedParameter
+
+            for role in ("k", "v"):
+                qweight = GGUFUninitializedParameter(requires_grad=False)
+                set_weight_attrs(
+                    qweight,
+                    {
+                        "is_gguf_weight": True,
+                        "weight_loader": self._split_kv_b_weight_loader,
+                    },
+                )
+                self.register_parameter(f"{role}_b_qweight", qweight)
+                qweight_type = nn.Parameter(
+                    torch.empty(1, dtype=torch.uint8), requires_grad=False
+                )
+                set_weight_attrs(
+                    qweight_type,
+                    {
+                        "is_gguf_weight_type": True,
+                        "weight_type": 0,
+                        "ignore_warning": True,
+                        "weight_loader": self._split_kv_b_weight_loader,
+                    },
+                )
+                self.register_parameter(f"{role}_b_qweight_type", qweight_type)
+            self._kimi_split_gguf_kv_b = True
         self._k3_mla_q_cache_fusion = envs.SGLANG_K3_AITER_MLA_Q_CACHE_FUSION.get()
         if self._k3_mla_q_cache_fusion:
             self.register_buffer(
@@ -2761,6 +2816,24 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
                 return _orig_o_proj_forward(x, *args, **kwargs)
 
             self.o_proj.forward = _gated_o_proj_forward
+
+    @staticmethod
+    def _split_kv_b_weight_loader(param, loaded_weight) -> None:
+        from torch.nn.parameter import UninitializedParameter
+
+        if getattr(param, "is_gguf_weight_type", False):
+            param.weight_type = int(loaded_weight.item())
+            param.data.copy_(loaded_weight.reshape_as(param))
+            return
+        if isinstance(param, UninitializedParameter):
+            param.materialize(tuple(loaded_weight.shape), dtype=loaded_weight.dtype)
+        param.data.copy_(loaded_weight)
+
+    def dispatch_attn_forward_method(self, forward_batch) -> AttnForwardMethod:
+        method = super().dispatch_attn_forward_method(forward_batch)
+        if getattr(self, "_kimi_split_gguf_kv_b", False):
+            return AttnForwardMethod.MLA
+        return method
 
     def _try_fused_mla_q_cache(
         self,
@@ -3940,6 +4013,13 @@ class KimiK3LinearForCausalLM(nn.Module):
             if isinstance(layer, PPMissingLayer):
                 continue
             self_attn = layer.self_attn
+            if getattr(self_attn, "_kimi_split_gguf_kv_b", False):
+                if int(self_attn.k_b_qweight_type.weight_type) != 2:
+                    raise ValueError("Kimi-K3 MLA K projection must remain GGUF Q4_0")
+                if int(self_attn.v_b_qweight_type.weight_type) != 10:
+                    raise ValueError("Kimi-K3 MLA V projection must remain GGUF Q2_K")
+                self_attn.use_deep_gemm_bmm = False
+                continue
             kv_b_weight = _get_k3_dense_weight(self_attn.kv_b_proj)
             w_kc, w_vc = kv_b_weight.unflatten(
                 0, (-1, self_attn.qk_nope_head_dim + self_attn.v_head_dim)
