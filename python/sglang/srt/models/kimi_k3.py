@@ -1702,12 +1702,35 @@ class KimiK3MoE(nn.Module):
                     prefix_sum,
                 )
         else:  # single collective over the flat [latent | shared] pair
-            self._forward_shared(
-                gate_up,
-                shared_output,
-                preactivated=shared_is_preactivated,
-            )
-            self._forward_routed(hidden_states, router_logits, routed_input, latent)
+            # HIP/TP recipe: NVIDIA k3_ar_fusion is off, so the CUDA dual-stream
+            # branch above never runs. Shared-down GEMM and routed experts only
+            # meet at the collective, so they can share two HIP streams. Decode
+            # occupancy is low (c2 routes 8 tokens), so leftover CUs can hide
+            # the ~4 us shared-down behind route+sort+gemm1. Join with
+            # wait_stream so breakable HIP-graph capture tracks the fork.
+            if self.alt_stream is not None:
+                current_stream = torch.cuda.current_stream()
+                self.alt_stream.wait_stream(current_stream)
+                with torch.cuda.stream(self.alt_stream):
+                    self._forward_shared(
+                        gate_up,
+                        shared_output,
+                        preactivated=shared_is_preactivated,
+                    )
+                self._forward_routed(
+                    hidden_states, router_logits, routed_input, latent
+                )
+                current_stream.wait_stream(self.alt_stream)
+                shared_output.record_stream(current_stream)
+            else:
+                self._forward_shared(
+                    gate_up,
+                    shared_output,
+                    preactivated=shared_is_preactivated,
+                )
+                self._forward_routed(
+                    hidden_states, router_logits, routed_input, latent
+                )
             if self.fuse_ar_norm and k3_ar_fusion.enabled() and not use_latent_tail:
                 fused_norm = True
                 k3_ar_fusion.all_reduce_norm(
@@ -3505,8 +3528,17 @@ class KimiK3LinearModel(nn.Module):
         #   [2] MLA output-gate GEMM, overlaps the attention core
         # (The attn-res bank write no longer needs a stream: it is fused
         # into the agg1 fast kernel, see AttnResidual.forward(write=True).)
-        # Disable on HIP code path.
-        self.alt_streams = None if _is_hip else [torch.cuda.Stream() for _ in range(3)]
+        # HIP is off unless SGLANG_ROCM_USE_MULTI_STREAM=1. ROCm serializes
+        # extra streams onto one hardware queue unless GPU_MAX_HW_QUEUES>=5.
+        if _is_hip and not envs.SGLANG_ROCM_USE_MULTI_STREAM.get():
+            self.alt_streams = None
+        else:
+            self.alt_streams = [torch.cuda.Stream() for _ in range(3)]
+            if _is_hip:
+                logger.info(
+                    "K3 HIP multi-stream pool enabled "
+                    "(SGLANG_ROCM_USE_MULTI_STREAM=1; set GPU_MAX_HW_QUEUES>=5)"
+                )
 
         self.layers, self.start_layer, self.end_layer = make_layers(
             config.num_hidden_layers,
