@@ -467,10 +467,13 @@ class AiterAttnBackend(AttentionBackend):
             if self.head_pad_mode == "zero" and self.kv_cache_dtype == fp8_dtype:
                 # Disable ps only when gluon kernel is selected to avoid falling
                 # back to incorrect aiter kernel
-                if prefer_mla_gluon_decode(
-                    head_pad_mode=self.head_pad_mode,
-                    num_head=self.num_head,
-                    kv_cache_dtype=self.kv_cache_dtype,
+                if (
+                    envs.SGLANG_AITER_MLA_GLUON.get()
+                    and prefer_mla_gluon_decode(
+                        head_pad_mode=self.head_pad_mode,
+                        num_head=self.num_head,
+                        kv_cache_dtype=self.kv_cache_dtype,
+                    )
                 ):
                     _use_mla_ps_kernel = False
                     fast_mode = False
