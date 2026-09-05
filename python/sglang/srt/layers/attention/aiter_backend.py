@@ -964,11 +964,9 @@ class AiterAttnBackend(AttentionBackend):
             mla_decode_fwd(q_in, k_buffer_flat, o, **kwargs)
             return o[:, : self.num_head, :]
         if self.head_pad_mode == "zero":
-            q_in = q.new_zeros(
-                (q.shape[0], self.num_head_padded, q.shape[-1]),
-                dtype=q.dtype,
+            q_in = torch.nn.functional.pad(
+                q, (0, 0, 0, self.num_head_padded - num_head)
             )
-            q_in[:, :num_head, :] = q
             o = q.new_empty(
                 (q.shape[0], self.num_head_padded, layer.v_head_dim),
                 dtype=self.input_dtype,
