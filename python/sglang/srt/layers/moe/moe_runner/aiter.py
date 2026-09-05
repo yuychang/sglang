@@ -133,9 +133,7 @@ def _aiter_fused_moe_supports_no_combine() -> bool:
 def _aiter_fused_moe_supports_output() -> bool:
     """Whether the installed aiter.fused_moe takes an `output` kwarg; without
     it, zero_copy_context's buffer cannot be the destination and we copy."""
-    from aiter.fused_moe import fused_moe
-
-    return "output" in inspect.signature(fused_moe).parameters
+    return False
 
 
 _RECV_BOUND_LOGGED: set[int] = set()
