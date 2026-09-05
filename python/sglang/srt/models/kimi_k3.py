@@ -2690,9 +2690,10 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
             )
             self.register_buffer(
                 "_k3_mla_q_cache_scale",
-                torch.ones((1,), dtype=torch.float32),
+                torch.full((1,), 1.0 / 16.0, dtype=torch.float32),
                 persistent=False,
             )
+            self.attn_mqa._k3_mla_q_scale = self._k3_mla_q_cache_scale
         else:
             self.register_buffer("_k3_identity_rope_cos", None, persistent=False)
             self.register_buffer("_k3_identity_rope_sin", None, persistent=False)
@@ -2890,6 +2891,7 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
             sin_cache,
             scale,
             True,
+            q_scale=self._k3_mla_q_cache_scale,
             q_out_dtype=q_out_dtype,
             compute_all_q_rope=False,
             identity_rope=True,
