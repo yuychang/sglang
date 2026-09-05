@@ -141,6 +141,24 @@ if _use_aiter_gfx95:
     from sglang.srt.layers.rocm_linear_utils import fused_qk_rope_cat_and_cache_mla
 
 
+def _is_unit_host_scale(scale) -> bool:
+    """Return whether scale is a host-side unit value without synchronizing."""
+    if scale is None:
+        return True
+    if isinstance(scale, torch.Tensor):
+        return False
+    try:
+        return float(scale) == 1.0
+    except (TypeError, ValueError):
+        return False
+
+
+def _bf16_absorb_weight(weight: torch.Tensor, scale) -> torch.Tensor:
+    """Convert an absorb weight to BF16 and skip the multiply for host 1.0."""
+    weight = weight.to(dtype=torch.bfloat16)
+    return weight if _is_unit_host_scale(scale) else weight * scale
+
+
 def rocm_absorb_q_bmm(
     attn: DeepseekV2AttentionMLA,
     q_nope: torch.Tensor,
@@ -186,7 +204,7 @@ def rocm_absorb_q_bmm(
         else:
             q_nope_out = torch.bmm(
                 q_nope.to(torch.bfloat16).transpose(0, 1),
-                attn.w_kc.to(torch.bfloat16) * attn.w_scale,
+                _bf16_absorb_weight(attn.w_kc, attn.w_scale),
             )
     return q_nope_out
 
@@ -243,7 +261,7 @@ def rocm_absorb_v_bmm(
         else:
             attn_bmm_output = torch.bmm(
                 attn_output.to(torch.bfloat16).transpose(0, 1),
-                attn.w_vc.to(torch.bfloat16) * attn.w_scale,
+                _bf16_absorb_weight(attn.w_vc, attn.w_scale),
             )
 
     if _bmm_buf is not None:
@@ -317,11 +335,13 @@ def _fused_rope_cat_and_cache(
     kv_cache_dtype = (
         fp8_dtype if attn.kv_cache_dtype == "fp8_e4m3" else q_nope_out.dtype
     )
-    # Gluon MLA decode (bh16bn128) requires bf16 Q; vLLM #50563.
+    # Gluon MLA decode (bh16bn128) requires BF16 Q. When Gluon is explicitly
+    # disabled, keep Q in FP8 and use the supported A8W8 ASM decode path.
     q_out_dtype = (
         q_nope_out.dtype
         if attn.kv_cache_dtype == "fp8_e4m3"
         and attn.current_attention_backend == "aiter"
+        and envs.SGLANG_AITER_MLA_GLUON.get()
         else kv_cache_dtype
     )
     return fused_qk_rope_cat_and_cache_mla(
@@ -765,7 +785,29 @@ class DeepseekMLARocmForwardMixin:
                         ),
                     )
         else:
-            if self._skip_rope_for_aiter_fused_mla():
+            q = None
+            k = None
+            k3_fused_q_cache = getattr(self, "_try_fused_mla_q_cache", None)
+            if (
+                k3_fused_q_cache is not None
+                and self.current_attention_backend
+                in ("aiter", "triton", "triton_mla")
+                and not get_parallel().dcp_enabled
+                and forward_batch.forward_mode.is_decode_or_idle()
+            ):
+                result = k3_fused_q_cache(
+                    q_nope_out,
+                    q_pe,
+                    k_nope,
+                    k_pe,
+                    positions,
+                    forward_batch.out_cache_loc,
+                )
+                if result is not None:
+                    q, k = result
+                    save_kv_cache = False
+
+            if q is None and self._skip_rope_for_aiter_fused_mla():
                 q, _, _, k = _fused_rope_cat_and_cache(
                     self,
                     q_nope_out,
@@ -776,7 +818,7 @@ class DeepseekMLARocmForwardMixin:
                     forward_batch.out_cache_loc,
                 )
                 save_kv_cache = False
-            else:
+            elif q is None:
                 q = torch.cat([q_nope_out, q_pe], dim=-1)
                 k = torch.cat([k_nope, k_pe], dim=-1)
 
