@@ -861,9 +861,9 @@ class Envs:
     # Enable dual-stream MoE (shared experts vs routed experts) on the
     # ROCm/AITER path. Requires GPU_MAX_HW_QUEUES>=5 to avoid HW-queue serialization.
     SGLANG_ROCM_USE_MULTI_STREAM = EnvBool(False)
-    # Fold the KDA [f_a|b] tail into the wide [q,k,v,g] projection so the whole
-    # in-proj is one GEMM. Decode is bandwidth bound there, so the 144 extra
-    # output columns ride along nearly free.
+    # Fold the Kimi-K3 KDA [f_a|b] tail into the wide [q,k,v,g] projection.
+    # The merged N=6288 shape is used only up to MAX_TOKENS below, where decode
+    # is bandwidth bound; larger batches keep the tuned N=6144 split path.
     SGLANG_ROCM_K3_FUSE_KDA_INPROJ = EnvBool(True)
     SGLANG_ROCM_K3_FUSE_KDA_INPROJ_MAX_TOKENS = EnvInt(256)
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("tilelang")
@@ -1588,6 +1588,14 @@ class Envs:
     # CustomAllReduceV2 with multicast is available; set 0/1 to override in
     # either direction. See srt/layers/k3_ar_fusion.py.
     SGLANG_K3_AR_FUSION = EnvBool(False)
+    # HIP: fuse the K3 latent all-reduce with RMSNorm via AITER's 2-stage
+    # kernel. Only applies when the combined buffer is already in the 2-stage
+    # AR regime (>= 80 KiB on TP8); smaller sizes stay on split AR + RMSNorm.
+    SGLANG_K3_FUSED_AR_RMSNORM = EnvBool(True)
+    # HIP: fold the K3 attn-res prefix add into AITER's element-parallel
+    # 1-stage custom all-reduce. Only decode M in {1, 2, 4}; M >= 8 takes the
+    # 2-stage kernel and stays on split AR + agg HAS_ADD.
+    SGLANG_K3_HIP_AR_RESIDUAL = EnvBool(True)
     # K3 SP-MoE fused residual + reduce-scatter and matching all-gather over
     # CustomAllReduceV2's MNNVL push workspace. Auto-probed for the validated
     # TP8 GB300 configuration; set 0/1 to override. See
@@ -1602,12 +1610,71 @@ class Envs:
     # kernel computes the TP-local o_proj partial and the cross-rank sum over
     # a P2P comm region, replacing the GEMM + NCCL AR pair at M <= 512.
     SGLANG_K3_GEMM_AR = EnvBool(False)
+    # Opt-in Kimi-K3 gfx950 MLA decode path: fuse identity-RoPE Q
+    # materialization, Q concat and latent KV-cache write into AITER's
+    # per-head kernel. Fail closed to the existing split/cat/cache chain.
+    SGLANG_K3_AITER_MLA_Q_CACHE_FUSION = EnvBool(False)
     # Merge the router gate and routed_expert_down_proj weights so the K3 MoE
     # front reads hidden_states once, and run the top-k plus the bf16 cast in one
     # epilogue kernel. See kernels/ops/moe/moe_front.py. Default on.
     SGLANG_K3_FUSED_FRONT = EnvBool(True)
     # Use the ROCm radix-4 router for covered K3 top-k workloads.
     SGLANG_K3_RADIX4_TOPK = EnvBool(False)
+    # Route Kimi-K3's non-EP merged BF16 MoE front through AITER tuned_gemm.
+    # Gated separately from latent MXFP4 so either can be measured alone.
+    SGLANG_K3_AITER_TUNED_MOE_FRONT = EnvBool(False)
+    SGLANG_K3_AITER_TUNED_MOE_FRONT_MIN_TOKENS = EnvInt(48)
+    SGLANG_K3_AITER_TUNED_MOE_FRONT_MAX_TOKENS = EnvInt(192)
+    # Keep packed MXFP4 copies of the non-EP latent down/up projections and use
+    # them only for large token batches. BF16 weights remain live as fallback.
+    SGLANG_K3_MOE_LATENT_MXFP4 = EnvBool(False)
+    SGLANG_K3_MOE_LATENT_MXFP4_MIN_TOKENS = EnvInt(2048)
+    # PTPC FP8 (per-token activation, per-channel weight) for the BF16 decode
+    # projections the checkpoint leaves unquantized, halving the weight bytes
+    # those HBM-bound GEMMs stream. The router gate must stay BF16: FP8 logits
+    # move the top-k selection.
+    SGLANG_K3_PTPC_FP8 = EnvBool(False)
+    SGLANG_K3_PTPC_FP8_MAX_TOKENS = EnvInt(256)
+    # Below this batch the projections are launch-latency bound, so the extra
+    # activation-quant launch costs more than the halved weight traffic saves.
+    SGLANG_K3_PTPC_FP8_MIN_TOKENS = EnvInt(8)
+    # Master switch for the ROCm AITER K3 decode path: the MXFP4 SiTU MoE
+    # runner, the fused MoE front and the AITER-backed attention projections.
+    SGLANG_AITER_K3_OPT = EnvBool(False)
+    # Per-operator opt-ins for the gfx950 FlyDSL specializations. Each one
+    # fail-closes to the split GEMM chain when the chip, shape or AITER build
+    # cannot service it, so enabling one on unsupported hardware is a no-op.
+    SGLANG_K3_AITER_MLA_GATE = EnvBool(False)
+    SGLANG_K3_AITER_KDA_GROUP64 = EnvBool(False)
+    SGLANG_K3_AITER_MOE_PREROUTE_FP8 = EnvBool(False)
+    SGLANG_K3_AITER_LATENT_TAIL_FP8 = EnvBool(False)
+    # Extend the KDA and MoE pre-route fusions from the single-token bucket to
+    # two tokens.
+    SGLANG_K3_AITER_B2_FUSIONS = EnvBool(False)
+    # Route two- and four-token MoE decode through the cooperative FlyDSL
+    # tri-projection, which returns the shared expert already SiTU-activated.
+    SGLANG_K3_PREROUTE_PREACTIVATED_SHARED = EnvBool(False)
+    # Launch geometry for that cooperative kernel: compute units, waves per
+    # block, waves per execution unit, and the weight-load cache modifier.
+    SGLANG_K3_PREROUTE_COOP_CU = EnvInt(256)
+    SGLANG_K3_PREROUTE_COOP_WPB = EnvInt(8)
+    SGLANG_K3_PREROUTE_COOP_WPE = EnvInt(3)
+    SGLANG_K3_PREROUTE_COOP_WCM = EnvInt(3)
+    # Where the K3 FlyDSL kernels come from: "auto" prefers the SGLang copy and
+    # falls back to AITER, "sglang" and "aiter" pin one source.
+    SGLANG_K3_FLYDSL_SOURCE = EnvStr("auto")
+    # Set to "aiter" to defer the KDA f_b projection into AITER's fused gfx950
+    # decode kernel instead of running it as a separate GEMM.
+    SGLANG_K3_KDA_FUSED_BACKEND = EnvStr("")
+    # Restore the pre-tuning (rows_per_wave, weight_cache_modifier) pair for
+    # the KDA group64 projection so the per-bucket tuning can be A/B'd.
+    SGLANG_K3_KDA_GROUP64_LEGACY_LAUNCH = EnvBool(False)
+    # Use the per-bank-depth num_warps / waves_per_eu for the ROCm
+    # attention-residual kernels; set 0 for the untuned launch.
+    SGLANG_K3_ATTN_RES_TUNED_LAUNCH = EnvBool(True)
+    # Prepend an SGLang-shipped BF16 tuned-GEMM profile for M=16384 to AITER's
+    # config search path. Read before any import can initialize AITER_CONFIGS.
+    SGLANG_K3_AITER_M16384_PROFILE = EnvBool(False)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_CACHE_CAPACITY = EnvInt(2)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_MIN_HITS = EnvInt(2)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_MAX_SEQLEN = EnvInt(6144)
