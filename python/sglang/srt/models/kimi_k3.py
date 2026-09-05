@@ -3006,7 +3006,7 @@ class KimiK3DecoderLayer(nn.Module):
         self._dp_attention = is_dp_attention_enabled()
         # mlp-sync (DP attention OR MoE a2a/EP) pads extend batches to
         # attn_tp multiples; attention must then run on the real rows only.
-        self._trim_padded_attn = require_mlp_sync(get_server_args())
+        self._trim_padded_attn = require_mlp_sync()
         # A layer runs MoE (vs a plain dense MLP) iff it is past the dense
         # prefix and on the MoE cadence — same predicate the mlp construction
         # below uses.
@@ -3484,7 +3484,7 @@ class KimiK3LinearModel(nn.Module):
         self.pp_group = get_pp_group()
         self.dspark_layers_to_capture: Optional[list[int]] = None
         self._dp_attention = is_dp_attention_enabled()
-        self._trim_padded_attn = require_mlp_sync(get_server_args())
+        self._trim_padded_attn = require_mlp_sync()
 
         if self.pp_group.is_first_rank:
             self.embed_tokens = VocabParallelEmbedding(
