@@ -4,10 +4,10 @@
 """Kimi-K3 MLA output-gate dispatch."""
 
 import functools
+import importlib.util
 
 import torch
 from aiter.jit.utils.chip_info import get_gfx_runtime
-from aiter.ops.flydsl.utils import is_flydsl_available
 
 _HIDDEN = 7168
 _OUTPUT = 1536
@@ -17,7 +17,7 @@ _WEIGHT_CACHE_MODIFIER = 0
 
 
 def _is_gfx950_flydsl_available() -> bool:
-    if not is_flydsl_available():
+    if importlib.util.find_spec("flydsl") is None:
         return False
     try:
         return get_gfx_runtime() == "gfx950"

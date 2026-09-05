@@ -6,11 +6,11 @@
 from __future__ import annotations
 
 import functools
+import importlib.util
 import math
 
 import torch
 from aiter.jit.utils.chip_info import get_gfx_runtime
-from aiter.ops.flydsl.utils import is_flydsl_available
 
 from sglang.srt.environ import envs
 
@@ -25,7 +25,10 @@ _ROUTER_SIZE = 896
 def is_kimi_k3_moe_preroute_fp8_available() -> bool:
     """Return whether the fixed-shape gfx950 FlyDSL kernels can be built."""
 
-    return is_flydsl_available() and get_gfx_runtime() == "gfx950"
+    return (
+        importlib.util.find_spec("flydsl") is not None
+        and get_gfx_runtime() == "gfx950"
+    )
 
 
 def _same_device(*tensors: torch.Tensor) -> bool:

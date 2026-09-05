@@ -6,11 +6,11 @@
 from __future__ import annotations
 
 import functools
+import importlib.util
 import math
 
 import torch
 from aiter.jit.utils.chip_info import get_gfx_runtime
-from aiter.ops.flydsl.utils import is_flydsl_available
 
 _LATENT_DIM = 3584
 _HIDDEN_DIM = 7168
@@ -87,7 +87,7 @@ def supports_latent_moe_tail_fp8(
         )
         and math.isfinite(epsilon)
         and epsilon > 0.0
-        and is_flydsl_available()
+        and importlib.util.find_spec("flydsl") is not None
         and get_gfx_runtime() == "gfx950"
     )
 
