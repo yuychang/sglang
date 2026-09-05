@@ -1540,15 +1540,12 @@ class Envs:
     # microbench, fused vs `per_token_quant_hip` + GEMM, per layer:
     #   M=1  9.26 vs 11.74 us   M=2  9.29 vs 11.97   M=4 10.82 vs 11.92
     #   M=8 15.68 vs 11.91      M=16 25.16 vs 12.01
-    # so it only owns M in {1, 2, 4}, and a rows_per_wave / cache-modifier
-    # sweep does not recover M=8 (best 15.48). On the mxmoe 16K recipe that
-    # is c2 TTT/GPU 161.12 vs 160.56 tok/s (+0.35%, TPOT 13.26 vs 13.31 ms)
-    # and c8-c64 flat, with GSM8K 1319q p256 at 0.949 against 0.941. Requires
-    # SGLANG_K3_PTPC_FP8_SHARED_DOWN, and costs a second 5.5 MiB row-major
-    # FP8 weight copy per layer per rank because the fused kernel cannot read
-    # the bpreshuffled layout coalesced. Comma-separated buckets, empty to
-    # disable.
-    SGLANG_K3_PTPC_FUSED_SHARED_DOWN_TOKENS = EnvStr("1,2,4")
+    # In-graph the pair is already ~8.4 us/layer, so fuse saves ~3 us/layer
+    # (~0.27 ms/decode step). 8K/1K TTT is prefill-dominated (~0.35% at c2,
+    # noise at c8-c64) against a second 5.5 MiB row-major FP8 weight copy
+    # per layer. Default off; serving does not pin this path. Set 1,2,4 to
+    # experiment. Requires SGLANG_K3_PTPC_FP8_SHARED_DOWN.
+    SGLANG_K3_PTPC_FUSED_SHARED_DOWN_TOKENS = EnvStr("0")
     # Below this batch the projections are launch-latency bound rather than
     # weight-bandwidth bound, so the extra activation-quant launch costs more
     # than the halved weight traffic saves.

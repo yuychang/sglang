@@ -54,7 +54,7 @@ def enabled_token_buckets() -> tuple[int, ...]:
             value = int(field)
         except ValueError:
             continue
-        if value in BUILDABLE_TOKEN_BATCHES:
+        if value > 0 and value in BUILDABLE_TOKEN_BATCHES:
             buckets.append(value)
     return tuple(sorted(set(buckets)))
 
