@@ -2690,12 +2690,12 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
             )
             self.register_buffer(
                 "_k3_mla_q_cache_scale",
-                torch.full((1,), 1.0 / 16.0, dtype=torch.float32),
+                torch.full((1,), 1.0 / 4.0, dtype=torch.float32),
                 persistent=False,
             )
             self.attn_mqa.register_buffer(
                 "_k3_mla_q_scale",
-                torch.full((1,), 1.0 / 16.0, dtype=torch.float32),
+                torch.full((1,), 1.0 / 4.0, dtype=torch.float32),
                 persistent=False,
             )
         else:
