@@ -861,9 +861,9 @@ class Envs:
     # Enable dual-stream MoE (shared experts vs routed experts) on the
     # ROCm/AITER path. Requires GPU_MAX_HW_QUEUES>=5 to avoid HW-queue serialization.
     SGLANG_ROCM_USE_MULTI_STREAM = EnvBool(False)
-    # Fold the KDA [f_a|b] tail into the wide [q,k,v,g] projection so the whole
-    # in-proj is one GEMM. Decode is bandwidth bound there, so the 144 extra
-    # output columns ride along nearly free.
+    # Fold the Kimi-K3 KDA [f_a|b] tail into the wide [q,k,v,g] projection.
+    # The merged N=6288 shape is used only up to MAX_TOKENS below, where decode
+    # is bandwidth bound; larger batches keep the tuned N=6144 split path.
     SGLANG_ROCM_K3_FUSE_KDA_INPROJ = EnvBool(True)
     SGLANG_ROCM_K3_FUSE_KDA_INPROJ_MAX_TOKENS = EnvInt(256)
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("tilelang")
@@ -1621,9 +1621,19 @@ class Envs:
     # Master switch for the ROCm AITER K3 decode path: the MXFP4 SiTU MoE
     # runner, the fused MoE front and the AITER-backed attention projections.
     SGLANG_AITER_K3_OPT = EnvBool(False)
+    # Per-operator opt-ins for the gfx950 FlyDSL specializations. Each one
+    # fail-closes to the split GEMM chain when the chip, shape or AITER build
+    # cannot service it, so enabling one on unsupported hardware is a no-op.
+    SGLANG_K3_AITER_KDA_GROUP64 = EnvBool(False)
+    # Extend the KDA and MoE pre-route fusions from the single-token bucket to
+    # two tokens.
+    SGLANG_K3_AITER_B2_FUSIONS = EnvBool(False)
     # Where the K3 FlyDSL kernels come from: "auto" prefers the SGLang copy and
     # falls back to AITER, "sglang" and "aiter" pin one source.
     SGLANG_K3_FLYDSL_SOURCE = EnvStr("auto")
+    # Restore the pre-tuning (rows_per_wave, weight_cache_modifier) pair for
+    # the KDA group64 projection so the per-bucket tuning can be A/B'd.
+    SGLANG_K3_KDA_GROUP64_LEGACY_LAUNCH = EnvBool(False)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_CACHE_CAPACITY = EnvInt(2)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_MIN_HITS = EnvInt(2)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_MAX_SEQLEN = EnvInt(6144)
