@@ -61,8 +61,17 @@ def log_mla_gluon_capability(log: logging.Logger | None = None) -> None:
 
 
 def prefer_mla_gluon_decode(
-    *, head_pad_mode: str, num_head: int, kv_cache_dtype: torch.dtype
+    *,
+    head_pad_mode: str,
+    num_head: int,
+    kv_cache_dtype: torch.dtype,
+    q_dtype: torch.dtype | None = None,
 ) -> bool:
+    # Gluon requires a BF16 Q. The Kimi-K3 fused MLA query producer emits FP8, so
+    # without this gate every layer raises and falls back to zero-pad
+    # mla_decode_fwd, which costs GSM8K accuracy rather than just speed.
+    if q_dtype is not None and q_dtype != torch.bfloat16:
+        return False
     return (
         head_pad_mode == "zero"
         and num_head == 12
