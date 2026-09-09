@@ -227,7 +227,11 @@ def mla_gluon_decode(
 
 
 def prefer_mla_gluon_decode(
-    *, head_pad_mode: str, num_head: int, kv_cache_dtype: torch.dtype
+    *,
+    head_pad_mode: str,
+    num_head: int,
+    kv_cache_dtype: torch.dtype,
+    q_dtype: Optional[torch.dtype] = None,
 ) -> bool:
     """Route Kimi-style h12 zero-pad MLA decode through Gluon when FP8 KV holds.
 
@@ -236,6 +240,8 @@ def prefer_mla_gluon_decode(
     today; other zero-pad head counts must stay on zero-pad + ``mla_decode_fwd``.
     """
     if not _mla_gluon_enabled():
+        return False
+    if q_dtype is not None and q_dtype != torch.bfloat16:
         return False
     if head_pad_mode == "zero" and num_head == 12 and kv_cache_dtype == fp8_dtype:
         return _gluon_runtime_ok()

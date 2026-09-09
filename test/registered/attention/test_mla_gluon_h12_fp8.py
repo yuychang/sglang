@@ -88,6 +88,31 @@ class TestMlaGluonCapability(CustomTestCase):
         "sglang.srt.layers.attention.aiter_mla_gluon._gluon_runtime_ok",
         return_value=True,
     )
+    def test_prefer_requires_bf16_q(self, _ok):
+        from sglang.kernels.ops.quantization.fp8_kernel import fp8_dtype
+        from sglang.srt.layers.attention.aiter_mla_gluon import prefer_mla_gluon_decode
+
+        self.assertFalse(
+            prefer_mla_gluon_decode(
+                head_pad_mode="zero",
+                num_head=12,
+                kv_cache_dtype=fp8_dtype,
+                q_dtype=fp8_dtype,
+            )
+        )
+        self.assertTrue(
+            prefer_mla_gluon_decode(
+                head_pad_mode="zero",
+                num_head=12,
+                kv_cache_dtype=fp8_dtype,
+                q_dtype=torch.bfloat16,
+            )
+        )
+
+    @mock.patch(
+        "sglang.srt.layers.attention.aiter_mla_gluon._gluon_runtime_ok",
+        return_value=True,
+    )
     def test_prefer_false_when_zero_pad_but_not_h12(self, _ok):
         from sglang.kernels.ops.quantization.fp8_kernel import fp8_dtype
         from sglang.srt.layers.attention.aiter_mla_gluon import prefer_mla_gluon_decode
