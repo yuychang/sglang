@@ -4031,7 +4031,6 @@ class KimiK3LinearForCausalLM(nn.Module):
             loaded_params.add(name)
 
         self.post_load_weights()
-        return loaded_params
 
     def post_load_weights(self):
         # Also invoked by loader post-load hooks (DummyModelLoader,
@@ -4123,13 +4122,9 @@ class KimiK3LinearForCausalLM(nn.Module):
                 precompile_k3_recompute_w_u_kernel,
             )
 
-            o_proj_weight = getattr(layer.self_attn.o_proj, "weight", None)
-            if o_proj_weight is None:
-                o_proj_weight = layer.self_attn.o_proj.qweight
             if precompile_k3_recompute_w_u_kernel(
                 num_heads=layer.self_attn.local_num_heads,
-                dtype=getattr(layer.self_attn.o_proj, "params_dtype", None)
-                or o_proj_weight.dtype,
+                dtype=layer.self_attn.o_proj.params_dtype,
                 device=layer.self_attn.dt_bias.device,
             ):
                 rank0_log("Precompiled the Kimi-K3 KDA prefill kernel.")
@@ -4140,24 +4135,6 @@ class KimiK3ForConditionalGeneration(nn.Module):
     """K3 multimodal wrapper: MoonViT3d tower + KimiK3LinearForCausalLM."""
 
     supports_cuda_vmm_feature_transport = True
-
-    # Fused runtime module -> checkpoint shard names, so quant configs can
-    # match fused prefixes against per-shard exclude_modules
-    packed_modules_mapping = {
-        "gate_up_proj": ["gate_proj", "up_proj"],
-        "qkv_proj": ["q_proj", "k_proj", "v_proj"],
-        "qkv_conv1d": ["q_conv1d", "k_conv1d", "v_conv1d"],
-        "fused_qkvg_proj": ["q_proj", "k_proj", "v_proj", "g_proj"],
-        "fused_qkvbfg_a_proj": [
-            "q_proj",
-            "k_proj",
-            "v_proj",
-            "b_proj",
-            "f_a_proj",
-            "g_a_proj",
-        ],
-        "fused_fg_b_proj": ["f_b_proj", "g_b_proj"],
-    }
     encoder_media_processor_config = EncoderMediaProcessorConfig(
         image_decode_mode="nvjpeg_fancy",
         preserve_media_metadata=True,
@@ -4559,4 +4536,4 @@ class KimiK3ForConditionalGeneration(nn.Module):
                 pass
 
 
-EntryClass = [KimiK3ForConditionalGeneration, KimiK3LinearForCausalLM]
+EntryClass = [KimiK3ForConditionalGeneration]
