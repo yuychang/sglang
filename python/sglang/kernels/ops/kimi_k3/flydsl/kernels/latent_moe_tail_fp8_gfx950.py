@@ -44,6 +44,7 @@ def _raw(value):
 
 def build_latent_moe_tail_fp8_persistent_module(
     num_tokens: int = 1,
+    add_prefix: bool = False,
     skip_rms: bool = False,
     rows_per_wave: int = 2,
     cu_count: int = 256,
@@ -79,7 +80,7 @@ def build_latent_moe_tail_fp8_persistent_module(
 
     kernel_name = (
         f"latent_moe_tail_b{num_tokens}_bf16_fp8_persistent_gfx950"
-        f"_skiprms{int(skip_rms)}"
+        f"_prefix{int(add_prefix)}_skiprms{int(skip_rms)}"
         f"_rpw{rows_per_wave}_cu{cu_count}_wpb{waves_per_block}"
         f"_wpe{waves_per_eu}_wcm{weight_cache_modifier}"
     )
@@ -91,6 +92,7 @@ def build_latent_moe_tail_fp8_persistent_module(
         rms_weight: fx.Pointer,
         up_weight: fx.Pointer,
         up_scale: fx.Pointer,
+        prefix: fx.Pointer,
         output: fx.Pointer,
         epsilon: fx.Float32,
     ):
@@ -107,6 +109,7 @@ def build_latent_moe_tail_fp8_persistent_module(
         rms_weight_rsrc = ptr_rsrc(rms_weight)
         up_weight_rsrc = ptr_rsrc(up_weight)
         up_scale_rsrc = ptr_rsrc(up_scale)
+        prefix_rsrc = ptr_rsrc(prefix)
         output_rsrc = ptr_rsrc(output)
         lds = fx.SharedAllocator().allocate(SharedStorage).peek()
         hidden_lds = lds.hidden.ptr
@@ -389,6 +392,21 @@ def build_latent_moe_tail_fp8_persistent_module(
                                 T.bf16,
                                 _raw(projected_f32 + shared_f32),
                             )
+                            if const_expr(add_prefix):
+                                # Two BF16 boundaries, matching the unfused
+                                # code: (projected + shared), then + prefix.
+                                result_f32 = ArithValue(arith.extf(f32, result))
+                                prefix_bf16 = buffer_ops.buffer_load(
+                                    prefix_rsrc,
+                                    output_element,
+                                    vec_width=1,
+                                    dtype=T.bf16,
+                                )
+                                prefix_f32 = ArithValue(arith.extf(f32, prefix_bf16))
+                                result = arith.trunc_f(
+                                    T.bf16,
+                                    _raw(result_f32 + prefix_f32),
+                                )
                             buffer_ops.buffer_store(result, output_rsrc, output_element)
                         scf.YieldOp([])
                     scf.YieldOp([])
@@ -400,6 +418,7 @@ def build_latent_moe_tail_fp8_persistent_module(
         rms_weight: fx.Pointer,
         up_weight: fx.Pointer,
         up_scale: fx.Pointer,
+        prefix: fx.Pointer,
         output: fx.Pointer,
         epsilon: fx.Float32,
         stream: fx.Stream = fx.Stream(None),  # noqa: B008
@@ -420,6 +439,7 @@ def build_latent_moe_tail_fp8_persistent_module(
             rms_weight,
             up_weight,
             up_scale,
+            prefix,
             output,
             epsilon,
         ).launch(

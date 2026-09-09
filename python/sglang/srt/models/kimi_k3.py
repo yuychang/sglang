@@ -1649,6 +1649,7 @@ class KimiK3MoE(nn.Module):
                 self._latent_tail_weight,
                 self._latent_tail_scale,
                 epsilon,
+                prefix_sum,
             ):
                 out = latent_tail_aiter_hip.run(
                     latent,
@@ -1657,10 +1658,9 @@ class KimiK3MoE(nn.Module):
                     self._latent_tail_weight,
                     self._latent_tail_scale,
                     epsilon,
+                    prefix_sum,
                     skip_rms=fused_norm,
                 )
-                if prefix_sum is not None:
-                    out = out + prefix_sum
                 return out
         if not fused_norm:
             latent = self._latent_norm(latent)

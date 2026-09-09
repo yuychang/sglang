@@ -55,10 +55,13 @@ def supports_latent_moe_tail_fp8(
     up_weight: torch.Tensor,
     up_scale: torch.Tensor,
     epsilon: float,
+    prefix: torch.Tensor | None = None,
 ) -> bool:
     """Fail closed unless an exact MI355X TP8 token bucket is present."""
 
     tensors = (routed, shared, rms_weight, up_weight, up_scale)
+    if prefix is not None:
+        tensors = (*tensors, prefix)
     num_tokens = routed.shape[0] if routed.ndim == 2 else -1
     return (
         all(tensor.is_cuda for tensor in tensors)
@@ -75,6 +78,13 @@ def supports_latent_moe_tail_fp8(
         and tuple(rms_weight.shape) == (_LATENT_DIM,)
         and tuple(up_weight.shape) == (_HIDDEN_DIM, _LATENT_DIM)
         and tuple(up_scale.shape) == (_HIDDEN_DIM,)
+        and (
+            prefix is None
+            or (
+                prefix.dtype == torch.bfloat16
+                and tuple(prefix.shape) == (num_tokens, _HIDDEN_DIM)
+            )
+        )
         and math.isfinite(epsilon)
         and epsilon > 0.0
         and importlib.util.find_spec("flydsl") is not None
@@ -83,13 +93,16 @@ def supports_latent_moe_tail_fp8(
 
 
 @functools.cache
-def _compiled_latent_moe_tail_fp8(num_tokens: int, skip_rms: bool = False):
+def _compiled_latent_moe_tail_fp8(
+    num_tokens: int, add_prefix: bool, skip_rms: bool = False
+):
     from .kernels.latent_moe_tail_fp8_gfx950 import (
         build_latent_moe_tail_fp8_persistent_module,
     )
 
     return build_latent_moe_tail_fp8_persistent_module(
         num_tokens=num_tokens,
+        add_prefix=add_prefix,
         skip_rms=skip_rms,
         rows_per_wave=1,
         cu_count=240,
@@ -106,6 +119,7 @@ def latent_moe_tail_fp8(
     up_scale: torch.Tensor,
     epsilon: float,
     *,
+    prefix: torch.Tensor | None = None,
     out: torch.Tensor | None = None,
     skip_rms: bool = False,
 ) -> torch.Tensor:
@@ -118,6 +132,7 @@ def latent_moe_tail_fp8(
         up_weight,
         up_scale,
         epsilon,
+        prefix,
     ):
         raise NotImplementedError("unsupported Kimi-K3 FP8 latent-tail contract")
     if out is None:
@@ -134,12 +149,14 @@ def latent_moe_tail_fp8(
 
     from aiter.ops.flydsl.kernels.tensor_shim import ptr_arg
 
-    _compiled_latent_moe_tail_fp8(int(routed.shape[0]), skip_rms)(
+    prefix_arg = prefix if prefix is not None else shared
+    _compiled_latent_moe_tail_fp8(int(routed.shape[0]), prefix is not None, skip_rms)(
         ptr_arg(routed),
         ptr_arg(shared),
         ptr_arg(rms_weight),
         ptr_arg(up_weight),
         ptr_arg(up_scale),
+        ptr_arg(prefix_arg),
         ptr_arg(out),
         float(epsilon),
         stream=torch.cuda.current_stream(routed.device),
