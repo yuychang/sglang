@@ -1626,6 +1626,7 @@ class Envs:
     # cannot service it, so enabling one on unsupported hardware is a no-op.
     SGLANG_K3_AITER_KDA_GROUP64 = EnvBool(False)
     SGLANG_K3_AITER_MOE_PREROUTE_FP8 = EnvBool(False)
+    SGLANG_K3_AITER_LATENT_TAIL_FP8 = EnvBool(False)
     # Extend the KDA and MoE pre-route fusions from the single-token bucket to
     # two tokens.
     SGLANG_K3_AITER_B2_FUSIONS = EnvBool(False)
