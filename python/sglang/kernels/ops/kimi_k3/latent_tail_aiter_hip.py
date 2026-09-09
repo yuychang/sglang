@@ -43,6 +43,7 @@ def covered(
     up_weight: torch.Tensor,
     up_scale: torch.Tensor,
     epsilon: float,
+    prefix: torch.Tensor | None = None,
 ) -> bool:
     if not enabled():
         return False
@@ -56,6 +57,7 @@ def covered(
             up_weight,
             up_scale,
             epsilon,
+            prefix,
         )
     )
 
@@ -67,6 +69,7 @@ def run(
     up_weight: torch.Tensor,
     up_scale: torch.Tensor,
     epsilon: float,
+    prefix: torch.Tensor | None = None,
     skip_rms: bool = False,
 ) -> torch.Tensor:
     op, _, _ = _ops()
@@ -79,6 +82,7 @@ def run(
         up_weight,
         up_scale,
         epsilon,
+        prefix=prefix,
         skip_rms=skip_rms,
     )
 
@@ -107,6 +111,25 @@ def warmup(
                 up_weight,
                 up_scale,
                 epsilon,
+                prefix=torch.zeros_like(shared),
+            )
+            run(
+                routed,
+                shared,
+                rms_weight,
+                up_weight,
+                up_scale,
+                epsilon,
+                skip_rms=True,
+            )
+            run(
+                routed,
+                shared,
+                rms_weight,
+                up_weight,
+                up_scale,
+                epsilon,
+                prefix=torch.zeros_like(shared),
                 skip_rms=True,
             )
         torch.cuda.synchronize(up_weight.device)
