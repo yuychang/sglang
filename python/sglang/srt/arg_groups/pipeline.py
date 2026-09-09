@@ -204,6 +204,10 @@ def run_resolution_pipeline(server_args: Any) -> None:
     # handle_gpu_memory_settings so the chunk size feeds memory budgeting.
     run_hook(apply_glm5_chunked_prefill_default, server_args)
 
+    from sglang.srt.arg_groups.kimi_k3_hook import disable_kimi_k3_symm_mem
+
+    disable_kimi_k3_symm_mem(server_args)
+
     # Handle device-specific backends.
     from sglang.srt.arg_groups.platform_hook import (
         handle_amd_specifics,
