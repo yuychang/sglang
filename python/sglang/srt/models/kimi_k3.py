@@ -138,7 +138,7 @@ from sglang.srt.utils.common import (
 logger = logging.getLogger(__name__)
 _is_hip = is_hip()
 _is_npu = is_npu()
-_aiter_k3_opt = get_bool_env_var("SGLANG_AITER_K3_OPT")
+_aiter_k3_opt = _is_hip and envs.SGLANG_AITER_K3_OPT.get()
 
 
 def _cdiv(a: int, b: int) -> int:
@@ -394,7 +394,8 @@ def _add3(
 
     if not add3.covered(a, b, c):
         return (a + b) + c
-    return add3.add3(a, b, c, prefetch_bc=prefetch_bc)
+    # Reuse `a` as output to avoid a full [M, D] scratch at large prefill M.
+    return add3.add3(a, b, c, out=a, prefetch_bc=prefetch_bc)
 
 
 # One-shot log guard: proves the merged front is live (see _ep_front).
