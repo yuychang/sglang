@@ -1608,6 +1608,9 @@ class Envs:
     SGLANG_K3_FUSED_FRONT = EnvBool(True)
     # Use the ROCm radix-4 router for covered K3 top-k workloads.
     SGLANG_K3_RADIX4_TOPK = EnvBool(False)
+    # Master switch for the ROCm AITER K3 decode path: the MXFP4 SiTU MoE
+    # runner, the fused MoE front and the AITER-backed attention projections.
+    SGLANG_AITER_K3_OPT = EnvBool(False)
     # Where the K3 FlyDSL kernels come from: "auto" prefers the SGLang copy and
     # falls back to AITER, "sglang" and "aiter" pin one source.
     SGLANG_K3_FLYDSL_SOURCE = EnvStr("auto")
