@@ -36,7 +36,11 @@ from sglang.srt.layers.aux_hidden_states import (
     AuxHiddenStateAccumulator,
     AuxHiddenStatePacker,
 )
-from sglang.srt.layers.communication import k3_ar_fusion, k3_sp_collective
+from sglang.srt.layers.communication import (
+    k3_ar_fusion,
+    k3_hip_ar_residual,
+    k3_sp_collective,
+)
 from sglang.srt.layers.dcp.planner import prepare_decode_context_parallel_metadata
 from sglang.srt.layers.dp_attention import (
     dp_gather_replicate,
@@ -2158,7 +2162,9 @@ class KimiK3DeltaAttention(nn.Module):
             use_dp_attention_reduce=not self.all_reduce_fusion,
             prefix=f"{prefix}.o_proj",
         )
-        if self.all_reduce_fusion and not _o_proj_takes_output(self.o_proj):
+        if self.all_reduce_fusion and k3_ar_fusion.enabled() and not _o_proj_takes_output(
+            self.o_proj
+        ):
             # the fused AR reduces o_proj's output in place out of a symmetric
             # buffer, which needs the GEMM to write into caller-owned storage
             self.all_reduce_fusion = False
@@ -2606,7 +2612,7 @@ class KimiK3DeltaAttention(nn.Module):
             norm_gate = g_proj_states.unflatten(-1, (-1, self.head_dim))
             core_attn_out = self.o_norm(core_attn_out, norm_gate)
         core_attn_out = core_attn_out.squeeze(0).flatten(-2)
-        if self.all_reduce_fusion:
+        if self.all_reduce_fusion and k3_ar_fusion.enabled():
             out = _k3_symm_o_proj_out(self.o_proj, core_attn_out)
             partial, _ = self.o_proj(core_attn_out, output_tensor=out)
             return partial
@@ -2697,13 +2703,15 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
             self._kimi_split_gguf_kv_b = True
         # Installed before the output-gate wrap below so the gate multiply is
         # applied to x before the fused GEMM+AR sees it.
-        if self.all_reduce_fusion and not _o_proj_takes_output(self.o_proj):
+        if self.all_reduce_fusion and k3_ar_fusion.enabled() and not _o_proj_takes_output(
+            self.o_proj
+        ):
             # the fused AR reduces o_proj's output in place out of a symmetric
             # buffer, which needs the GEMM to write into caller-owned storage
             self.all_reduce_fusion = False
             self.o_proj.reduce_results = True
             self.o_proj.use_dp_attention_reduce = True
-        if self.all_reduce_fusion:
+        if self.all_reduce_fusion and k3_ar_fusion.enabled():
             # Hand the GEMM a slice of the persistent symmetric buffer
             # (k3_ar_fusion.symm_buffer); the fused AR reduces it in place.
             # The captured name must differ from the gate block's
@@ -2892,7 +2900,7 @@ class KimiK3DecoderLayer(nn.Module):
             and attn_tp_size > 1
             and attn_tp_size == get_parallel().tp_size
             and config.attn_res_block_size is not None
-            and k3_ar_fusion.enabled()
+            and (k3_ar_fusion.enabled() or k3_hip_ar_residual.enabled())
         )
 
         # Attention
@@ -3266,8 +3274,18 @@ class KimiK3DecoderLayer(nn.Module):
             # into the fused all-reduce; attn_res then takes the pre-added
             # tensor through its prefix_sum=None branch (same semantics:
             # (normed, new_prefix) with new_prefix = prefix + attn_out).
-            hidden_states = k3_ar_fusion.all_reduce(hidden_states, prefix_sum)
-            prefix_sum = None
+            if k3_ar_fusion.enabled():
+                hidden_states = k3_ar_fusion.all_reduce(hidden_states, prefix_sum)
+                prefix_sum = None
+            else:
+                fused = k3_hip_ar_residual.try_all_reduce_add(
+                    hidden_states, prefix_sum
+                )
+                if fused is not None:
+                    hidden_states = fused
+                    prefix_sum = None
+                else:
+                    hidden_states = tensor_model_parallel_all_reduce(hidden_states)
 
         # ---- Aggregation 2: MLP side (on the shard under SP-MoE) ----
         if not agg2_fused:
