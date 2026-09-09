@@ -145,6 +145,7 @@ _EXPERT_WEIGHT_NAME = re.compile(r"experts\.\d+\.w[123]\.")
 _is_hip = is_hip()
 _is_npu = is_npu()
 _aiter_k3_opt = _is_hip and envs.SGLANG_ROCM_K3_AITER_OPT.get()
+_aiter_mla_gate = _is_hip and envs.SGLANG_ROCM_K3_AITER_MLA_GATE.get()
 _aiter_kda_group64 = _is_hip and envs.SGLANG_ROCM_K3_AITER_KDA_GROUP64.get()
 _aiter_moe_preroute_fp8 = _is_hip and envs.SGLANG_ROCM_K3_AITER_MOE_PREROUTE_FP8.get()
 _aiter_latent_tail_fp8 = _is_hip and envs.SGLANG_ROCM_K3_AITER_LATENT_TAIL_FP8.get()
@@ -2768,15 +2769,27 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
                 gate_input = self._gate_hidden_states
                 self._gate_hidden_states = None
                 if gate_input is not None and not isinstance(x, tuple):
-                    gate = self._compute_output_gate(gate_input)
-                    from sglang.kernels.ops.attention import mla_output_gate
+                    from sglang.kernels.ops.attention import (
+                        mla_gate_aiter_hip,
+                        mla_output_gate,
+                    )
 
-                    if mla_output_gate.covered(x, gate):
-                        # One kernel for x * sigmoid(gate); double rounding
-                        # matches the unfused pair bit-for-bit.
-                        x = mla_output_gate.kimi_k3_mla_output_gate(x, gate)
+                    if (
+                        self._gate_pending_stream is None
+                        and _aiter_mla_gate
+                        and mla_gate_aiter_hip.covered(
+                            gate_input, self.g_proj.weight, x
+                        )
+                    ):
+                        x = mla_gate_aiter_hip.run(gate_input, self.g_proj.weight, x)
                     else:
-                        x = x * torch.sigmoid(gate)
+                        gate = self._compute_output_gate(gate_input)
+                        if mla_output_gate.covered(x, gate):
+                            # One kernel for x * sigmoid(gate); double rounding
+                            # matches the unfused pair bit-for-bit.
+                            x = mla_output_gate.kimi_k3_mla_output_gate(x, gate)
+                        else:
+                            x = x * torch.sigmoid(gate)
                 elif self._gate_pending_stream is not None:
                     # Even a skipped gate must close its capture branch.
                     torch.cuda.current_stream().wait_stream(self._gate_pending_stream)
@@ -2807,7 +2820,8 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
         """Fork early, but record the gate after attention to limit replay streams."""
         self._gate_pending_stream = None
         if (
-            self._gate_alt_stream is not None
+            not _aiter_mla_gate
+            and self._gate_alt_stream is not None
             and get_is_capture_mode()
             # Keep the fork and join within one capture segment.
             and not is_in_breakable_cuda_graph()
@@ -3977,6 +3991,10 @@ class KimiK3LinearForCausalLM(nn.Module):
                 pass
             elif hasattr(self_attn.kv_b_proj, "weight_scale"):
                 self_attn.w_scale = self_attn.kv_b_proj.weight_scale
+            if _aiter_mla_gate and isinstance(self_attn, KimiK3MLAAttention):
+                from sglang.kernels.ops.attention import mla_gate_aiter_hip
+
+                mla_gate_aiter_hip.warmup(self_attn.g_proj.weight)
 
         # Post-load: precompute the attn-res combined score weights BEFORE
         # cuda graph capture (a lazy first call inside get_cw would bake the
