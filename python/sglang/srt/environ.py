@@ -1648,6 +1648,9 @@ class Envs:
     # Restore the pre-tuning (rows_per_wave, weight_cache_modifier) pair for
     # the KDA group64 projection so the per-bucket tuning can be A/B'd.
     SGLANG_K3_KDA_GROUP64_LEGACY_LAUNCH = EnvBool(False)
+    # Use the per-bank-depth num_warps / waves_per_eu for the ROCm
+    # attention-residual kernels; set 0 for the untuned launch.
+    SGLANG_K3_ATTN_RES_TUNED_LAUNCH = EnvBool(True)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_CACHE_CAPACITY = EnvInt(2)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_MIN_HITS = EnvInt(2)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_MAX_SEQLEN = EnvInt(6144)
