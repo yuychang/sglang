@@ -138,11 +138,21 @@ from sglang.srt.utils.common import (
 logger = logging.getLogger(__name__)
 _is_hip = is_hip()
 _is_npu = is_npu()
+_use_aiter = get_bool_env_var("SGLANG_USE_AITER") and _is_hip
 _aiter_k3_opt = _is_hip and envs.SGLANG_AITER_K3_OPT.get()
 _aiter_mla_gate = _is_hip and envs.SGLANG_K3_AITER_MLA_GATE.get()
 _aiter_kda_group64 = _is_hip and envs.SGLANG_K3_AITER_KDA_GROUP64.get()
 _aiter_moe_preroute_fp8 = _is_hip and envs.SGLANG_K3_AITER_MOE_PREROUTE_FP8.get()
 _aiter_latent_tail_fp8 = _is_hip and envs.SGLANG_K3_AITER_LATENT_TAIL_FP8.get()
+_k3_aiter_tuned_moe_front = _is_hip and envs.SGLANG_K3_AITER_TUNED_MOE_FRONT.get()
+_k3_aiter_tuned_moe_front_min_tokens = (
+    envs.SGLANG_K3_AITER_TUNED_MOE_FRONT_MIN_TOKENS.get()
+)
+_k3_aiter_tuned_moe_front_max_tokens = (
+    envs.SGLANG_K3_AITER_TUNED_MOE_FRONT_MAX_TOKENS.get()
+)
+_moe_latent_mxfp4 = _is_hip and envs.SGLANG_K3_MOE_LATENT_MXFP4.get()
+_moe_latent_mxfp4_min_tokens = envs.SGLANG_K3_MOE_LATENT_MXFP4_MIN_TOKENS.get()
 _k3_ptpc_fp8 = _is_hip and envs.SGLANG_K3_PTPC_FP8.get()
 _k3_ptpc_fp8_max_tokens = envs.SGLANG_K3_PTPC_FP8_MAX_TOKENS.get()
 _k3_ptpc_fp8_min_tokens = envs.SGLANG_K3_PTPC_FP8_MIN_TOKENS.get()
@@ -201,8 +211,8 @@ def _k3_bf16_gemm(
 ) -> torch.Tensor:
     """F.linear / torch.mm with the same TGV dispatch module-level GEMMs get
     through UnquantizedLinearMethod. The fused MoE front and the deferred
-    shared down GEMM call torch directly on raw merged weights, so the
-    --bf16-gemm-backend cutedsl selection would silently skip them."""
+    shared down GEMM call torch directly on raw merged weights, so neither the
+    optional AITER tuned selection nor --bf16-gemm-backend reaches them."""
     if out is None and out_dtype is not None and out_dtype != x.dtype:
         out = torch.empty(
             (x.shape[0], weight.shape[0]), dtype=out_dtype, device=x.device
@@ -221,6 +231,21 @@ def _k3_bf16_gemm(
                 if out is None:
                     return cutedsl_bf16_gemm(x, weight)
                 return cutedsl_bf16_gemm_out(x, weight, out)
+        if (
+            out is None
+            and _use_aiter
+            and _k3_aiter_tuned_moe_front
+            and (
+                _k3_aiter_tuned_moe_front_min_tokens
+                <= x.shape[0]
+                <= _k3_aiter_tuned_moe_front_max_tokens
+            )
+            and tuple(weight.shape) == (6016, 7168)
+            and type(weight.data) is torch.Tensor
+        ):
+            from aiter.tuned_gemm import tgemm
+
+            return tgemm.mm(x, weight, None, otype=x.dtype)
     if out is None:
         return torch.nn.functional.linear(x, weight)
     if out.dtype != x.dtype:
@@ -547,17 +572,14 @@ class KimiK3MoE(nn.Module):
                 "got a checkpoint with different constants"
             )
 
-        # EP a2a backends (megamoe / DeepEP / Mooncake / Ascend-FuseEP / MoRI)
-        # move each row to its experts directly, so the MoE region can consume
-        # whatever rows this rank holds — an SP-MoE token shard (attn_tp > 1) or
-        # the DP-local batch (DP attention) — with every global token dispatched
-        # exactly once. No DP gather and no TP reduce is needed anywhere in the
-        # region.
+        # EP a2a backends move each row to its experts directly, so the MoE
+        # region can consume whatever rows this rank holds — an SP-MoE token
+        # shard or the DP-local batch — and still dispatch every global token
+        # exactly once. No DP gather and no TP reduce is needed here.
         _a2a_backend = get_moe_a2a_backend()
         self._ep_a2a = (
             _a2a_backend.is_megamoe()
             or _a2a_backend.is_deepep()
-            or _a2a_backend.is_mooncake()
             or _a2a_backend.is_ascend_fuseep()
             or _a2a_backend.is_mori()
         )
@@ -629,6 +651,11 @@ class KimiK3MoE(nn.Module):
         self._shared_down_fp8_w = None
         self._shared_down_fp8_s = None
         self._shared_down_fp8_n = 0
+        self._front_head = None
+        self._front_down_w4 = None
+        self._front_down_scale4 = None
+        self._latent_up_w4 = None
+        self._latent_up_scale4 = None
         self._situ_beta = float(config.activation_situ_beta)
         self._situ_linear_beta = float(config.activation_situ_linear_beta)
 
@@ -708,9 +735,7 @@ class KimiK3MoE(nn.Module):
             self.fuse_ar_norm
             and self.tp_size == 8
             and self.routed_expert_up_proj is not None
-            and isinstance(
-                getattr(self.routed_expert_up_proj, "weight", None), torch.Tensor
-            )
+            and isinstance(self.routed_expert_up_proj.weight, torch.Tensor)
             and self.routed_expert_up_proj.weight.dtype == torch.bfloat16
             and self.routed_expert_up_proj.weight.is_contiguous()
         )
@@ -751,8 +776,6 @@ class KimiK3MoE(nn.Module):
             mods = [self.gate, self.routed_expert_down_proj]
         else:
             return
-        if any(getattr(module, "weight", None) is None for module in mods):
-            return
         dtypes = {m.weight.dtype for m in mods}
         if len(dtypes) != 1 or dtypes.pop() not in (torch.bfloat16, torch.float16):
             return
@@ -766,6 +789,48 @@ class KimiK3MoE(nn.Module):
             "_ep_front_eligible",
         ):
             self.__dict__.pop(prop, None)
+
+    def _prepare_moe_latent_mxfp4(self) -> None:
+        """Pack non-EP latent projections for the large-M MXFP4 path."""
+        if (
+            not _moe_latent_mxfp4
+            or not self.use_latent_moe
+            or not self._eligible_for_fused_front
+            or self._front_sizes is None
+            or len(self._front_sizes) != 3
+        ):
+            return
+        from sglang.kernels.ops.kimi_k3 import latent_mxfp4_aiter_hip
+
+        if not latent_mxfp4_aiter_hip.supported():
+            return
+        head_rows = self._front_sizes[0] + self._front_sizes[1]
+        front_head = self._front_w[:head_rows]
+        down = self._front_w[head_rows:]
+        up = self.routed_expert_up_proj.weight
+        if (
+            tuple(down.shape) != (3584, 7168)
+            or tuple(up.shape) != (7168, 3584)
+            or down.dtype != torch.bfloat16
+            or up.dtype != torch.bfloat16
+        ):
+            return
+        self._front_head = front_head
+        self._front_down_w4, self._front_down_scale4 = latent_mxfp4_aiter_hip.pack(
+            down, "latent down_proj"
+        )
+        self._latent_up_w4, self._latent_up_scale4 = latent_mxfp4_aiter_hip.pack(
+            up, "latent up_proj"
+        )
+
+    def _use_moe_latent_mxfp4(self, num_tokens: int) -> bool:
+        return (
+            self._front_down_w4 is not None
+            and self._front_down_scale4 is not None
+            and self._latent_up_w4 is not None
+            and self._latent_up_scale4 is not None
+            and num_tokens >= _moe_latent_mxfp4_min_tokens
+        )
 
     def _prepare_preroute_fp8(self) -> None:
         if (
@@ -957,10 +1022,7 @@ class KimiK3MoE(nn.Module):
         from sglang.kernels.ops.attention.dsv4 import mega_moe_pre_dispatch
         from sglang.srt.distributed.parallel_state import get_moe_ep_group
         from sglang.srt.environ import envs
-        from sglang.srt.layers.moe.mega_moe import (
-            _configure_mega_moe_deep_gemm_num_sms,
-            _get_mega_moe_symm_buffer,
-        )
+        from sglang.srt.layers.moe.mega_moe import _get_mega_moe_symm_buffer
 
         # In SP-MoE mode (KimiK3DecoderLayer reduce-scatters the o_proj
         # output) the incoming rows are already this rank's token shard, so
@@ -1013,16 +1075,15 @@ class KimiK3MoE(nn.Module):
             dtype=torch.bfloat16,
             device=routed_input.device,
         )
-        with _configure_mega_moe_deep_gemm_num_sms(deep_gemm):
-            deep_gemm.fp8_fp4_mega_moe(
-                y,
-                self.experts.mega_l1_weights,
-                self.experts.mega_l2_weights,
-                buf,
-                recipe=(1, 1, 32),
-                activation="situ",
-                fast_math=True,
-            )
+        deep_gemm.fp8_fp4_mega_moe(
+            y,
+            self.experts.mega_l1_weights,
+            self.experts.mega_l2_weights,
+            buf,
+            recipe=(1, 1, 32),
+            activation="situ",
+            fast_math=True,
+        )
         y = y[:num_tokens]
         if not self.experts.should_fuse_routed_scaling_factor_in_topk:
             if (
@@ -1240,7 +1301,7 @@ class KimiK3MoE(nn.Module):
             topk_output, routed_input = routed_input
         else:
             # MoEGate produces fp32 router logits on CUDA (via linear_bf16_fp32
-            # or tiny_gemm_bf16); non-CUDA falls back to F.linear (bf16). The
+            # or dsv3_router_gemm); non-CUDA falls back to F.linear (bf16). The
             # fp32 logits reach the radix router from moe_fused_gate.
             router_logits = self.gate(hidden_states)
             topk_output = self.topk(hidden_states, router_logits)
@@ -1464,6 +1525,7 @@ class KimiK3MoE(nn.Module):
             )
 
         num_tokens, hidden_size = hidden_states.shape
+        use_mxfp4 = self._use_moe_latent_mxfp4(num_tokens)
         preroute = None
         shared_is_preactivated = False
         if (
@@ -1521,14 +1583,29 @@ class KimiK3MoE(nn.Module):
                 )
                 preroute = True
         if preroute is None:
-            fused = _k3_bf16_gemm(
-                hidden_states,
-                self._front_w,
-                out_dtype=torch.float32 if self._front_fp32 else None,
-            )
-            gate_up, router_logits, routed_input = torch.split(
-                fused, self._front_sizes, dim=-1
-            )
+            if use_mxfp4:
+                from sglang.kernels.ops.kimi_k3 import latent_mxfp4_aiter_hip
+
+                head = _k3_bf16_gemm(
+                    hidden_states,
+                    self._front_head,
+                    out_dtype=torch.float32 if self._front_fp32 else None,
+                )
+                gate_up, router_logits = torch.split(
+                    head, self._front_sizes[:2], dim=-1
+                )
+                routed_input = latent_mxfp4_aiter_hip.run(
+                    hidden_states, self._front_down_w4, self._front_down_scale4
+                )
+            else:
+                fused = _k3_bf16_gemm(
+                    hidden_states,
+                    self._front_w,
+                    out_dtype=torch.float32 if self._front_fp32 else None,
+                )
+                gate_up, router_logits, routed_input = torch.split(
+                    fused, self._front_sizes, dim=-1
+                )
         if num_tokens > 1 and _is_hip and not _aiter_k3_opt:
             router_logits = router_logits.contiguous()
         if self._moe_front_needs_dense_bf16:
@@ -1617,6 +1694,7 @@ class KimiK3MoE(nn.Module):
             # fused-norm AR (its GEMV chains on it via PDL)
             if (
                 fused_norm
+                and not use_mxfp4
                 and self._gemm_ag_up_eligible
                 and k3_ar_fusion.gemm_ag_up_fits(num_tokens)
             ):
@@ -1695,7 +1773,13 @@ class KimiK3MoE(nn.Module):
                 return out
         if not fused_norm:
             latent = self._latent_norm(latent)
-        if self._use_latent_up_ptpc_fp8(latent):
+        if use_mxfp4:
+            from sglang.kernels.ops.kimi_k3 import latent_mxfp4_aiter_hip
+
+            out = latent_mxfp4_aiter_hip.run(
+                latent, self._latent_up_w4, self._latent_up_scale4
+            )
+        elif self._use_latent_up_ptpc_fp8(latent):
             from sglang.kernels.ops.kimi_k3 import ptpc_fp8_aiter_hip
 
             out = ptpc_fp8_aiter_hip.run(
@@ -2373,11 +2457,6 @@ class KimiK3DeltaAttention(nn.Module):
                     and self._qkvgbfa_sizes is not None
                     and 0 < hidden_states.shape[0] <= self._qkvgbfa_bs_limit
                 ):
-                    # ROCm only. One GEMM for the whole in-proj: the [f_a|b]
-                    # tail rides along in the wide projection's bandwidth
-                    # instead of paying its own launch. Worth ~30% of the
-                    # in-proj at decode on gfx950; see
-                    # SGLANG_ROCM_K3_FUSE_KDA_INPROJ.
                     if self._use_qkvgbfa_ptpc_fp8(hidden_states):
                         from sglang.kernels.ops.kimi_k3 import ptpc_fp8_aiter_hip
 
@@ -2981,30 +3060,18 @@ class KimiK3DecoderLayer(nn.Module):
             and layer_idx >= config.first_k_dense_replace
             and layer_idx % config.moe_layer_freq == 0
         )
-        # SP-MoE (EP a2a backend — megamoe, DeepEP, Mooncake, Ascend-FuseEP or
-        # MoRI): o_proj defers its attention-TP reduction; this layer completes
-        # it as a reduce-scatter
-        # so the whole MoE region (agg2, norms, gate, latent projs, tp1
-        # shared experts, EP a2a dispatch) runs on 1/attn_tp of the rows,
-        # then all-gathers rows back after the MoE tail add. RS+AG moves the
-        # same bytes the o_proj all-reduce did, the shared-expert all-reduce
-        # disappears via tp1 weights, and each rank dispatches only its shard
-        # through the a2a (kills the attn_tp-fold dispatch redundancy) —
-        # strictly less communication + MoE-front compute /attn_tp. Works the
-        # same under DP attention: the attn_tp group is then the
-        # within-replica subgroup, rows are the DP-local batch, and
-        # KimiK3MoE skips the DP gather under EP a2a so the shard flows
-        # straight into the a2a. With attn_tp == 1 (full DP attention) there
-        # is no attention reduce to convert — the MoE-side gather skip alone
-        # removes the replication. Dense layers are excluded: their
-        # column-parallel MLP has no per-token decomposition that survives a
-        # token shard.
+        # SP-MoE: o_proj defers its attention-TP reduction and this layer
+        # completes it as a reduce-scatter, so the whole MoE region runs on
+        # 1/attn_tp of the rows and all-gathers them back after the MoE tail
+        # add. Requires an EP a2a backend, which routes each row to its experts
+        # directly and therefore tolerates a token shard. Dense layers are
+        # excluded: their column-parallel MLP has no per-token decomposition
+        # that survives one.
         _a2a_backend = get_moe_a2a_backend()
         self._sp_moe = (
             (
                 _a2a_backend.is_megamoe()
                 or _a2a_backend.is_deepep()
-                or _a2a_backend.is_mooncake()
                 or _a2a_backend.is_ascend_fuseep()
                 or _a2a_backend.is_mori()
             )
@@ -3454,15 +3521,9 @@ class KimiK3LinearModel(nn.Module):
         self._trim_padded_attn = require_mlp_sync()
 
         if self.pp_group.is_first_rank:
-            embedding_quant_config = (
-                quant_config
-                if quant_config is not None and quant_config.get_name() == "expert_pack"
-                else None
-            )
             self.embed_tokens = VocabParallelEmbedding(
                 config.vocab_size,
                 config.hidden_size,
-                quant_config=embedding_quant_config,
                 prefix=f"{prefix}.embed_tokens",
                 # Under DP attention each rank embeds only its local tokens:
                 # reduce within the attention-TP group, not the full TP group.
@@ -4031,17 +4092,20 @@ class KimiK3LinearForCausalLM(nn.Module):
                 continue
             if isinstance(layer.mlp, KimiK3MoE):
                 layer.mlp._merge_front_weights()
+                layer.mlp._prepare_moe_latent_mxfp4()
                 layer.mlp._prepare_preroute_fp8()
                 layer.mlp._prepare_latent_tail_fp8()
                 layer.mlp._prepare_latent_up_ptpc_fp8()
                 layer.mlp._prepare_shared_down_ptpc_fp8()
-                # The router consumes the correction bias in fp32; convert the
-                # bf16 checkpoint values once (exact) so the per-call
-                # .to(float32) in topk becomes a no-op instead of one upcast
-                # kernel per MoE layer per step.
+                # Convert the correction bias to whatever dtype the router
+                # wants (fp32, or the gate-logit dtype under aiter) once here,
+                # so topk's per-call cast becomes a no-op. Both are exact.
                 bias = layer.mlp.gate.e_score_correction_bias
-                if bias.dtype != torch.float32:
-                    bias.data = bias.data.to(torch.float32)
+                _bias_dtype = (
+                    layer.mlp.gate.weight.dtype if _use_aiter else torch.float32
+                )
+                if bias.dtype != _bias_dtype:
+                    bias.data = bias.data.to(_bias_dtype)
             if isinstance(layer.self_attn, KimiK3DeltaAttention):
                 layer.self_attn._merge_bfa_weights()
                 layer.self_attn._prepare_group64_projection()
