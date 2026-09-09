@@ -1130,6 +1130,10 @@ class KimiK3MoE(nn.Module):
     def _moe_front_needs_dense_bf16(self) -> bool:
         """Whether routed_input must be repaired into a dense bf16 buffer.
 
+        AITER's K3 MXFP8 activation route indexes rows by input.stride(-2), so
+        it can consume the fused-front split view directly. Other AITER
+        quantization routes are not used by this K3 path.
+
         Only the SM100 trtllm-gen mxfp4 runner reads the front slice as it
         comes: its group quant (route_quant_fused / per_token_group_quant)
         takes both a strided row and an fp32 row. The SM90/SM120 cutlass mxfp4
@@ -1137,6 +1141,10 @@ class KimiK3MoE(nn.Module):
         skips it as well, so those keep the bf16 contract even though the
         runner backend is the same."""
         from sglang.srt.layers.quantization.mxfp4 import Mxfp4MoEMethod
+
+        runner = getattr(self.experts, "runner", None)
+        if runner is not None and runner.runner_backend.is_aiter():
+            return False
 
         method = self.experts.quant_method
         return not (
@@ -1168,8 +1176,8 @@ class KimiK3MoE(nn.Module):
         if self._route_quant_fuse_eligible:
             route_quant_handoff.stage(routed_input)
         try:
-            topk_output = self.topk(hidden_states, router_logits)
             with zero_copy_context.set_moe_output(latent):
+                topk_output = self.topk(hidden_states, router_logits)
                 expert_output = self.experts(routed_input, topk_output)
         finally:
             route_quant_handoff.clear()
