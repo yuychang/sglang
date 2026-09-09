@@ -1620,6 +1620,8 @@ class Envs:
     SGLANG_K3_FUSED_FRONT = EnvBool(True)
     # Use the ROCm radix-4 router for covered K3 top-k workloads.
     SGLANG_K3_RADIX4_TOPK = EnvBool(False)
+    # Fold the BM=16 MoE sort into the radix-4 launch for decode-sized M.
+    SGLANG_K3_RADIX4_FUSE_SORT = EnvBool(True)
     # Route Kimi-K3's non-EP merged BF16 MoE front through AITER tuned_gemm.
     # Gated separately from latent MXFP4 so either can be measured alone.
     SGLANG_K3_AITER_TUNED_MOE_FRONT = EnvBool(False)
