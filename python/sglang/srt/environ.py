@@ -1631,6 +1631,9 @@ class Envs:
     # Where the K3 FlyDSL kernels come from: "auto" prefers the SGLang copy and
     # falls back to AITER, "sglang" and "aiter" pin one source.
     SGLANG_K3_FLYDSL_SOURCE = EnvStr("auto")
+    # Set to "aiter" to defer the KDA f_b projection into AITER's fused gfx950
+    # decode kernel instead of running it as a separate GEMM.
+    SGLANG_K3_KDA_FUSED_BACKEND = EnvStr("")
     # Restore the pre-tuning (rows_per_wave, weight_cache_modifier) pair for
     # the KDA group64 projection so the per-bucket tuning can be A/B'd.
     SGLANG_K3_KDA_GROUP64_LEGACY_LAUNCH = EnvBool(False)
