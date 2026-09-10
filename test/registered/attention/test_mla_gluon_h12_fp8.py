@@ -226,5 +226,72 @@ class TestMlaGluonDecodeFallback(CustomTestCase):
         self.assertIs(out, gluon_out)
 
 
+class TestMlaGluonDcp(CustomTestCase):
+    def _kwargs(self):
+        return dict(
+            q=torch.zeros(6, 8, 576),
+            k_buffer=torch.zeros(12, 576),
+            layer=mock.Mock(v_head_dim=512, qk_head_dim=576, tp_q_head_num=4),
+            kv_indices=torch.arange(12, dtype=torch.int32),
+            kv_indptr=torch.tensor([0, 6, 12], dtype=torch.int32),
+            sm_scale=0.125,
+            min_kv_seq_len=1,
+        )
+
+    def test_multi_token_lse_and_gathered_heads(self):
+        from sglang.srt.layers.attention import aiter_mla_gluon as mod
+
+        lse = torch.zeros(2, 3, 8)
+
+        def kernel(q_nope, q_pe, kv, out, *args, **kwargs):
+            self.assertEqual(q_nope.shape, (2, 3, 8, 512))
+            self.assertEqual(q_pe.shape, (2, 3, 8, 64))
+            self.assertTrue(kwargs["return_lse"])
+            out.fill_(7)
+            return out, lse
+
+        with (
+            mock.patch.object(mod, "mla_gluon_available", return_value=True),
+            mock.patch.object(mod, "_mla_gluon_fn", side_effect=kernel),
+        ):
+            out, result_lse = mod.mla_gluon_decode(
+                **self._kwargs(), qlen=3, return_lse=True
+            )
+        self.assertEqual(out.shape, (6, 8, 512))
+        self.assertTrue(torch.all(out == 7))
+        self.assertIs(result_lse, lse)
+
+    def test_two_dimensional_table_forwarded(self):
+        from sglang.srt.layers.attention import aiter_mla_gluon as mod
+
+        kernel = mock.Mock(return_value=(None, torch.zeros(6, 8)))
+        with (
+            mock.patch.object(mod, "mla_gluon_available", return_value=True),
+            mock.patch.object(mod, "_mla_gluon_fn", kernel),
+        ):
+            mod.mla_gluon_decode(
+                **self._kwargs(), use_2d_view=True, return_lse=True
+            )
+        self.assertTrue(kernel.call_args.kwargs["use_2d_view"])
+
+    def test_dcp_kernel_failure_does_not_fall_back(self):
+        from sglang.srt.layers.attention import aiter_mla_gluon as mod
+
+        with (
+            mock.patch.object(mod, "mla_gluon_available", return_value=True),
+            mock.patch.object(mod, "_mla_gluon_fn", side_effect=RuntimeError("kernel failed")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "kernel failed"):
+                mod.mla_gluon_decode(**self._kwargs(), return_lse=True)
+            self.assertIsNone(mod.mla_gluon_decode(**self._kwargs()))
+
+    def test_dcp_requires_kernel(self):
+        from sglang.srt.layers.attention import aiter_mla_gluon as mod
+
+        with mock.patch.object(mod, "mla_gluon_available", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "required for DCP"):
+                mod.mla_gluon_decode(**self._kwargs(), return_lse=True)
+
+
 if __name__ == "__main__":
     unittest.main()
