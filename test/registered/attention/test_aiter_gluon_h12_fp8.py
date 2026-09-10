@@ -134,6 +134,17 @@ class TestPreferMlaGluonDecode(CustomTestCase):
         with mock.patch(_GLUON_FN, return_value=mock.Mock()):
             self.assertFalse(self._prefer(kv_cache_dtype=torch.bfloat16))
 
+    def test_false_for_non_bf16_q(self):
+        """The Gluon kernel only accepts a BF16 Q. Routing an FP8 Q there makes
+        every layer raise and fall back, which drops GSM8K to 0.80; the fused
+        Kimi-K3 MLA query producer emits FP8, so this is reachable in practice.
+        """
+        with mock.patch(_GLUON_FN, return_value=mock.Mock()):
+            self.assertFalse(self._prefer(q_dtype=fp8_dtype))
+            self.assertTrue(self._prefer(q_dtype=torch.bfloat16))
+            # Callers that cannot name the dtype keep the pre-gate behavior.
+            self.assertTrue(self._prefer(q_dtype=None))
+
 
 def _layer(num_head=12, qk_head_dim=576, v_head_dim=512):
     layer = mock.Mock()
@@ -224,6 +235,24 @@ class TestMlaGluonDecodeShapes(CustomTestCase):
                 min_kv_seq_len=128,
             )
         self.assertIsNone(out)
+
+    def test_raises_for_dcp_when_gluon_unavailable(self):
+        """DCP callers unpack (out, lse), so returning None would surface as an
+        opaque 'cannot unpack non-sequence NoneType' far from the real cause.
+        There is no fallback: zero-pad mla_decode_fwd cannot produce the LSE.
+        """
+        with mock.patch(_GLUON_FN, return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "required for DCP"):
+                mod.mla_gluon_decode(
+                    q=torch.zeros(4, 12, 576, dtype=torch.bfloat16),
+                    k_buffer=torch.zeros(64, 576, dtype=torch.bfloat16),
+                    layer=_layer(),
+                    kv_indices=torch.zeros(64, dtype=torch.int32),
+                    kv_indptr=torch.zeros(5, dtype=torch.int32),
+                    sm_scale=0.125,
+                    min_kv_seq_len=1,
+                    return_lse=True,
+                )
 
 
 class TestForwardMlaDecodeDispatch(CustomTestCase):

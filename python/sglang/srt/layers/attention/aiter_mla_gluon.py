@@ -100,6 +100,10 @@ def mla_gluon_decode(
     """
     mla_gluon = _gluon_fn()
     if mla_gluon is None:
+        # DCP callers unpack (out, lse) and have no fallback: the zero-pad
+        # mla_decode_fwd path cannot return the LSE the cross-rank merge needs.
+        if return_lse:
+            raise RuntimeError("AITER Gluon MLA is required for DCP")
         return None
 
     num_head = layer.tp_q_head_num

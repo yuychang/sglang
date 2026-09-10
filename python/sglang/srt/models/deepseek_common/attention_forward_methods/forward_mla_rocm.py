@@ -799,12 +799,16 @@ class DeepseekMLARocmForwardMixin:
             q = torch.cat([q_nope_out, q_pe], dim=-1)
             if llama_4_scaling is not None:
                 q[..., : self.kv_lora_rank] *= llama_4_scaling
+            # set_mla_kv_buffer owner-filters and shards internally, so pass the
+            # RAW loc: pre-dividing here would double-apply the filter.
             get_token_to_kv_pool().set_mla_kv_buffer(
                 self.attn_mqa,
                 forward_batch.out_cache_loc,
                 k_nope,
                 k_pe,
             )
+            # Decode reads its KV back from the shard; target-verify cannot,
+            # since the window it must attend densely is split across ranks.
             if forward_batch.forward_mode.is_target_verify():
                 k_window = torch.cat([k_nope, k_pe], dim=-1)
                 v_window = k_nope
