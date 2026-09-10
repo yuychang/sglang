@@ -155,6 +155,13 @@ def mla_gluon_available() -> bool:
         return False
 
 
+def _gluon_fn():
+    """Return the runtime-validated kernel required by DCP."""
+    if _gluon_runtime_ok() and mla_gluon_available():
+        return _mla_gluon_fn
+    return None
+
+
 def mla_gluon_decode(
     *,
     q: torch.Tensor,
@@ -162,29 +169,42 @@ def mla_gluon_decode(
     layer: RadixAttention,
     kv_indices: torch.Tensor,
     kv_indptr: torch.Tensor,
-    seq_lens: torch.Tensor,
+    seq_lens: Optional[torch.Tensor] = None,
     sm_scale: float,
     kv_scale: float = 1.0,
     min_kv_seq_len: Optional[int] = None,
-) -> Optional[torch.Tensor]:
+    qlen: int = 1,
+    use_2d_view: bool = False,
+    return_lse: bool = False,
+):
     """Run Gluon MLA decode for fused Q [B, H, 576] and MLA KV pool.
 
-    Returns output [B, H, v_head_dim] on success, or None to fall back.
+    Returns output [tokens, H, v_head_dim], or (output, LSE) for DCP.
+    Non-DCP failures return None to fall back; DCP failures propagate because
+    the fallback kernel cannot return the LSE needed for the cross-rank merge.
 
     ``min_kv_seq_len`` must be supplied by the caller during CUDA graph capture
     (no GPU->CPU sync from ``seq_lens``). For eager decode, omit it to derive
     from ``seq_lens`` when safe.
     """
     if not mla_gluon_available():
+        if return_lse:
+            raise RuntimeError("AITER Gluon MLA is required for DCP")
         return None
 
-    batch_size = q.shape[0]
+    batch_size = q.shape[0] // qlen
+    num_head = q.shape[1]
 
     kv_lora_rank = layer.v_head_dim
     qk_rope_head_dim = layer.qk_head_dim - kv_lora_rank
     q_nope, q_pe = torch.split(q, [kv_lora_rank, qk_rope_head_dim], dim=-1)
 
-    o = q.new_empty((batch_size, layer.tp_q_head_num, kv_lora_rank))
+    if qlen > 1:
+        q_nope = q_nope.view(batch_size, qlen, num_head, kv_lora_rank)
+        q_pe = q_pe.view(batch_size, qlen, num_head, qk_rope_head_dim)
+        o = q.new_empty((batch_size, qlen, num_head, kv_lora_rank))
+    else:
+        o = q.new_empty((batch_size, num_head, kv_lora_rank))
 
     kv_c = k_buffer.view(-1, layer.qk_head_dim)
     if min_kv_seq_len is None:
@@ -193,13 +213,13 @@ def mla_gluon_decode(
                 "mla_gluon_decode: min_kv_seq_len missing during CUDA graph capture"
             )
             min_kv_seq_len = 1
-        elif seq_lens.numel():
+        elif seq_lens is not None and seq_lens.numel():
             min_kv_seq_len = int(seq_lens.max().item())
         else:
             min_kv_seq_len = 1
 
     try:
-        _mla_gluon_fn(
+        result = _mla_gluon_fn(
             q_nope,
             q_pe,
             kv_c,
@@ -209,12 +229,19 @@ def mla_gluon_decode(
             sm_scale,
             k_pe=None,
             kv_pe_offset=kv_lora_rank,
-            use_2d_view=False,
+            use_2d_view=use_2d_view,
             kv_scale=kv_scale,
             min_kv_seq_len=min_kv_seq_len,
+            **({"return_lse": True} if return_lse else {}),
         )
-        return o
+        out = o.flatten(0, 1) if qlen > 1 else o
+        if return_lse:
+            _, lse = result
+            return out, lse
+        return out
     except Exception as exc:
+        if return_lse:
+            raise  # DCP cannot fall back to a kernel without LSE.
         logger.warning(
             "mla_gluon decode failed (num_head=%s, kv_dtype=%s, batch=%s): %s; "
             "falling back to zero-pad mla_decode_fwd",
