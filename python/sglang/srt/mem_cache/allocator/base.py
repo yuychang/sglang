@@ -191,8 +191,35 @@ class BaseTokenToKVPoolAllocator(abc.ABC):
         Each segment covers the pages ``[start_pos // ps, ceil(end / ps))``.
         Starts sit on page boundaries, ends may fall mid-page, and the page
         ranges of consecutive segments do not overlap -- so in page units the
-        segments are aligned and disjoint, and every page is released once."""
-        for free_index, start_pos in self._page_disjoint(segments):
+        segments are aligned and disjoint, and every page is released once.
+
+        DCP widens the allocator page by ``dcp_size`` while radix-cache
+        segments remain aligned to the logical page.  Adjacent logical
+        segments may therefore share one physical page.  In that case use the
+        allocator's general free path, which deduplicates page ids, instead of
+        the fixed-stride fast path."""
+        nonempty = [
+            (free_index, start_pos)
+            for free_index, start_pos in segments
+            if free_index.numel() > 0
+        ]
+        if not nonempty:
+            return
+        ps = self.page_size
+        prev_end = None
+        fast_path = True
+        for free_index, start_pos in nonempty:
+            if start_pos % ps != 0 or (
+                prev_end is not None
+                and start_pos // ps <= (prev_end - 1) // ps
+            ):
+                fast_path = False
+                break
+            prev_end = start_pos + free_index.numel()
+        if not fast_path:
+            self.free(torch.cat([free_index for free_index, _ in nonempty]))
+            return
+        for free_index, start_pos in nonempty:
             self.free_segment(free_index, start_pos=start_pos)
 
     def free_full_segment(self, free_index: torch.Tensor, *, start_pos: int):

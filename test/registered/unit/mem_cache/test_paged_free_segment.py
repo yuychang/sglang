@@ -185,10 +185,10 @@ class TestFreeSegments(unittest.TestCase):
         )
         self.assertTrue(torch.equal(torch.sort(freed)[0], reference))
 
-    def test_segments_sharing_a_page_are_rejected(self):
+    def test_segments_sharing_a_page_use_deduplicating_fallback(self):
         for spans in ([(0, 5), (5, 8)], [(0, 5), (7, 11)], [(0, 6), (4, 11)]):
-            with self.assertRaises(AssertionError):
-                self._freed_by_segments(11, spans)
+            freed, reference = self._freed_by_segments(11, spans)
+            self.assertTrue(torch.equal(torch.sort(freed)[0], reference))
 
 
 class _RecordingBaseAllocator(BaseTokenToKVPoolAllocator):
@@ -225,15 +225,19 @@ class TestBaseFallbackFreeSegments(unittest.TestCase):
         per_call_pages = [set((t // PAGE_SIZE).tolist()) for t in alloc.freed]
         self.assertEqual(per_call_pages, [{0, 1}, {2}])
 
-    def test_fallback_rejects_shared_page_and_unaligned_start(self):
+    def test_fallback_coalesces_shared_page_segments(self):
+        alloc = _RecordingBaseAllocator()
+        row = torch.arange(11)
+        alloc.free_segments([(row[0:6], 0), (row[6:11], 6)])
+        self.assertEqual(len(alloc.freed), 1)
+        self.assertTrue(torch.equal(alloc.freed[0], row))
+
+    def test_direct_unaligned_segment_is_still_rejected(self):
         alloc = _RecordingBaseAllocator()
         row = torch.arange(11)
         with self.assertRaises(AssertionError):
-            alloc.free_segments([(row[0:6], 0), (row[6:11], 6)])
-        with self.assertRaises(AssertionError):
             alloc.free_segment(row[1:], start_pos=1)
-        self.assertEqual(len(alloc.freed), 1)
-        self.assertTrue(torch.equal(alloc.freed[0], row[0:6]))
+        self.assertEqual(len(alloc.freed), 0)
 
 
 if __name__ == "__main__":
