@@ -1,3 +1,4 @@
+import os
 from typing import Optional
 
 import torch
@@ -22,6 +23,8 @@ if not is_cpu():
 
 class TritonKDAKernel(LinearAttnKernelBase):
     """Triton-based kernel for KDA (Kimi Delta Attention) linear attention."""
+
+    _prefill_window_size = int(os.getenv("SGLANG_KDA_PREFILL_WINDOW_SIZE", "0"))
 
     # XPU has no tvm_ffi CUDA JIT kernel for KDA packed decode; route XPU to the
     # non-packed Triton decode() path (fused_sigmoid_gating_delta_rule_update),
@@ -233,19 +236,84 @@ class TritonKDAKernel(LinearAttnKernelBase):
         return_intermediate_states: bool = False,
         **kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
-        return chunk_kda(
-            q=q,
-            k=k,
-            v=v,
-            g=g,
-            beta=beta,
-            initial_state=ssm_states,
-            initial_state_indices=cache_indices,
-            use_qk_l2norm_in_kernel=True,
-            cu_seqlens=query_start_loc,
-            A_log=A_log,
-            dt_bias=dt_bias,
-            lower_bound=lower_bound,
-            beta_is_raw=beta_is_raw,
-            output_intermediate_states=return_intermediate_states,
-        )
+        def run_chunk(
+            q_chunk,
+            k_chunk,
+            v_chunk,
+            g_chunk,
+            beta_chunk,
+            state_index,
+            chunk_start_loc,
+        ):
+            return chunk_kda(
+                q=q_chunk,
+                k=k_chunk,
+                v=v_chunk,
+                g=g_chunk,
+                beta=beta_chunk,
+                initial_state=ssm_states,
+                initial_state_indices=state_index,
+                use_qk_l2norm_in_kernel=True,
+                cu_seqlens=chunk_start_loc,
+                A_log=A_log,
+                dt_bias=dt_bias,
+                lower_bound=lower_bound,
+                beta_is_raw=beta_is_raw,
+                output_intermediate_states=return_intermediate_states,
+            )
+
+        total_tokens = q.shape[1]
+        window_size = self._prefill_window_size
+        if window_size <= 0 or total_tokens <= window_size:
+            return run_chunk(q, k, v, g, beta, cache_indices, query_start_loc)
+
+        # A scheduler prefill chunk does not bound KDA work when a radix-cache
+        # restore reconstructs a long linear-attention suffix. chunk_kda then
+        # materializes O(T) gate/intra/recurrent workspaces (including fp32
+        # tensors) for the full suffix. Process each sequence in chunk-aligned
+        # windows instead. chunk_kda commits the final recurrent state in place,
+        # so the next window starts from the exact state left by the preceding
+        # one. Keeping non-final windows aligned to KDA's 64-token chunk size
+        # also preserves the global ordering of intermediate radix snapshots.
+        window_size = max(64, window_size // 64 * 64)
+        seq_lens_cpu = kwargs.get("extend_seq_lens_cpu")
+        if seq_lens_cpu is None:
+            seq_lens_cpu = (query_start_loc[1:] - query_start_loc[:-1]).cpu()
+        seq_lens = [int(length) for length in seq_lens_cpu]
+
+        def token_slice(tensor, start, end):
+            if tensor.shape[0] == 1 and tensor.ndim > 1:
+                return tensor[:, start:end]
+            return tensor[start:end]
+
+        outputs = []
+        intermediate_states = []
+        token_start = 0
+        for seq_idx, seq_len in enumerate(seq_lens):
+            seq_end = token_start + seq_len
+            for start in range(token_start, seq_end, window_size):
+                end = min(start + window_size, seq_end)
+                result = run_chunk(
+                    q[:, start:end],
+                    k[:, start:end],
+                    v[:, start:end],
+                    token_slice(g, start, end),
+                    token_slice(beta, start, end),
+                    cache_indices[seq_idx : seq_idx + 1],
+                    # This call contains one dense sequence. Fixed-length mode
+                    # avoids rebuilding varlen chunk indices (and synchronizing
+                    # them to the host) for every KDA layer and window.
+                    None,
+                )
+                if return_intermediate_states:
+                    output, states = result
+                    intermediate_states.append(states)
+                else:
+                    output = result
+                outputs.append(output)
+            token_start = seq_end
+
+        output = torch.cat(outputs, dim=1)
+        if return_intermediate_states:
+            return output, torch.cat(intermediate_states, dim=1)
+        return output
