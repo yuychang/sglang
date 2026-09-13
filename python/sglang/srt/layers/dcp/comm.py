@@ -36,15 +36,12 @@ from sglang.srt.distributed.device_communicators.pynccl_allocator import (
     use_symmetric_memory,
 )
 from sglang.srt.distributed.parallel_state import GroupCoordinator
-<<<<<<< HEAD
 from sglang.srt.runtime_context import get_parallel
 from sglang.srt.utils import is_hip
 
 _is_hip = is_hip()
-=======
-from sglang.srt.runtime_context import get_parallel, get_platform
+from sglang.srt.runtime_context import get_platform
 from sglang.srt.utils.common import is_mnnvl_fabric_device
->>>>>>> origin/main
 
 
 def _warn_deprecated_dcp_accessor(name: str, replacement: str) -> None:

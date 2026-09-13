@@ -194,13 +194,10 @@ def handle_attention_aiter(attn, forward_batch):
     if is_in_tc_piecewise_cuda_graph() or is_in_breakable_cuda_graph():
         return AttnForwardMethod.MHA
     if forward_batch.forward_mode.is_extend_without_speculative():
-<<<<<<< HEAD
         if get_parallel().dcp_enabled:
             return AttnForwardMethod.MHA_ONE_SHOT
-=======
         if not _support_mha_one_shot(attn, forward_batch, "aiter"):
             return AttnForwardMethod.MHA_CHUNKED_KV
->>>>>>> origin/main
         return AttnForwardMethod.MHA
     else:
         return AttnForwardMethod.MLA

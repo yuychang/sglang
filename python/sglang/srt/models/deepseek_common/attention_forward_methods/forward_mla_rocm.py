@@ -140,34 +140,17 @@ if _use_aiter_gfx95:
     from sglang.srt.layers.rocm_linear_utils import fused_qk_rope_cat_and_cache_mla
 
 
-<<<<<<< HEAD
-def _is_unit_host_scale(scale) -> bool:
-    """Return whether scale is a host-side unit value without synchronizing."""
+def _absorb_weight_bf16(weight: torch.Tensor, scale) -> torch.Tensor:
+    """Dequantize an absorbed MLA weight, skipping host-side unit scales."""
+    weight = weight if weight.dtype == torch.bfloat16 else weight.to(torch.bfloat16)
     if scale is None:
-        return True
+        return weight
     if isinstance(scale, torch.Tensor):
-        return False
+        return weight * scale
     try:
-        return float(scale) == 1.0
+        return weight if float(scale) == 1.0 else weight * scale
     except (TypeError, ValueError):
-        return False
-
-
-def _bf16_absorb_weight(weight: torch.Tensor, scale) -> torch.Tensor:
-    """Convert an absorb weight to BF16 and skip the multiply for host 1.0."""
-    weight = weight.to(dtype=torch.bfloat16)
-    return weight if _is_unit_host_scale(scale) else weight * scale
-=======
-def _absorb_weight_bf16(w: torch.Tensor, w_scale) -> torch.Tensor:
-    """Dequantize an absorbed MLA weight, skipping the pass when it is a no-op."""
-    if (
-        w.dtype == torch.bfloat16
-        and isinstance(w_scale, (int, float))
-        and w_scale == 1.0
-    ):
-        return w
-    return w.to(torch.bfloat16) * w_scale
->>>>>>> origin/main
+        return weight * scale
 
 
 def rocm_absorb_q_bmm(
@@ -215,11 +198,7 @@ def rocm_absorb_q_bmm(
         else:
             q_nope_out = torch.bmm(
                 q_nope.to(torch.bfloat16).transpose(0, 1),
-<<<<<<< HEAD
-                _bf16_absorb_weight(attn.w_kc, attn.w_scale),
-=======
                 _absorb_weight_bf16(attn.w_kc, attn.w_scale),
->>>>>>> origin/main
             )
     return q_nope_out
 
@@ -292,11 +271,7 @@ def rocm_absorb_v_bmm(
         else:
             attn_bmm_output = torch.bmm(
                 attn_output.to(torch.bfloat16).transpose(0, 1),
-<<<<<<< HEAD
-                _bf16_absorb_weight(attn.w_vc, attn.w_scale),
-=======
                 _absorb_weight_bf16(attn.w_vc, attn.w_scale),
->>>>>>> origin/main
             )
 
     if _bmm_buf is not None:

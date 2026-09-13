@@ -171,9 +171,9 @@ class ForwardMetadata:
 _AITER_PARTITION_SIZE_ROCM = 256
 
 
-<<<<<<< HEAD
 _DCP_VERIFY_TABLE_COLS_PER_BLOCK = 128
-=======
+
+
 # AITER's gfx950 FP8 FMHA ASM kernels only cover these GQA ratios. Other
 # ratios (e.g. Qwen3.8-27B 24Q/4KV = 6) must not take the pertensor shortcut.
 _AITER_FP8_ASM_GQA_RATIOS = frozenset({1, 2, 4, 8, 16})
@@ -184,7 +184,6 @@ def _aiter_fp8_asm_supports_gqa(num_q_heads: int, num_kv_heads: int) -> bool:
     if num_kv_heads <= 0 or num_q_heads % num_kv_heads != 0:
         return False
     return (num_q_heads // num_kv_heads) in _AITER_FP8_ASM_GQA_RATIOS
->>>>>>> origin/main
 
 
 def _asm_context_prefill_gather_indices(
@@ -1083,7 +1082,6 @@ class AiterAttnBackend(AttentionBackend):
         k_descale,
     ):
         k_buffer = self.token_to_kv_pool.get_key_buffer(layer.layer_id)
-<<<<<<< HEAD
         q_mla = self._mla_q_heads(q, layer)
         max_q_len = self.forward_metadata.max_q_len or 1
 
@@ -1095,27 +1093,22 @@ class AiterAttnBackend(AttentionBackend):
                 q_dtype=q_mla.dtype,
             )
             and max_q_len == 1
-=======
-        q = q.view(-1, layer.tp_q_head_num, layer.qk_head_dim)
-        max_q_len = self.forward_metadata.max_q_len or 1
-
-        if prefer_mla_gluon_decode(
-            head_pad_mode=getattr(self, "head_pad_mode", "none"),
-            num_head=getattr(self, "num_head", layer.tp_q_head_num),
-            kv_cache_dtype=self.kv_cache_dtype,
->>>>>>> origin/main
         ):
-            return mla_gluon_decode(
-                q=q,
+            kv_scale = self._resolve_fp8_kv_scale_float(layer, k_descale)
+            min_kv_seq_len = self._resolve_mla_gluon_min_kv_seq_len(forward_batch)
+            gluon_out = mla_gluon_decode(
+                q=q_mla,
                 k_buffer=k_buffer,
                 layer=layer,
                 kv_indices=self.forward_metadata.kv_indices,
                 kv_indptr=self.forward_metadata.kv_indptr,
+                seq_lens=forward_batch.seq_lens,
                 sm_scale=layer.scaling,
-                kv_scale=self._resolve_fp8_kv_scale_float(layer, k_descale),
-                min_kv_seq_len=self._resolve_mla_gluon_min_kv_seq_len(forward_batch),
-                qlen=max_q_len,
+                kv_scale=kv_scale,
+                min_kv_seq_len=min_kv_seq_len,
             )
+            if gluon_out is not None:
+                return gluon_out
 
         work_metadata = self.forward_metadata.work_metadata
         work_indptr = self.forward_metadata.work_indptr
@@ -1126,7 +1119,7 @@ class AiterAttnBackend(AttentionBackend):
         num_kv_splits = self.forward_metadata.num_kv_splits
 
         return self._mla_decode_fwd_with_head_pad(
-            q,
+            q_mla,
             k_buffer.view(-1, 1, 1, layer.qk_head_dim),
             layer,
             qo_indptr=self.forward_metadata.qo_indptr,
@@ -2815,7 +2808,6 @@ class AiterAttnBackend(AttentionBackend):
                 and not forward_batch.forward_mode.is_draft_extend_v2()
             ):
                 extend_no_prefix = not any(forward_batch.extend_prefix_lens_cpu)
-<<<<<<< HEAD
                 if self.dcp_world_size > 1:
                     if self.use_fp8_prefill_attn and self.head_pad_mode != "zero":
                         return self.mla_fp8_prefill_attn(q, k, v, layer)
@@ -2830,10 +2822,8 @@ class AiterAttnBackend(AttentionBackend):
                         softmax_scale=layer.scaling,
                         causal=True,
                     )
-=======
                 if forward_batch.mha_return_lse:
                     return self._forward_extend_skip_prefix(q, k, v, layer)
->>>>>>> origin/main
                 if kv_indices.shape[0] == 0 or extend_no_prefix:
                     if self.use_fp8_prefill_attn and self.head_pad_mode != "zero":
                         output = self.mla_fp8_prefill_attn(
