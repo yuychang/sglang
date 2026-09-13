@@ -796,7 +796,9 @@ class DeepseekMLARocmForwardMixin:
             # that helper omits draft-extend-v2, which needs the same treatment.
             q = torch.cat([q_nope_out, q_pe], dim=-1)
             if llama_4_scaling is not None:
-                q *= llama_4_scaling
+                # llama_4_scaling applies only to the q_nope portion;
+                # mutate in place via the slice view of q.
+                q[..., : self.kv_lora_rank] *= llama_4_scaling
             # set_mla_kv_buffer owner-filters and shards internally, so pass the
             # RAW loc: pre-dividing here would double-apply the filter.
             get_token_to_kv_pool().set_mla_kv_buffer(
