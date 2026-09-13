@@ -200,6 +200,25 @@ def handle_attention_aiter(attn, forward_batch):
     if forward_batch.forward_mode.is_extend_without_speculative():
         if get_parallel().dcp_enabled:
             return AttnForwardMethod.MHA_ONE_SHOT
+        prefix_lens = forward_batch.extend_prefix_lens_cpu
+        if (
+            _is_hip
+            and is_gfx95_supported()
+            and prefix_lens is not None
+            and any(prefix_lens)
+            and sum(prefix_lens) > forward_batch.get_max_chunk_capacity()
+            and attn.kv_cache_dtype == "fp8_e4m3"
+            and attn.num_local_heads == 12
+            and attn.qk_nope_head_dim == 128
+            and attn.qk_rope_head_dim == 64
+            and attn.v_head_dim == 128
+            and attn.kv_lora_rank == 512
+        ):
+            # Kimi-K3 TP8 cached prefixes expand 512 latent values into
+            # 12 heads of BF16 K/V.  A one-shot 250K prefix needs roughly
+            # 3.8 GiB while the chunked path bounds that materialization by
+            # SGLANG_MAX_KV_CHUNK_CAPACITY and merges attention states by LSE.
+            return AttnForwardMethod.MHA_CHUNKED_KV
         return AttnForwardMethod.MHA
     else:
         return AttnForwardMethod.MLA

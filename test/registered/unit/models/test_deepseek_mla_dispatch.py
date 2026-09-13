@@ -95,5 +95,56 @@ class TestResolveRocmForwardMethod(CustomTestCase):
                 self.assertEqual(abh.resolve_rocm_forward_method(method), method)
 
 
+class TestAiterKimiK3ChunkedPrefixDispatch(CustomTestCase):
+    @staticmethod
+    def _attn():
+        return SimpleNamespace(
+            kv_cache_dtype="fp8_e4m3",
+            num_local_heads=12,
+            qk_nope_head_dim=128,
+            qk_rope_head_dim=64,
+            v_head_dim=128,
+            kv_lora_rank=512,
+        )
+
+    @staticmethod
+    def _batch(prefix_len):
+        return SimpleNamespace(
+            forward_mode=SimpleNamespace(
+                is_extend_without_speculative=lambda: True,
+            ),
+            extend_prefix_lens_cpu=[prefix_len],
+            get_max_chunk_capacity=lambda: 131072,
+        )
+
+    def test_long_kimi_k3_prefix_uses_chunked_mha(self):
+        parallel = SimpleNamespace(dcp_enabled=False)
+        with (
+            mock.patch.object(abh, "_is_hip", True),
+            mock.patch.object(abh, "is_gfx95_supported", return_value=True),
+            mock.patch.object(abh, "get_parallel", return_value=parallel),
+            mock.patch.object(abh, "is_in_tc_piecewise_cuda_graph", return_value=False),
+            mock.patch.object(abh, "is_in_breakable_cuda_graph", return_value=False),
+        ):
+            method = abh.handle_attention_aiter(
+                self._attn(), self._batch(prefix_len=254000)
+            )
+        self.assertEqual(method, AttnForwardMethod.MHA_CHUNKED_KV)
+
+    def test_prefix_within_capacity_keeps_fast_mha(self):
+        parallel = SimpleNamespace(dcp_enabled=False)
+        with (
+            mock.patch.object(abh, "_is_hip", True),
+            mock.patch.object(abh, "is_gfx95_supported", return_value=True),
+            mock.patch.object(abh, "get_parallel", return_value=parallel),
+            mock.patch.object(abh, "is_in_tc_piecewise_cuda_graph", return_value=False),
+            mock.patch.object(abh, "is_in_breakable_cuda_graph", return_value=False),
+        ):
+            method = abh.handle_attention_aiter(
+                self._attn(), self._batch(prefix_len=131072)
+            )
+        self.assertEqual(method, AttnForwardMethod.MHA)
+
+
 if __name__ == "__main__":
     unittest.main()
