@@ -36,8 +36,8 @@ from sglang.multimodal_gen.runtime.pipelines_core.stages.base import (
 from sglang.multimodal_gen.runtime.server_args import ServerArgs
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 from sglang.multimodal_gen.runtime.utils.perf_logger import StageProfiler
+from sglang.multimodal_gen.runtime.utils.precision_types import PRECISION_TO_TYPE
 from sglang.multimodal_gen.runtime.utils.profiler import SGLDiffusionProfiler
-from sglang.multimodal_gen.utils import PRECISION_TO_TYPE
 
 logger = init_logger(__name__)
 
@@ -776,5 +776,9 @@ class HeliosChunkedDenoisingStage(PipelineStage):
         # separately to avoid temporal artifacts at chunk boundaries.
         batch.latent_chunks = chunk_latents_list
         batch.latents = history_latents[:, :, -total_generated_latent_frames:]
+        batch.record_stage_iterations(
+            global_step_offset,
+            global_step_offset if is_enable_stage2 else None,
+        )
 
         return batch
