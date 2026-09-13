@@ -2717,11 +2717,13 @@ class AiterAttnBackend(AttentionBackend):
             ):
                 extend_no_prefix = not any(forward_batch.extend_prefix_lens_cpu)
                 if forward_batch.attn_attend_prefix_cache is not None:
+                    # AITER's varlen FA uses return_lse (not the CUDA FA3
+                    # softmax-LSE flag). LSE arrives as (heads, tokens).
                     if forward_batch.attn_attend_prefix_cache:
                         chunk_idx = forward_batch.prefix_chunk_idx
                         assert chunk_idx is not None and chunk_idx >= 0
                         assert forward_batch.mha_return_lse
-                        output = flash_attn_varlen_func(
+                        output, lse = flash_attn_varlen_func(
                             q,
                             k,
                             v,
@@ -2731,25 +2733,25 @@ class AiterAttnBackend(AttentionBackend):
                             forward_batch.prefix_chunk_max_seq_lens[chunk_idx],
                             softmax_scale=layer.scaling,
                             causal=False,
-                            return_softmax_lse=True,
-                        )
-                    else:
-                        output = flash_attn_varlen_func(
-                            q,
-                            k,
-                            v,
-                            qo_indptr,
-                            qo_indptr,
-                            max_q_len,
-                            max_q_len,
-                            softmax_scale=layer.scaling,
-                            causal=True,
-                            return_softmax_lse=forward_batch.mha_return_lse,
-                        )
-                    if forward_batch.mha_return_lse:
-                        output, lse, *_ = output
+                            return_lse=True,
+                        )[:2]
                         return output, lse.transpose(0, 1).contiguous()
-                    return output
+                    result = flash_attn_varlen_func(
+                        q,
+                        k,
+                        v,
+                        qo_indptr,
+                        qo_indptr,
+                        max_q_len,
+                        max_q_len,
+                        softmax_scale=layer.scaling,
+                        causal=True,
+                        return_lse=bool(forward_batch.mha_return_lse),
+                    )
+                    if forward_batch.mha_return_lse:
+                        output, lse = result[:2]
+                        return output, lse.transpose(0, 1).contiguous()
+                    return result
                 if self.dcp_world_size > 1:
                     if self.use_fp8_prefill_attn and self.head_pad_mode != "zero":
                         return self.mla_fp8_prefill_attn(q, k, v, layer)

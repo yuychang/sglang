@@ -145,6 +145,15 @@ class TestAiterKimiK3ChunkedPrefixDispatch(CustomTestCase):
             )
         self.assertEqual(method, AttnForwardMethod.MHA)
 
+    def test_aiter_chunked_prefix_uses_return_lse_kwarg(self):
+        import inspect
+
+        from sglang.srt.layers.attention.aiter_backend import AiterAttnBackend
+
+        src = inspect.getsource(AiterAttnBackend.forward_extend)
+        self.assertNotIn("return_softmax_lse=", src)
+        self.assertIn("return_lse=", src)
+
 
 if __name__ == "__main__":
     unittest.main()
