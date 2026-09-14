@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import os
 from typing import Any, Callable, Optional, cast
 
 import torch
@@ -26,6 +27,9 @@ __all__ = ["QuarkW8A8Fp8"]
 _is_fp8_fnuz = is_fp8_fnuz()
 _is_hip = is_hip()
 _use_aiter = get_bool_env_var("SGLANG_USE_AITER") and _is_hip
+_cache_k3_f_b_bf16 = (
+    _is_hip and os.getenv("SGLANG_K3_KDA_FUSED_BACKEND", "").lower() == "aiter"
+)
 if _use_aiter:
     from aiter.ops.shuffle import shuffle_weight
 
@@ -94,6 +98,14 @@ class QuarkW8A8Fp8(QuarkLinearScheme):
                     layer.input_scale = Parameter(input_scale, requires_grad=False)
             else:
                 weight_scale = layer.weight_scale.data
+            if _cache_k3_f_b_bf16 and tuple(weight.shape) == (1536, 128):
+                # K3's fused ROCm KDA decode consumes f_b inside the recurrent
+                # kernel as BF16. Keep this tiny (~0.4 MiB) dense view before
+                # the regular FP8 path transposes/preshuffles the serialized
+                # layout; the ordinary projection remains FP8 for prefill.
+                layer._k3_f_b_bf16_weight = (
+                    weight.to(torch.float32) * weight_scale.view(-1, 1)
+                ).to(torch.bfloat16)
             if _is_hip and weight.shape[0] % 16 != 0:
                 # hipBLASLt needs the GEMM's N to be a multiple of 16 and
                 # torch._scaled_mm raises instead of padding. A narrow output

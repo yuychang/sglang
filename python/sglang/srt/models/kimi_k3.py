@@ -2509,7 +2509,9 @@ class KimiK3DeltaAttention(nn.Module):
 
             layer = self.attn
             w = layer.conv_weights
-            f_b_weight = self.f_b_proj.weight
+            f_b_weight = getattr(
+                self.f_b_proj, "_k3_f_b_bf16_weight", self.f_b_proj.weight
+            )
             backend = envs.SGLANG_K3_KDA_FUSED_BACKEND.get().lower()
             backend_available = (
                 backend == "aiter"
