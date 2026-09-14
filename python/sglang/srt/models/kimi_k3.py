@@ -812,8 +812,7 @@ class KimiK3MoE(nn.Module):
             mods = [self.gate, self.routed_expert_down_proj]
         else:
             return
-        dtypes = {m.weight.dtype for m in mods}
-        if len(dtypes) != 1 or dtypes.pop() not in (torch.bfloat16, torch.float16):
+        if not _merge_dtype_ok([m.weight for m in mods]):
             return
         self._front_w, self._front_sizes = _merge_weights_as_views(mods)
         self._front_is_ep_pair = len(mods) == 2
@@ -2246,6 +2245,8 @@ class KimiK3DeltaAttention(nn.Module):
             self._bfa_w = torch.cat(weights, dim=0).contiguous()
             self._bfa_f_b_w = _get_k3_dense_weight(self.f_b_proj).contiguous()
         else:
+            if _is_hip and self._merge_kda_inproj_fp8_hip():
+                return
             if _is_hip and self._merge_kda_inproj_weights_hip():
                 self._bfa_f_b_w = self.f_b_proj.weight
                 return
@@ -2278,6 +2279,72 @@ class KimiK3DeltaAttention(nn.Module):
             self._bfa_b_size,
             merged.shape[0] - sum(sizes),
         ]
+        return True
+
+    def _kda_inproj_channel_fp8_scales(self) -> Optional[list[torch.Tensor]]:
+        """Per-channel FP8 scales of the three KDA input projections, if uniform.
+
+        Quark stores self_attn.* as [out, in] e4m3 plus an [out] fp32 scale --
+        already the PTPC layout -- so the merge can reuse them instead of
+        re-quantizing a dequantized copy."""
+        if not (
+            _is_hip
+            and _k3_ptpc_fp8
+            and envs.SGLANG_ROCM_K3_FUSE_KDA_INPROJ.get()
+            and self.do_fuse_qkvbfg
+            and self.use_full_rank_gate
+        ):
+            return None
+        scales = []
+        for module in (self.fused_qkvg_proj, self.f_a_proj, self.b_proj):
+            weight = module.weight
+            scale = getattr(module, "weight_scale", None)
+            if (
+                type(weight.data) is not torch.Tensor
+                or weight.dim() != 2
+                or weight.dtype != torch.float8_e4m3fn
+                or not isinstance(scale, torch.Tensor)
+                or scale.numel() != weight.shape[0]
+            ):
+                return None
+            scales.append(scale.data.reshape(-1).float())
+        return scales
+
+    def _merge_kda_inproj_fp8_hip(self) -> bool:
+        """Merge the per-channel FP8 KDA input projections into one PTPC GEMM."""
+        scales = self._kda_inproj_channel_fp8_scales()
+        if scales is None:
+            return False
+        from sglang.kernels.ops.kimi_k3 import ptpc_fp8_aiter_hip
+
+        if not ptpc_fp8_aiter_hip.available():
+            return False
+        mods = (self.fused_qkvg_proj, self.f_a_proj, self.b_proj)
+        weights = [module.weight.data for module in mods]
+        if len({weight.shape[1] for weight in weights}) != 1:
+            return False
+        sizes = [weight.shape[0] for weight in weights]
+        # Same 8-row pad as the BF16 merge: it keeps every fused-output row
+        # 16-byte aligned for the vectorized consumers of the split slices.
+        pad = (-sum(sizes)) % 8
+        if pad:
+            weights.append(weights[0].new_zeros((pad, weights[0].shape[1])))
+            scales.append(scales[0].new_ones(pad))
+        (
+            self._qkvgbfa_fp8_w,
+            self._qkvgbfa_fp8_s,
+            self._qkvgbfa_fp8_n,
+        ) = ptpc_fp8_aiter_hip.pack_prequantized(
+            torch.cat(weights, dim=0), torch.cat(scales)
+        )
+        self._bfa_fa_size, self._bfa_b_size = sizes[1], sizes[2]
+        self._qkvgbfa_sizes = [*self.split_sizes, sizes[1], sizes[2], pad]
+        ptpc_fp8_aiter_hip.warmup(
+            self._qkvgbfa_fp8_w,
+            self._qkvgbfa_fp8_s,
+            self._qkvgbfa_fp8_n,
+            weights[0].shape[1],
+        )
         return True
 
     def _use_qkvgbfa_ptpc_fp8(self, hidden_states: torch.Tensor) -> bool:
@@ -2463,6 +2530,34 @@ class KimiK3DeltaAttention(nn.Module):
         )
         self._kda_fused_decode_ready = True
 
+    def _qkvgbfa_inproj(self, hidden_states: torch.Tensor) -> Optional[torch.Tensor]:
+        """Run the merged [q,k,v,g | f_a | b] projection, or None if uncovered."""
+        if self._use_qkvgbfa_ptpc_fp8(hidden_states):
+            from sglang.kernels.ops.kimi_k3 import ptpc_fp8_aiter_hip
+
+            return ptpc_fp8_aiter_hip.run(
+                hidden_states,
+                self._qkvgbfa_fp8_w,
+                self._qkvgbfa_fp8_s,
+                self._qkvgbfa_fp8_n,
+            )
+        # A prequantized merge has no dense carrier to hand the linear method.
+        if self._qkvgbfa_layer is None:
+            return None
+        return self.fused_qkvg_proj.quant_method.apply(
+            self._qkvgbfa_layer, hidden_states, None
+        )
+
+    def _apply_f_b(self, f_a: torch.Tensor) -> torch.Tensor:
+        if self._bfa_f_b_w is None:
+            # f_a is a column slice of the merged projection and the FP8
+            # activation quantizer asserts on contiguity; the tiny GEMM below
+            # takes the view as is.
+            return self.f_b_proj(f_a.contiguous())[0]
+        from sglang.kernels.ops.kimi_k3 import kimi_k3_tiny_gemm
+
+        return kimi_k3_tiny_gemm(f_a, self._bfa_f_b_w)
+
     def forward_qkvbfg_fused(
         self, hidden_states: torch.Tensor, defer_f_b: bool = False
     ):
@@ -2492,36 +2587,24 @@ class KimiK3DeltaAttention(nn.Module):
                         dim=-1,
                     )
                     return mixed_qkv, beta, f_a, g_proj_states
-            if self._bfa_w is not None:
-                w = self._bfa_w
-                n_fa, n_b = self._bfa_fa_size, self._bfa_b_size
-                from sglang.kernels.ops.kimi_k3 import kimi_k3_tiny_gemm as gemm
-
-                if (
-                    _is_hip
-                    and self._qkvgbfa_sizes is not None
-                    and 0 < hidden_states.shape[0] <= self._qkvgbfa_bs_limit
-                ):
-                    if self._use_qkvgbfa_ptpc_fp8(hidden_states):
-                        from sglang.kernels.ops.kimi_k3 import ptpc_fp8_aiter_hip
-
-                        fused_states = ptpc_fp8_aiter_hip.run(
-                            hidden_states,
-                            self._qkvgbfa_fp8_w,
-                            self._qkvgbfa_fp8_s,
-                            self._qkvgbfa_fp8_n,
-                        )
-                    else:
-                        fused_states = self.fused_qkvg_proj.quant_method.apply(
-                            self._qkvgbfa_layer, hidden_states, None
-                        )
+            if (
+                _is_hip
+                and self._qkvgbfa_sizes is not None
+                and 0 < hidden_states.shape[0] <= self._qkvgbfa_bs_limit
+            ):
+                fused_states = self._qkvgbfa_inproj(hidden_states)
+                if fused_states is not None:
                     qkv, g_proj_states, f_a, beta, _padding = torch.split(
                         fused_states, self._qkvgbfa_sizes, dim=-1
                     )
                     # The ROCm fused KDA kernel takes f_a and folds f_b into the
                     # recurrence itself, so do not launch f_b separately there.
-                    forget_gate = f_a if defer_f_b else gemm(f_a, self.f_b_proj.weight)
+                    forget_gate = f_a if defer_f_b else self._apply_f_b(f_a)
                     return qkv, beta, forget_gate, g_proj_states
+            if self._bfa_w is not None:
+                w = self._bfa_w
+                n_fa, n_b = self._bfa_fa_size, self._bfa_b_size
+                from sglang.kernels.ops.kimi_k3 import kimi_k3_tiny_gemm as gemm
 
                 if (
                     self._bfa_alt_stream is not None
