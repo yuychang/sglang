@@ -3062,11 +3062,26 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
         ):
             return None
 
-        # AITER decode uses FP8 Q when the cache is FP8. Triton decode keeps
-        # Q/Q-PE in BF16 while sharing the same fused FP8 cache write.
+        # AITER's asm decode uses FP8 Q when the cache is FP8. Gluon keeps Q in
+        # BF16 while retaining the fused FP8 cache write; its h12/bh16 kernel is
+        # both faster and more accurate for K3's long-context decode regime.
         triton_decode = self.current_attention_backend in ("triton", "triton_mla")
-        q_out_dtype = q_nope_out.dtype if triton_decode else kv_cache.dtype
         tokens, heads = q_nope_out.shape[0], q_nope_out.shape[1]
+        from sglang.srt.layers.attention.aiter_mla_gluon import (
+            prefer_mla_gluon_decode,
+        )
+
+        gluon_decode = not triton_decode and prefer_mla_gluon_decode(
+            head_pad_mode="zero",
+            num_head=heads,
+            kv_cache_dtype=kv_cache.dtype,
+            q_dtype=torch.bfloat16,
+        )
+        q_out_dtype = (
+            q_nope_out.dtype
+            if triton_decode or gluon_decode
+            else kv_cache.dtype
+        )
         if (
             q_nope_out.shape != (tokens, heads, self.kv_lora_rank)
             or q_pe.shape != (tokens, heads, self.qk_rope_head_dim)
@@ -3082,7 +3097,11 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
         # zeroed 16-head buffer instead so decode can skip that launch.
         # Do not use uninitialized pad heads: that is the fill-elim that
         # already failed GSM8K.
-        aiter_pad_heads = 16 if (heads < 16 and 16 % heads != 0) else heads
+        aiter_pad_heads = (
+            heads
+            if gluon_decode
+            else (16 if (heads < 16 and 16 % heads != 0) else heads)
+        )
         q_out = self._mla_q_out_buffer(
             tokens,
             aiter_pad_heads,
