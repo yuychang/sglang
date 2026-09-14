@@ -93,6 +93,21 @@ class QuarkW8A8Fp8(QuarkLinearScheme):
                     layer.input_scale = Parameter(input_scale, requires_grad=False)
             else:
                 weight_scale = layer.weight_scale.data
+            if _is_hip and weight.shape[0] % 16 != 0:
+                # hipBLASLt needs the GEMM's N to be a multiple of 16 and
+                # torch._scaled_mm raises instead of padding. A narrow output
+                # partition cannot satisfy that at any batch size (Kimi-K3's KDA
+                # b_proj emits one beta channel per head, 12 at TP=8), so serve
+                # this linear dequantized; at that width it is memory-bound.
+                layer.weight = Parameter(
+                    (weight.to(torch.float32) * weight_scale.view(-1, 1))
+                    .to(self.out_dtype)
+                    .t(),
+                    requires_grad=False,
+                )
+                layer.weight_scale = None
+                layer.input_scale = None
+                return
             if self.per_token:
                 weight_scale = weight_scale.view(-1, 1)
             if _use_aiter:
@@ -173,6 +188,10 @@ class QuarkW8A8Fp8(QuarkLinearScheme):
         x: torch.Tensor,
         bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        if layer.weight_scale is None:
+            # Dequantized at load; weight is [in, out] like the fp8 path's.
+            output = torch.matmul(x, layer.weight)
+            return output if bias is None else output + bias
 
         return apply_fp8_linear(
             x,
