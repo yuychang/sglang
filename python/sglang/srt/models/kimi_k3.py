@@ -75,7 +75,11 @@ from sglang.srt.layers.moe.utils import (
     get_moe_runner_backend,
 )
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
-from sglang.srt.layers.quantization.fp8_utils import block_quant_dequant
+from sglang.srt.layers.quantization.fp8_utils import (
+    block_quant_dequant,
+    channel_quant_to_tensor_quant,
+    normalize_e4m3fn_to_e4m3fnuz,
+)
 from sglang.srt.layers.radix_linear_attention import RadixLinearAttention
 from sglang.srt.layers.utils import PPMissingLayer, get_layer_id
 from sglang.srt.layers.vocab_parallel_embedding import (
@@ -105,6 +109,7 @@ from sglang.srt.model_loader.weight_utils import (
 from sglang.srt.models.deepseek_common.attention_forward_methods.forward_methods import (
     AttnForwardMethod,
 )
+from sglang.srt.models.deepseek_common.utils import _is_fp8_fnuz
 from sglang.srt.models.deepseek_v2 import DeepseekV2AttentionMLA, MoEGate
 from sglang.srt.models.kimi_k3_vl import (
     KimiK3MultiModalProjector,
@@ -201,6 +206,27 @@ def _get_k3_dense_weight(module: nn.Module) -> torch.Tensor:
         module.quant_method.weight_block_size,
         module.params_dtype,
     )
+
+
+def _k3_channel_fp8_to_tensor_fp8(
+    module: nn.Module, weight: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Requantize a per-output-channel FP8 weight to per-tensor, returning
+    (weight, scalar scale).
+
+    The aiter batched absorb GEMM dereferences w_scale as a single scalar, so a
+    per-channel vector reaching it applies channel 0's scale to every channel.
+    Must run while dim 0 is still the channel axis weight_scale indexes, i.e.
+    before the kv_b_proj head split."""
+    weight_scale = module.weight_scale
+    if _is_fp8_fnuz:
+        weight, weight_scale, _ = normalize_e4m3fn_to_e4m3fnuz(
+            weight=weight, weight_scale=weight_scale, input_scale=None
+        )
+    # Per-channel scale is 1D [out]; reshape so it broadcasts against [out, in].
+    if weight_scale.dim() == 1:
+        weight_scale = weight_scale.view(-1, 1)
+    return channel_quant_to_tensor_quant(weight, weight_scale)
 
 
 def _k3_bf16_gemm(
@@ -4053,14 +4079,28 @@ class KimiK3LinearForCausalLM(nn.Module):
                     raise ValueError("Kimi-K3 MLA V projection must remain GGUF Q2_K")
                 self_attn.use_deep_gemm_bmm = False
                 continue
-            kv_b_weight = _get_k3_dense_weight(self_attn.kv_b_proj)
+            kv_b_proj = self_attn.kv_b_proj
+            kv_b_weight = _get_k3_dense_weight(kv_b_proj)
+            tensor_scale = None
+            if kv_b_weight.dtype in (
+                torch.float8_e4m3fn,
+                torch.float8_e4m3fnuz,
+            ) and getattr(kv_b_proj, "weight_scale", None) is not None:
+                if kv_b_proj.weight_scale.numel() > 1:
+                    kv_b_weight, tensor_scale = _k3_channel_fp8_to_tensor_fp8(
+                        kv_b_proj, kv_b_weight
+                    )
+                else:
+                    tensor_scale = kv_b_proj.weight_scale
             w_kc, w_vc = kv_b_weight.unflatten(
                 0, (-1, self_attn.qk_nope_head_dim + self_attn.v_head_dim)
             ).split([self_attn.qk_nope_head_dim, self_attn.v_head_dim], dim=1)
             self_attn.w_kc = w_kc.transpose(1, 2).contiguous().transpose(1, 2)
             self_attn.w_vc = w_vc.contiguous().transpose(1, 2)
-            if hasattr(self_attn.kv_b_proj, "weight_scale"):
-                self_attn.w_scale = self_attn.kv_b_proj.weight_scale
+            if tensor_scale is not None:
+                self_attn.w_scale = tensor_scale
+            elif hasattr(kv_b_proj, "weight_scale"):
+                self_attn.w_scale = kv_b_proj.weight_scale
             if _aiter_mla_gate and isinstance(self_attn, KimiK3MLAAttention):
                 from sglang.kernels.ops.kimi_k3 import mla_gate_aiter_hip
 
