@@ -44,6 +44,7 @@ __all__ = ["QuarkW4A4MXFp4MoE"]
 
 _is_hip = is_hip()
 _use_aiter = get_bool_env_var("SGLANG_USE_AITER") and _is_hip
+_aiter_k3_opt = _use_aiter and get_bool_env_var("SGLANG_AITER_K3_OPT")
 if _use_aiter:
     from aiter.ops.shuffle import moe_shuffle_scale, moe_shuffle_weight, shuffle_weight
     from aiter.utility.fp4_utils import e8m0_shuffle
@@ -196,9 +197,15 @@ class QuarkW4A4MXFp4MoE(QuarkMoEScheme):
                 )
             return
 
+        # Generic AITER kernels align the packed W2 dimension to 128. For K3
+        # TP8 that changes the native 384 intermediate width (192 packed) into
+        # 512 (256 packed), adding 33% zero work and preventing the native-shape
+        # MXMoE tuning table from binding. The K3 FlyDSL path supports 128-wide
+        # alignment in the unpacked dimension, so retain the checkpoint shape.
+        pad_for_aiter = _use_aiter and not _aiter_k3_opt
         w13_up_dim, w2_down_dim, weight_padded = get_moe_weight_sizes(
             intermediate_size_per_partition,
-            is_aiter_moe=_use_aiter,
+            is_aiter_moe=pad_for_aiter,
             is_concat=True,
             is_packed=True,
         )
