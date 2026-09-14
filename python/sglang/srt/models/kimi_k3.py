@@ -285,6 +285,15 @@ def _k3_bf16_gemm(
 # unconsumed stashes fall back to the unfused chain + o_norm here.
 
 
+def _merge_dtype_ok(weights: list[torch.Tensor]) -> bool:
+    """Return whether these weights may be concatenated into one fused buffer.
+
+    _merge_weights_as_views cats .weight alone, so anything carrying a separate
+    scale tensor (per-channel FP8, packed MXFP4) must stay unfused."""
+    dtypes = {weight.dtype for weight in weights}
+    return len(dtypes) == 1 and dtypes.pop() in (torch.bfloat16, torch.float16)
+
+
 def _merge_weights_as_views(
     mods: list, pad_rows_to: int = 1
 ) -> tuple[torch.Tensor, list[int]]:
@@ -2240,6 +2249,10 @@ class KimiK3DeltaAttention(nn.Module):
             if _is_hip and self._merge_kda_inproj_weights_hip():
                 self._bfa_f_b_w = self.f_b_proj.weight
                 return
+            # Leave a quantized checkpoint on the unfused b_proj/f_a_proj GEMVs;
+            # the merged buffer would drop their scales.
+            if not _merge_dtype_ok([mod.weight for mod in mods]):
+                return
             self._bfa_w, sizes = _merge_weights_as_views(
                 mods, pad_rows_to=8
             )
@@ -2319,7 +2332,12 @@ class KimiK3DeltaAttention(nn.Module):
             for weight in weights
         ):
             return False
-        return len({(weight.dtype, weight.shape[1]) for weight in weights}) == 1
+        # Whitelist the dtype rather than require the three to agree: the merged
+        # buffer carries only .weight, so quantized weights that happen to match
+        # each other still lose their per-channel scales.
+        if not _merge_dtype_ok(weights):
+            return False
+        return len({weight.shape[1] for weight in weights}) == 1
 
     def _prepare_group64_projection(self) -> None:
         if (
@@ -2328,15 +2346,15 @@ class KimiK3DeltaAttention(nn.Module):
             or not self.use_full_rank_gate
         ):
             return
+        srcs = [self.fused_qkvg_proj.weight, self.b_proj.weight, self.f_a_proj.weight]
+        # The shape check below passes for FP8 too, so pack() would reinterpret
+        # quantized bytes as bf16 and drop the per-channel scales.
+        if not _merge_dtype_ok(srcs):
+            return
         from sglang.kernels.ops.kimi_k3 import kda_group64_aiter_hip
 
         merged = torch.cat(
-            [
-                self.fused_qkvg_proj.weight,
-                self.b_proj.weight,
-                self.f_a_proj.weight,
-                self.f_a_proj.weight.new_zeros((4, self.hidden_size)),
-            ],
+            [*srcs, self.f_a_proj.weight.new_zeros((4, self.hidden_size))],
             dim=0,
         ).contiguous()
         if tuple(merged.shape) != (6288, 7168):
