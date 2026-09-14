@@ -244,11 +244,6 @@ class QuarkW4A4MXFP4(QuarkLinearScheme):
         self.input_quant_spec = input_quant_spec
         self.is_checkpoint_mxfp4_serialized = is_checkpoint_mxfp4_serialized
         self.dequantization_config = dequantization_config
-        # QuarkConfig can opt individual dense linears into bf16 after it has
-        # matched the full module prefix. This is used for K3 shared experts:
-        # their relatively small TP-sharded weights unlock the substantially
-        # faster dense fused-front pipeline without dequantizing routed MoE.
-        self.dequantize_to_bf16 = _dequant_linear_to_bf16
 
         if not self.is_checkpoint_mxfp4_serialized:
             if not is_gfx95_supported():
@@ -269,7 +264,7 @@ class QuarkW4A4MXFP4(QuarkLinearScheme):
             assert layer.weight.dtype == torch.uint8
             assert layer.weight_scale.dtype == torch.uint8
 
-        if self.dequantize_to_bf16:
+        if _dequant_linear_to_bf16:
             w_bf16 = _dequant_mxfp4_to_bf16(layer.weight.data, layer.weight_scale.data)
             layer.weight = torch.nn.Parameter(w_bf16, requires_grad=False)
             # FP4 block scales are folded into the bf16 weight; drop them.
