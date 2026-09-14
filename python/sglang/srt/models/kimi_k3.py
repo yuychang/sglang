@@ -841,16 +841,19 @@ class KimiK3MoE(nn.Module):
         if (
             not _moe_latent_mxfp4
             or not self.use_latent_moe
-            or not self._eligible_for_fused_front
+            or not (
+                self._eligible_for_fused_front
+                or self._eligible_for_partial_fused_front
+            )
             or self._front_sizes is None
-            or len(self._front_sizes) != 3
+            or len(self._front_sizes) not in (2, 3)
         ):
             return
         from sglang.kernels.ops.kimi_k3 import latent_mxfp4_aiter_hip
 
         if not latent_mxfp4_aiter_hip.supported():
             return
-        head_rows = self._front_sizes[0] + self._front_sizes[1]
+        head_rows = sum(self._front_sizes[:-1])
         front_head = self._front_w[:head_rows]
         down = self._front_w[head_rows:]
         up = self.routed_expert_up_proj.weight
@@ -1040,6 +1043,17 @@ class KimiK3MoE(nn.Module):
             and get_moe_a2a_backend().is_none()
             and self.shared_experts.down_proj.weight.dtype
             in (torch.bfloat16, torch.float16)
+        )
+
+    @cached_property
+    def _eligible_for_partial_fused_front(self) -> bool:
+        """Dense gate+latent front with a separately quantized shared branch."""
+        return (
+            self.use_latent_moe
+            and self.shared_experts is not None
+            and self._front_w is not None
+            and self._front_is_ep_pair
+            and get_moe_a2a_backend().is_none()
         )
 
     @cached_property
@@ -1541,6 +1555,15 @@ class KimiK3MoE(nn.Module):
                 return
         self._run_shared_down(shared.act_fn(gate_up), shared_output)
 
+    def _forward_quantized_shared(
+        self, hidden_states: torch.Tensor, shared_output: torch.Tensor
+    ) -> None:
+        """Run a mixed-layout shared MLP into the fused collective buffer."""
+        shared = self.shared_experts
+        assert shared is not None
+        output = shared(hidden_states)
+        shared_output.copy_(output)
+
     def _get_fused_norm_params(self) -> tuple[torch.Tensor, float]:
         norm = self.routed_expert_norm
         assert self.fuse_ar_norm and norm is not None
@@ -1571,6 +1594,7 @@ class KimiK3MoE(nn.Module):
             )
 
         num_tokens, hidden_size = hidden_states.shape
+        partial_front = self._eligible_for_partial_fused_front
         use_mxfp4 = self._use_moe_latent_mxfp4(num_tokens)
         preroute = None
         shared_is_preactivated = False
@@ -1637,12 +1661,22 @@ class KimiK3MoE(nn.Module):
                     self._front_head,
                     out_dtype=torch.float32 if self._front_fp32 else None,
                 )
-                gate_up, router_logits = torch.split(
-                    head, self._front_sizes[:2], dim=-1
-                )
+                if partial_front:
+                    router_logits = head
+                    gate_up = None
+                else:
+                    gate_up, router_logits = torch.split(
+                        head, self._front_sizes[:2], dim=-1
+                    )
                 routed_input = latent_mxfp4_aiter_hip.run(
                     hidden_states, self._front_down_w4, self._front_down_scale4
                 )
+            elif partial_front:
+                fused = _k3_bf16_gemm(hidden_states, self._front_w)
+                router_logits, routed_input = torch.split(
+                    fused, self._front_sizes, dim=-1
+                )
+                gate_up = None
             else:
                 fused = _k3_bf16_gemm(
                     hidden_states,
@@ -1701,11 +1735,14 @@ class KimiK3MoE(nn.Module):
             else:
                 self._forward_routed(hidden_states, router_logits, routed_input, latent)
             with torch.cuda.stream(self.alt_stream):
-                self._forward_shared(
-                    gate_up,
-                    shared_output,
-                    preactivated=shared_is_preactivated,
-                )
+                if partial_front:
+                    self._forward_quantized_shared(hidden_states, shared_output)
+                else:
+                    self._forward_shared(
+                        gate_up,
+                        shared_output,
+                        preactivated=shared_is_preactivated,
+                    )
                 # low-SM pull so the side-stream AR leaves the SMs to the
                 # routed GEMMs it overlaps (K3 dims are fixed; tuned here)
                 k3_ar_fusion.all_reduce_low_sm(shared_output, num_blocks=4, unroll=8)
@@ -1751,11 +1788,14 @@ class KimiK3MoE(nn.Module):
                     prefix_sum,
                 )
         else:  # single collective over the flat [latent | shared] pair
-            self._forward_shared(
-                gate_up,
-                shared_output,
-                preactivated=shared_is_preactivated,
-            )
+            if partial_front:
+                self._forward_quantized_shared(hidden_states, shared_output)
+            else:
+                self._forward_shared(
+                    gate_up,
+                    shared_output,
+                    preactivated=shared_is_preactivated,
+                )
             self._forward_routed(hidden_states, router_logits, routed_input, latent)
             if self.fuse_ar_norm and k3_ar_fusion.enabled() and not use_latent_tail:
                 fused_norm = True
@@ -1872,7 +1912,10 @@ class KimiK3MoE(nn.Module):
             hidden_states = get_global_dp_buffer(get_tp_group())
             dp_gather_replicate(hidden_states, local_hidden_states, forward_batch)
             dp_prefix_sum, prefix_sum = prefix_sum, None
-        if hidden_states.shape[0] > 0 and self._eligible_for_fused_front:
+        if hidden_states.shape[0] > 0 and (
+            self._eligible_for_fused_front
+            or self._eligible_for_partial_fused_front
+        ):
             out = self._forward_fused(
                 hidden_states,
                 prefix_sum=prefix_sum,
