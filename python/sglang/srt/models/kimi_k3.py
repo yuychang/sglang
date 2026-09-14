@@ -1561,8 +1561,14 @@ class KimiK3MoE(nn.Module):
         """Run a mixed-layout shared MLP into the fused collective buffer."""
         shared = self.shared_experts
         assert shared is not None
-        output = shared(hidden_states)
-        shared_output.copy_(output)
+        gate_up, _ = shared.gate_up_proj(hidden_states)
+        activated = shared.act_fn(gate_up)
+        apply_into = getattr(shared.down_proj.quant_method, "apply_into", None)
+        if apply_into is not None:
+            apply_into(shared.down_proj, activated, shared_output)
+        else:
+            output, _ = shared.down_proj(activated)
+            shared_output.copy_(output)
 
     def _get_fused_norm_params(self) -> tuple[torch.Tensor, float]:
         norm = self.routed_expert_norm
