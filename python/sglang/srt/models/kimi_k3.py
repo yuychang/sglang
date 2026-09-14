@@ -75,7 +75,9 @@ from sglang.srt.layers.moe.utils import (
     get_moe_runner_backend,
 )
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
-from sglang.srt.layers.quantization.fp8_utils import block_quant_dequant
+from sglang.srt.layers.quantization.fp8_utils import (
+    block_quant_dequant,
+)
 from sglang.srt.layers.radix_linear_attention import RadixLinearAttention
 from sglang.srt.layers.utils import PPMissingLayer, get_layer_id
 from sglang.srt.layers.vocab_parallel_embedding import (
@@ -257,6 +259,15 @@ def _k3_bf16_gemm(
 # kernel, kernels/ops/attention/kda_fused_decode). The model hands the output-norm gate
 # to the KDA backend via an attempt-and-verify stash on the attention layer;
 # unconsumed stashes fall back to the unfused chain + o_norm here.
+
+
+def _merge_dtype_ok(weights: list[torch.Tensor]) -> bool:
+    """Return whether these weights may be concatenated into one fused buffer.
+
+    _merge_weights_as_views cats .weight alone, so anything carrying a separate
+    scale tensor (per-channel FP8, packed MXFP4) must stay unfused."""
+    dtypes = {weight.dtype for weight in weights}
+    return len(dtypes) == 1 and dtypes.pop() in (torch.bfloat16, torch.float16)
 
 
 def _merge_weights_as_views(
@@ -777,8 +788,7 @@ class KimiK3MoE(nn.Module):
             mods = [self.gate, self.routed_expert_down_proj]
         else:
             return
-        dtypes = {m.weight.dtype for m in mods}
-        if len(dtypes) != 1 or dtypes.pop() not in (torch.bfloat16, torch.float16):
+        if not _merge_dtype_ok([m.weight for m in mods]):
             return
         self._front_w, self._front_sizes = _merge_weights_as_views(mods)
         self._front_is_ep_pair = len(mods) == 2
@@ -2214,6 +2224,10 @@ class KimiK3DeltaAttention(nn.Module):
             if _is_hip and self._merge_kda_inproj_weights_hip():
                 self._bfa_f_b_w = self.f_b_proj.weight
                 return
+            # Leave a quantized checkpoint on the unfused b_proj/f_a_proj GEMVs;
+            # the merged buffer would drop their scales.
+            if not _merge_dtype_ok([mod.weight for mod in mods]):
+                return
             self._bfa_w, sizes = _merge_weights_as_views(
                 mods, pad_rows_to=8
             )
@@ -2293,7 +2307,12 @@ class KimiK3DeltaAttention(nn.Module):
             for weight in weights
         ):
             return False
-        return len({(weight.dtype, weight.shape[1]) for weight in weights}) == 1
+        # Whitelist the dtype rather than require the three to agree: the merged
+        # buffer carries only .weight, so quantized weights that happen to match
+        # each other still lose their per-channel scales.
+        if not _merge_dtype_ok(weights):
+            return False
+        return len({weight.shape[1] for weight in weights}) == 1
 
     def _prepare_group64_projection(self) -> None:
         if (
@@ -2302,15 +2321,15 @@ class KimiK3DeltaAttention(nn.Module):
             or not self.use_full_rank_gate
         ):
             return
+        srcs = [self.fused_qkvg_proj.weight, self.b_proj.weight, self.f_a_proj.weight]
+        # The shape check below passes for FP8 too, so pack() would reinterpret
+        # quantized bytes as bf16 and drop the per-channel scales.
+        if not _merge_dtype_ok(srcs):
+            return
         from sglang.kernels.ops.kimi_k3 import kda_group64_aiter_hip
 
         merged = torch.cat(
-            [
-                self.fused_qkvg_proj.weight,
-                self.b_proj.weight,
-                self.f_a_proj.weight,
-                self.f_a_proj.weight.new_zeros((4, self.hidden_size)),
-            ],
+            [*srcs, self.f_a_proj.weight.new_zeros((4, self.hidden_size))],
             dim=0,
         ).contiguous()
         if tuple(merged.shape) != (6288, 7168):
@@ -4053,14 +4072,41 @@ class KimiK3LinearForCausalLM(nn.Module):
                     raise ValueError("Kimi-K3 MLA V projection must remain GGUF Q2_K")
                 self_attn.use_deep_gemm_bmm = False
                 continue
-            kv_b_weight = _get_k3_dense_weight(self_attn.kv_b_proj)
+            kv_b_proj = self_attn.kv_b_proj
+            kv_b_weight = _get_k3_dense_weight(kv_b_proj)
+            tensor_scale = None
+            if _is_hip and kv_b_weight.dtype in (
+                torch.float8_e4m3fn,
+                torch.float8_e4m3fnuz,
+            ):
+                scale = getattr(kv_b_proj, "weight_scale", None)
+                if isinstance(scale, torch.Tensor) and scale.numel() > 1:
+                    from sglang.srt.models.kimi_k3_rocm_quant import (
+                        _k3_channel_fp8_to_tensor_fp8,
+                    )
+
+                    # Fold the per-channel scale while dim 0 is still the
+                    # channel axis it indexes, i.e. before the head split.
+                    kv_b_weight, tensor_scale = _k3_channel_fp8_to_tensor_fp8(
+                        kv_b_proj, kv_b_weight
+                    )
             w_kc, w_vc = kv_b_weight.unflatten(
                 0, (-1, self_attn.qk_nope_head_dim + self_attn.v_head_dim)
             ).split([self_attn.qk_nope_head_dim, self_attn.v_head_dim], dim=1)
             self_attn.w_kc = w_kc.transpose(1, 2).contiguous().transpose(1, 2)
             self_attn.w_vc = w_vc.contiguous().transpose(1, 2)
-            if hasattr(self_attn.kv_b_proj, "weight_scale"):
-                self_attn.w_scale = self_attn.kv_b_proj.weight_scale
+            if tensor_scale is not None:
+                self_attn.w_scale = tensor_scale
+            elif hasattr(kv_b_proj, "weight_scale"):
+                scale = kv_b_proj.weight_scale
+                if not _is_hip:
+                    self_attn.w_scale = scale
+                elif isinstance(scale, torch.Tensor) and scale.numel() == 1:
+                    # aiter's absorb GEMM dereferences w_scale as one scalar, so
+                    # anything else -- a vector the branch above could not fold,
+                    # or the None quark leaves on a dequantized narrow partition
+                    # -- must keep DeepseekV2AttentionMLA's 1.0 default.
+                    self_attn.w_scale = scale
             if _aiter_mla_gate and isinstance(self_attn, KimiK3MLAAttention):
                 from sglang.kernels.ops.kimi_k3 import mla_gate_aiter_hip
 
