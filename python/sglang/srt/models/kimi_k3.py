@@ -797,11 +797,22 @@ class KimiK3MoE(nn.Module):
         if _is_npu:
             return
         if self.shared_experts is not None and get_moe_a2a_backend().is_none():
-            mods = [
+            full_front = [
                 self.shared_experts.gate_up_proj,
                 self.gate,
                 self.routed_expert_down_proj,
             ]
+            if _merge_dtype_ok([m.weight for m in full_front]):
+                mods = full_front
+            elif envs.SGLANG_K3_FUSED_FRONT.get():
+                # Quark quantizes the shared experts but deliberately leaves
+                # the router and latent projections dense. Preserve the useful
+                # gate+latent merge instead of dropping the entire front just
+                # because the shared gate_up weight has another dtype/layout.
+                # The shared branch remains on its native quantized kernels.
+                mods = [self.gate, self.routed_expert_down_proj]
+            else:
+                return
         elif envs.SGLANG_K3_FUSED_FRONT.get():
             # EP a2a: the shared experts are tp1-replicated and run on the side
             # stream, so they stay out of the merge -- but the router gate and the
