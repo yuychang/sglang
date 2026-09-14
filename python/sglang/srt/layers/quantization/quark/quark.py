@@ -33,7 +33,7 @@ from sglang.srt.layers.quantization.quark.utils import (
 )
 from sglang.srt.layers.quantization.unquant import UnquantizedLinearMethod
 from sglang.srt.layers.radix_attention import RadixAttention
-from sglang.srt.utils import get_device_capability
+from sglang.srt.utils import get_bool_env_var, get_device_capability, is_hip
 
 if TYPE_CHECKING:
     from transformers import PretrainedConfig
@@ -41,6 +41,10 @@ if TYPE_CHECKING:
     from sglang.srt.layers.moe.token_dispatcher import StandardDispatchOutput
 
 __all__ = ["QuarkLinearMethod", "QuarkFusedMoEMethod"]
+
+_dequant_shared_experts_to_bf16 = is_hip() and get_bool_env_var(
+    "SGLANG_QUARK_DEQUANT_SHARED_EXPERTS", "false"
+)
 
 
 def _parse_nvfp4_excludes(hf_quant_config: Dict[str, Any]) -> List[str]:
@@ -865,6 +869,16 @@ class QuarkConfig(QuantizationConfig):
 
         # Find the quant_scheme
         scheme = self._get_scheme_from_config(layer_quant_config)
+        if (
+            _dequant_shared_experts_to_bf16
+            and isinstance(scheme, QuarkW4A4MXFP4)
+            and ".shared_expert" in layer_name
+        ):
+            # K3's shared MLP is only 2 experts and TP-sharded. Paying its
+            # modest bf16 footprint allows KimiK3MoE to merge shared gate/up,
+            # router, and latent projections and use the dense fused tail,
+            # while the much larger routed-expert weights remain MXFP4.
+            scheme.dequantize_to_bf16 = True
 
         # Raise error if device does not support the scheme
         # (e.g. fp8 needs ada lovelace)

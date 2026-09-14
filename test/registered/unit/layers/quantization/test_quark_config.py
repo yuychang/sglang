@@ -15,6 +15,7 @@ from sglang.srt.layers.quantization.quark.quark import (
     _mixed_precision_layer_map,
     _parse_nvfp4_excludes,
 )
+from sglang.srt.layers.quantization.quark.schemes import QuarkW4A4MXFP4
 from sglang.srt.layers.quantization.quark.utils import check_equal_or_regex_match
 from sglang.test.test_utils import CustomTestCase
 
@@ -24,6 +25,41 @@ _GET_CAP = "sglang.srt.layers.quantization.quark.quark.get_device_capability"
 def _bare_config() -> QuarkConfig:
     """Skip __init__ — _check_scheme_supported reads no instance attributes."""
     return QuarkConfig.__new__(QuarkConfig)
+
+
+class TestSelectiveSharedExpertDequant(CustomTestCase):
+    def test_only_shared_expert_mxfp4_linears_are_selected(self):
+        config = _bare_config()
+
+        def make_scheme():
+            scheme = QuarkW4A4MXFP4.__new__(QuarkW4A4MXFP4)
+            scheme.dequantize_to_bf16 = False
+            return scheme
+
+        with (
+            patch(
+                "sglang.srt.layers.quantization.quark.quark."
+                "_dequant_shared_experts_to_bf16",
+                True,
+            ),
+            patch.object(config, "_find_matched_config", return_value={}),
+            patch.object(config, "_check_scheme_supported"),
+        ):
+            shared = make_scheme()
+            with patch.object(config, "_get_scheme_from_config", return_value=shared):
+                config.get_linear_scheme(
+                    torch.nn.Module(),
+                    "model.layers.0.mlp.shared_experts.gate_up_proj",
+                )
+            self.assertTrue(shared.dequantize_to_bf16)
+
+            routed = make_scheme()
+            with patch.object(config, "_get_scheme_from_config", return_value=routed):
+                config.get_linear_scheme(
+                    torch.nn.Module(),
+                    "model.layers.0.mlp.routed_expert_down_proj",
+                )
+            self.assertFalse(routed.dequantize_to_bf16)
 
 
 class TestCheckSchemeSupportedError(CustomTestCase):
