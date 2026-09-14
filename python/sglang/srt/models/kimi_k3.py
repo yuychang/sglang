@@ -1587,13 +1587,22 @@ class KimiK3MoE(nn.Module):
         shared = self.shared_experts
         assert shared is not None
         n_out = shared.gate_up_proj.weight.shape[0]
+        num_tokens = hidden_states.shape[0]
+        # Fused quant+GEMM helps decode (M<=64). At prefill widths the
+        # unfused MXFP4 GEMM remains faster, and TTT is prefill-heavy.
+        use_fused = num_tokens <= 64
         gate_up = hidden_states.new_empty(
-            hidden_states.shape[0], n_out, dtype=hidden_states.dtype
+            num_tokens, n_out, dtype=hidden_states.dtype
         )
-        if not self._mxfp4_apply_into(shared.gate_up_proj, hidden_states, gate_up):
+        if not (
+            use_fused
+            and self._mxfp4_apply_into(shared.gate_up_proj, hidden_states, gate_up)
+        ):
             gate_up, _ = shared.gate_up_proj(hidden_states)
         activated = shared.act_fn(gate_up)
-        if not self._mxfp4_apply_into(shared.down_proj, activated, shared_output):
+        if not (
+            use_fused and self._mxfp4_apply_into(shared.down_proj, activated, shared_output)
+        ):
             output, _ = shared.down_proj(activated)
             shared_output.copy_(output)
 
