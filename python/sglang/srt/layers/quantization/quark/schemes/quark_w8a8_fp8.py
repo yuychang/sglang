@@ -26,9 +26,6 @@ __all__ = ["QuarkW8A8Fp8"]
 _is_fp8_fnuz = is_fp8_fnuz()
 _is_hip = is_hip()
 _use_aiter = get_bool_env_var("SGLANG_USE_AITER") and _is_hip
-_dequant_fp8_linear_to_bf16 = _is_hip and get_bool_env_var(
-    "SGLANG_QUARK_DEQUANT_FP8_LINEAR_TO_BF16", "false"
-)
 if _use_aiter:
     from aiter.ops.shuffle import shuffle_weight
 
@@ -97,27 +94,6 @@ class QuarkW8A8Fp8(QuarkLinearScheme):
                     layer.input_scale = Parameter(input_scale, requires_grad=False)
             else:
                 weight_scale = layer.weight_scale.data
-            if _dequant_fp8_linear_to_bf16:
-                # Quark K3 quantizes only self-attention linears with this
-                # scheme. Materializing them in the ordinary [out, in] BF16
-                # layout lets the model's BF16 projection mergers run and
-                # avoids a separate activation-quantization launch before
-                # every small decode GEMM. This is an HBM-for-launch-overhead
-                # trade and remains opt-in until a serving A/B selects it.
-                layer.weight = Parameter(
-                    (weight.to(torch.float32) * weight_scale.view(-1, 1)).to(
-                        torch.bfloat16
-                    ),
-                    requires_grad=False,
-                )
-                layer.weight_scale = None
-                layer.input_scale = None
-                from sglang.srt.layers.quantization.unquant import (
-                    UnquantizedLinearMethod,
-                )
-
-                layer.quant_method = UnquantizedLinearMethod()
-                return
             if _is_hip and weight.shape[0] % 16 != 0:
                 # hipBLASLt needs the GEMM's N to be a multiple of 16 and
                 # torch._scaled_mm raises instead of padding. A narrow output
