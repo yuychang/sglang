@@ -1560,18 +1560,40 @@ class KimiK3MoE(nn.Module):
                 return
         self._run_shared_down(shared.act_fn(gate_up), shared_output)
 
+    @staticmethod
+    def _mxfp4_apply_into(
+        linear: torch.nn.Module, x: torch.Tensor, output: torch.Tensor
+    ) -> bool:
+        """Write an MXFP4 linear into ``output`` when the fused quant+GEMM path exists.
+
+        Quark stores ``apply_into`` on the scheme (``linear.scheme``), not on
+        ``quant_method``. Looking only at ``quant_method`` silently fell back to
+        a separate ``dynamic_mxfp4_quant`` plus ``gemm_afp4wfp4`` pair per
+        projection — 186 GEMMs and 186 quants per c64 decode step.
+        """
+        scheme = getattr(linear, "scheme", None)
+        apply_into = getattr(scheme, "apply_into", None) if scheme is not None else None
+        if apply_into is None:
+            apply_into = getattr(getattr(linear, "quant_method", None), "apply_into", None)
+        if apply_into is None:
+            return False
+        apply_into(linear, x, output)
+        return True
+
     def _forward_quantized_shared(
         self, hidden_states: torch.Tensor, shared_output: torch.Tensor
     ) -> None:
         """Run a mixed-layout shared MLP into the fused collective buffer."""
         shared = self.shared_experts
         assert shared is not None
-        gate_up, _ = shared.gate_up_proj(hidden_states)
+        n_out = shared.gate_up_proj.weight.shape[0]
+        gate_up = hidden_states.new_empty(
+            hidden_states.shape[0], n_out, dtype=hidden_states.dtype
+        )
+        if not self._mxfp4_apply_into(shared.gate_up_proj, hidden_states, gate_up):
+            gate_up, _ = shared.gate_up_proj(hidden_states)
         activated = shared.act_fn(gate_up)
-        apply_into = getattr(shared.down_proj.quant_method, "apply_into", None)
-        if apply_into is not None:
-            apply_into(shared.down_proj, activated, shared_output)
-        else:
+        if not self._mxfp4_apply_into(shared.down_proj, activated, shared_output):
             output, _ = shared.down_proj(activated)
             shared_output.copy_(output)
 
