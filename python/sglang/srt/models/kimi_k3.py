@@ -119,6 +119,7 @@ from sglang.srt.models.kimi_k3_rocm_fusion import (
     _k3_fuse_mla_gate_ptpc,
     _k3_hidden_num_tokens,
     _k3_hidden_rows,
+    _k3_hidden_tensor,
     _k3_maybe_fuse_inproj_quant,
     _k3_ptpc_fp8,
     _k3_ptpc_fp8_batch_ok,
@@ -2230,6 +2231,13 @@ class KimiK3DeltaAttention(nn.Module):
             self._bfa_w = torch.cat(weights, dim=0).contiguous()
             self._bfa_f_b_w = _get_k3_dense_weight(self.f_b_proj).contiguous()
         else:
+            if _is_hip:
+                from sglang.srt.models.kimi_k3_rocm_quant import (
+                    _k3_merge_kda_inproj_fp8,
+                )
+
+                if _k3_merge_kda_inproj_fp8(self):
+                    return
             if _is_hip and self._merge_kda_inproj_weights_hip():
                 self._bfa_f_b_w = self.f_b_proj.weight
                 return
@@ -2264,14 +2272,19 @@ class KimiK3DeltaAttention(nn.Module):
         ]
         return True
 
-    def _use_qkvgbfa_ptpc_fp8(self, hidden_states: torch.Tensor) -> bool:
+    def _use_qkvgbfa_ptpc_fp8(self, hidden_states) -> bool:
+        x = _k3_hidden_tensor(hidden_states)
         if getattr(self, "_qkvgbfa_fp8_w", None) is None or not _k3_ptpc_fp8_batch_ok(
-            hidden_states.shape[0]
+            x.shape[0]
         ):
             return False
         from sglang.kernels.ops.kimi_k3 import ptpc_fp8_aiter_hip
 
-        return ptpc_fp8_aiter_hip.covered(hidden_states, self._qkvgbfa_fp8_w)
+        if isinstance(hidden_states, tuple):
+            return ptpc_fp8_aiter_hip.covered_prequant(
+                x, hidden_states[1], self._qkvgbfa_fp8_w
+            )
+        return ptpc_fp8_aiter_hip.covered(x, self._qkvgbfa_fp8_w)
 
     def _prepare_qkvgbfa_ptpc_fp8(self) -> None:
         """Quantize the merged KDA input projection for PTPC FP8 decode."""
@@ -2478,36 +2491,29 @@ class KimiK3DeltaAttention(nn.Module):
                         dim=-1,
                     )
                     return mixed_qkv, beta, f_a, g_proj_states
-            if self._bfa_w is not None:
-                w = self._bfa_w
-                n_fa, n_b = self._bfa_fa_size, self._bfa_b_size
-                from sglang.kernels.ops.kimi_k3 import kimi_k3_tiny_gemm as gemm
+            if (
+                _is_hip
+                and self._qkvgbfa_sizes is not None
+                and 0 < token_count <= self._qkvgbfa_bs_limit
+            ):
+                from sglang.srt.models.kimi_k3_rocm_quant import (
+                    _k3_apply_f_b,
+                    _k3_qkvgbfa_inproj,
+                )
 
-                if (
-                    _is_hip
-                    and self._qkvgbfa_sizes is not None
-                    and 0 < hidden_states.shape[0] <= self._qkvgbfa_bs_limit
-                ):
-                    if self._use_qkvgbfa_ptpc_fp8(hidden_states):
-                        from sglang.kernels.ops.kimi_k3 import ptpc_fp8_aiter_hip
-
-                        fused_states = ptpc_fp8_aiter_hip.run(
-                            hidden_states,
-                            self._qkvgbfa_fp8_w,
-                            self._qkvgbfa_fp8_s,
-                            self._qkvgbfa_fp8_n,
-                        )
-                    else:
-                        fused_states = self.fused_qkvg_proj.quant_method.apply(
-                            self._qkvgbfa_layer, hidden_states, None
-                        )
+                fused_states = _k3_qkvgbfa_inproj(self, hidden_states)
+                if fused_states is not None:
                     qkv, g_proj_states, f_a, beta, _padding = torch.split(
                         fused_states, self._qkvgbfa_sizes, dim=-1
                     )
                     # The ROCm fused KDA kernel takes f_a and folds f_b into the
                     # recurrence itself, so do not launch f_b separately there.
-                    forget_gate = f_a if defer_f_b else gemm(f_a, self.f_b_proj.weight)
+                    forget_gate = f_a if defer_f_b else _k3_apply_f_b(self, f_a)
                     return qkv, beta, forget_gate, g_proj_states
+            if self._bfa_w is not None:
+                w = self._bfa_w
+                n_fa, n_b = self._bfa_fa_size, self._bfa_b_size
+                from sglang.kernels.ops.kimi_k3 import kimi_k3_tiny_gemm as gemm
 
                 if (
                     self._bfa_alt_stream is not None
