@@ -144,9 +144,6 @@ logger = logging.getLogger(__name__)
 _is_hip = is_hip()
 _is_npu = is_npu()
 _use_aiter = get_bool_env_var("SGLANG_USE_AITER") and _is_hip
-_k3_hip_moe_alt_stream = _is_hip and get_bool_env_var(
-    "SGLANG_K3_HIP_MOE_ALT_STREAM", "false"
-)
 _aiter_k3_opt = _is_hip and envs.SGLANG_AITER_K3_OPT.get()
 _aiter_mla_gate = _is_hip and envs.SGLANG_K3_AITER_MLA_GATE.get()
 _aiter_kda_group64 = _is_hip and envs.SGLANG_K3_AITER_KDA_GROUP64.get()
@@ -3737,15 +3734,8 @@ class KimiK3LinearModel(nn.Module):
         #   [2] MLA output-gate GEMM, overlaps the attention core
         # (The attn-res bank write no longer needs a stream: it is fused
         # into the agg1 fast kernel, see AttnResidual.forward(write=True).)
-        # HIP normally keeps the graph single-stream. The opt-in MoE-only
-        # stream exercises the already-implemented shared/routed overlap
-        # without enabling the unrelated MLA/KDA side-stream paths.
-        if _is_hip:
-            self.alt_streams = (
-                [torch.cuda.Stream(), None, None] if _k3_hip_moe_alt_stream else None
-            )
-        else:
-            self.alt_streams = [torch.cuda.Stream() for _ in range(3)]
+        # Disable on HIP code path.
+        self.alt_streams = None if _is_hip else [torch.cuda.Stream() for _ in range(3)]
 
         self.layers, self.start_layer, self.end_layer = make_layers(
             config.num_hidden_layers,
