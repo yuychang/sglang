@@ -785,8 +785,7 @@ class KimiK3MoE(nn.Module):
             mods = [self.gate, self.routed_expert_down_proj]
         else:
             return
-        dtypes = {m.weight.dtype for m in mods}
-        if len(dtypes) != 1 or dtypes.pop() not in (torch.bfloat16, torch.float16):
+        if not _is_unquantized_mergeable([m.weight for m in mods]):
             return
         self._front_w, self._front_sizes = _merge_weights_as_views(mods)
         self._front_is_ep_pair = len(mods) == 2
@@ -2420,15 +2419,15 @@ class KimiK3DeltaAttention(nn.Module):
             or not self.use_full_rank_gate
         ):
             return
+        srcs = [self.fused_qkvg_proj.weight, self.b_proj.weight, self.f_a_proj.weight]
+        # The shape check below passes for FP8 too, so pack() would reinterpret
+        # quantized bytes as bf16 and drop the per-channel scales.
+        if not _is_unquantized_mergeable(srcs):
+            return
         from sglang.kernels.ops.gemm import kda_group64_aiter_hip
 
         merged = torch.cat(
-            [
-                self.fused_qkvg_proj.weight,
-                self.b_proj.weight,
-                self.f_a_proj.weight,
-                self.f_a_proj.weight.new_zeros((4, self.hidden_size)),
-            ],
+            [*srcs, self.f_a_proj.weight.new_zeros((4, self.hidden_size))],
             dim=0,
         ).contiguous()
         if tuple(merged.shape) != (6288, 7168):
