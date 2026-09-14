@@ -44,9 +44,23 @@ __all__ = ["QuarkW4A4MXFp4MoE"]
 
 _is_hip = is_hip()
 _use_aiter = get_bool_env_var("SGLANG_USE_AITER") and _is_hip
+_aiter_k3_opt = _use_aiter and get_bool_env_var("SGLANG_ROCM_K3_AITER_OPT")
 if _use_aiter:
-    from aiter.ops.shuffle import moe_shuffle_scale, moe_shuffle_weight, shuffle_weight
+    from aiter.ops.shuffle import (
+        moe_shuffle_scale,
+        moe_shuffle_weight,
+        shuffle_scale_a16w4,
+        shuffle_weight,
+        shuffle_weight_a16w4,
+    )
     from aiter.utility.fp4_utils import e8m0_shuffle
+
+
+def _aiter_situ_uses_gu_interleaved_weights() -> bool:
+    """Match AITER's SiTU activation-mode precedence when choosing weight layout."""
+    a8w4 = get_bool_env_var("AITER_SITUV2_A8W4", "false")
+    a4w4 = get_bool_env_var("AITER_SITUV2_A4W4", "false")
+    return a8w4 or not a4w4
 
 
 # gfx1250's grouped MoE GEMM reads weight scales in the n32k4 layout
@@ -196,9 +210,15 @@ class QuarkW4A4MXFp4MoE(QuarkMoEScheme):
                 )
             return
 
+        # Generic AITER kernels align the packed W2 dimension to 128. For K3
+        # TP8 that changes the native 384 intermediate width (192 packed) into
+        # 512 (256 packed), adding 33% zero work and preventing the native-shape
+        # MXMoE tuning table from binding. The K3 FlyDSL path supports 128-wide
+        # alignment in the unpacked dimension, so retain the checkpoint shape.
+        pad_for_aiter = _use_aiter and not _aiter_k3_opt
         w13_up_dim, w2_down_dim, weight_padded = get_moe_weight_sizes(
             intermediate_size_per_partition,
-            is_aiter_moe=_use_aiter,
+            is_aiter_moe=pad_for_aiter,
             is_concat=True,
             is_packed=True,
         )
@@ -818,6 +838,36 @@ class QuarkW4A4MXFp4MoE(QuarkMoEScheme):
 
         layer.w2_weight = torch.nn.Parameter(qw2_weight, requires_grad=False)
 
+    def _shuffle_gu_interleaved(self, layer: torch.nn.Module) -> None:
+        """Preshuffle into the GU-interleaved layout the a16w4/a8w4 kernels read.
+
+        Scales stay 2-D; opus_moe rejects the 3-D form the a4w4 path keeps.
+        """
+        num_experts = layer.w13_weight_scale.shape[0]
+
+        layer.w13_weight.data = shuffle_weight_a16w4(layer.w13_weight, 16, True)
+        w13_weight_scale = shuffle_scale_a16w4(
+            layer.w13_weight_scale.view(-1, layer.w13_weight_scale.shape[-1]),
+            num_experts,
+            True,
+        )
+        layer.w2_weight.data = shuffle_weight_a16w4(layer.w2_weight, 16, False)
+        w2_weight_scale = shuffle_scale_a16w4(
+            layer.w2_weight_scale.view(-1, layer.w2_weight_scale.shape[-1]),
+            num_experts,
+            False,
+        )
+
+        # Tagged so apply_weights can carry the flag across .view(float4_e2m1fn_x2)
+        # and aiter's fused_moe selects the preshuffle_on kernel family.
+        layer.w13_weight.is_shuffled = True
+        layer.w2_weight.is_shuffled = True
+
+        layer.w13_weight_scale = torch.nn.Parameter(
+            w13_weight_scale, requires_grad=False
+        )
+        layer.w2_weight_scale = torch.nn.Parameter(w2_weight_scale, requires_grad=False)
+
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         if (
             not self.is_checkpoint_mxfp4_serialized
@@ -831,6 +881,22 @@ class QuarkW4A4MXFp4MoE(QuarkMoEScheme):
             assert layer.w2_weight.dtype == torch.uint8
             assert layer.w13_weight_scale.dtype == torch.uint8
             assert layer.w2_weight_scale.dtype == torch.uint8
+
+        # AITER picks the SiTUv2 activation dtype at runtime: A8W4 and the
+        # A16W4 default read the preshuffled GU-interleaved layout, only A4W4
+        # reads the separated layout below. The mxfp4 MoE method agrees.
+        if (
+            _is_shuffle_moe_mxfp4
+            and not _is_gfx1250
+            and layer.moe_runner_config.activation == "situ"
+            and _aiter_situ_uses_gu_interleaved_weights()
+        ):
+            self._shuffle_gu_interleaved(layer)
+            if hasattr(layer, "dispatcher"):
+                layer.dispatcher.set_quant_config(
+                    {"weight_dtype": torch.float4_e2m1fn_x2}
+                )
+            return
 
         # Pre-shuffle weight scales
         if _is_gfx1250:
