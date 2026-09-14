@@ -266,7 +266,12 @@ def _k3_bf16_gemm(
                 <= x.shape[0]
                 <= _k3_aiter_tuned_moe_front_max_tokens
             )
-            and tuple(weight.shape) == (6016, 7168)
+            # BF16 K3 uses the 6016-row full front. Quark's MXFP4 shared
+            # experts leave a 4480-row BF16 router+latent partial front. Both
+            # shapes have exhaustive gfx950 entries in
+            # kimik3_bf16_tuned_gemm.csv, so route both through tgemm instead
+            # of making the Quark path fall back to generic torch.mm.
+            and tuple(weight.shape) in ((6016, 7168), (4480, 7168))
             and type(weight.data) is torch.Tensor
         ):
             from aiter.tuned_gemm import tgemm
