@@ -123,7 +123,7 @@ def _fuses_routed_scaling_factor_in_topk(quant_method) -> bool:
 
 
 def _copy_weight_view_before_h2d(loaded_weight: torch.Tensor) -> torch.Tensor:
-    """Stage a CPU tensor view in independent contiguous pinned storage."""
+    """Copy a CPU tensor view into independent contiguous storage."""
     if loaded_weight.device.type != "cpu":
         return loaded_weight
     tensor_bytes = loaded_weight.numel() * loaded_weight.element_size()
@@ -134,13 +134,7 @@ def _copy_weight_view_before_h2d(loaded_weight: torch.Tensor) -> torch.Tensor:
     )
     if not needs_copy:
         return loaded_weight
-    staged = torch.empty_like(
-        loaded_weight,
-        pin_memory=True,
-        memory_format=torch.contiguous_format,
-    )
-    staged.copy_(loaded_weight)
-    return staged
+    return loaded_weight.clone(memory_format=torch.contiguous_format)
 
 
 def _maybe_copy_weight_view_before_h2d(
