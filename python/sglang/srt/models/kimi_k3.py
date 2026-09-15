@@ -1004,7 +1004,7 @@ class KimiK3MoE(nn.Module):
             return
         from sglang.kernels.ops.kimi_k3 import ptpc_fp8_aiter_hip
 
-        weight = self.shared_experts.down_proj.weight
+        weight = self._preroute_dense_weight(self.shared_experts.down_proj)
         if (
             not ptpc_fp8_aiter_hip.available()
             or not isinstance(weight, torch.Tensor)
@@ -1023,7 +1023,7 @@ class KimiK3MoE(nn.Module):
             self._shared_down_fp8_s,
             self._shared_down_fp8_n,
             in_features,
-            token_buckets=(8, 16, 32, 64, 128, 256),
+            token_buckets=(2, 4, 8, 16, 32, 64, 128, 256),
         )
 
     def _prepare_latent_tail_fp8(self) -> None:
@@ -1797,7 +1797,7 @@ class KimiK3MoE(nn.Module):
             else:
                 self._forward_routed(hidden_states, router_logits, routed_input, latent)
             with torch.cuda.stream(self.alt_stream):
-                if partial_front:
+                if partial_front and gate_up is None:
                     self._forward_quantized_shared(hidden_states, shared_output)
                 else:
                     self._forward_shared(
