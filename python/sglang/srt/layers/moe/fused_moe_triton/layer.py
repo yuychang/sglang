@@ -671,7 +671,7 @@ class FusedMoE(torch.nn.Module):
         # for per channel weight quantization
         if shard_id == "w2":
             loaded_weight = _maybe_copy_weight_view_before_h2d(loaded_weight)
-            expert_data.copy_(loaded_weight)
+            expert_data.copy_(loaded_weight, non_blocking=True)
         elif shard_id in ("w1", "w3"):
             self._load_w13(
                 shard_id=shard_id,
@@ -760,10 +760,10 @@ class FusedMoE(torch.nn.Module):
             and loaded_weight.shape[shard_dim] < expert_data.shape[shard_dim]
         ):
             expert_data.narrow(shard_dim, 0, loaded_weight.shape[shard_dim]).copy_(
-                loaded_weight
+                loaded_weight, non_blocking=True
             )
         else:
-            expert_data.copy_(loaded_weight)
+            expert_data.copy_(loaded_weight, non_blocking=True)
 
     def _load_w2(
         self,
@@ -846,10 +846,10 @@ class FusedMoE(torch.nn.Module):
             and loaded_weight.shape[shard_dim] < expert_data.shape[shard_dim]
         ):
             expert_data.narrow(shard_dim, 0, loaded_weight.shape[shard_dim]).copy_(
-                loaded_weight
+                loaded_weight, non_blocking=True
             )
         else:
-            expert_data.copy_(loaded_weight)
+            expert_data.copy_(loaded_weight, non_blocking=True)
 
     def _maybe_load_fp8_shared_expert_as_fp4(
         self,
