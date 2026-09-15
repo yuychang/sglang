@@ -1850,7 +1850,7 @@ class KimiK3MoE(nn.Module):
                     prefix_sum,
                 )
         else:  # single collective over the flat [latent | shared] pair
-            if partial_front:
+            if partial_front and gate_up is None:
                 self._forward_quantized_shared(hidden_states, shared_output)
             else:
                 self._forward_shared(
