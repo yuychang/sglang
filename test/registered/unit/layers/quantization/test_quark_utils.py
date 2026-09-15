@@ -5,9 +5,13 @@ from sglang.test.ci.ci_register import register_cpu_ci
 register_cpu_ci(est_time=10, suite="base-a-test-cpu")
 
 import unittest
+from types import SimpleNamespace
 
 import torch
 
+from sglang.srt.layers.quantization.quark.schemes.quark_w4a4_mxfp4 import (
+    QuarkW4A4MXFP4,
+)
 from sglang.srt.layers.quantization.quark.utils import (
     e8m0_to_f32,
     should_ignore_layer,
@@ -113,6 +117,30 @@ class TestE8M0ToF32(CustomTestCase):
         self.assertEqual(out[0].item(), 1.0)
         self.assertEqual(out[1].item(), 128.0)
         self.assertTrue(torch.isnan(out[2]).item())
+
+
+class TestMXFP4WeightMaterialization(CustomTestCase):
+    def test_materializes_packed_weight_without_mutating_layer(self):
+        # Packed low/high nibbles 1/2 decode to 0.5/1.0. An e8m0 scale of
+        # 127 is exactly one.
+        packed = torch.full((2, 16), 0x21, dtype=torch.uint8)
+        scales = torch.full((2, 1), 127, dtype=torch.uint8)
+        layer = SimpleNamespace(weight=packed, weight_scale=scales)
+        scheme = object.__new__(QuarkW4A4MXFP4)
+
+        dense = scheme.materialize_bf16_weight(layer)
+
+        expected = torch.tensor([0.5, 1.0], dtype=torch.bfloat16).repeat(2, 16)
+        torch.testing.assert_close(dense, expected)
+        self.assertIs(layer.weight, packed)
+        self.assertIs(layer.weight_scale, scales)
+
+    def test_reuses_already_materialized_weight(self):
+        weight = torch.randn(2, 32, dtype=torch.bfloat16)
+        layer = SimpleNamespace(weight=weight, dequantized_bf16=True)
+        scheme = object.__new__(QuarkW4A4MXFP4)
+
+        self.assertIs(scheme.materialize_bf16_weight(layer), weight)
 
 
 if __name__ == "__main__":
