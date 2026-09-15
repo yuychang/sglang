@@ -70,7 +70,7 @@ def cooperative_preactivated_tri_covered(
     shared_scale: torch.Tensor,
     router_weight: torch.Tensor,
 ) -> bool:
-    if not cooperative_preactivated_enabled() or hidden.shape[0] not in (2, 4, 8):
+    if not cooperative_preactivated_enabled() or hidden.shape[0] not in (2, 4):
         return False
     _, supports = _preactivated_ops()
     return bool(
@@ -216,7 +216,6 @@ def warmup(
     if cooperative_preactivated_enabled():
         token_buckets.append(2)
         token_buckets.append(4)
-        token_buckets.append(8)
     for num_tokens in token_buckets:
         hidden = torch.zeros(
             (num_tokens, 7168),

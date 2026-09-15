@@ -256,7 +256,7 @@ def supports_kimi_k3_moe_tri_projection_cooperative_preactivated_fp8(
         shared_weight,
         shared_scale,
         router_weight,
-        (2, 4, 8),
+        (2, 4),
     )
 
 
