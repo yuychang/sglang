@@ -54,7 +54,7 @@ def bench(fn, warmup: int, iters: int, trials: int) -> tuple[float, float, float
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--tokens", type=int, choices=(1, 2, 4), required=True)
+    parser.add_argument("--tokens", type=int, choices=(1, 2, 4, 8), required=True)
     parser.add_argument("--warmup", type=int, default=50)
     parser.add_argument("--iters", type=int, default=500)
     parser.add_argument("--trials", type=int, default=11)
@@ -68,7 +68,7 @@ def main() -> None:
     routed, routed_scale = quantize_rows(routed_bf16)
     shared, shared_scale = quantize_rows(shared_bf16)
     merged = torch.cat((shared_bf16, router, routed_bf16), dim=0).contiguous()
-    if args.tokens in (2, 4):
+    if args.tokens in (2, 4, 8):
         shared = (
             shared.view(2, 768, 7168).permute(1, 0, 2).contiguous().view(1536, 7168)
         )

@@ -1661,7 +1661,7 @@ class KimiK3MoE(nn.Module):
         preroute = None
         shared_is_preactivated = False
         if (
-            num_tokens <= 4
+            num_tokens <= 8
             and self._preroute_routed_weight is not None
             and self._preroute_routed_scale is not None
             and self._preroute_shared_weight is not None
