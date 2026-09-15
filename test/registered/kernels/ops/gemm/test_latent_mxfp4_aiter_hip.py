@@ -94,6 +94,19 @@ class TestKimiK3LatentMXFP4(CustomTestCase):
             kimi_k3_model._k3_bf16_gemm(x, weight, out=out)
             tuned_mm.assert_called_once()
 
+    def test_tuned_front_accepts_quark_partial_shape(self):
+        x = torch.randn(64, 7168, dtype=torch.bfloat16, device=self.device)
+        weight = torch.empty(4480, 7168, dtype=torch.bfloat16, device=self.device)
+        expected = torch.randn(64, 4480, dtype=torch.bfloat16, device=self.device)
+        with (
+            patch.object(kimi_k3_model, "_use_aiter", True),
+            patch.object(kimi_k3_model, "_k3_aiter_tuned_moe_front", True),
+            patch("aiter.tuned_gemm.tgemm.mm", return_value=expected) as tuned_mm,
+        ):
+            actual = kimi_k3_model._k3_bf16_gemm(x, weight)
+        self.assertIs(actual, expected)
+        tuned_mm.assert_called_once_with(x, weight, None, otype=x.dtype)
+
 
 if __name__ == "__main__":
     unittest.main()
