@@ -259,13 +259,24 @@ class QuarkW4A4MXFP4(QuarkLinearScheme):
     def get_min_capability(cls) -> int:
         return 70
 
+    def materialize_bf16_weight(self, layer: torch.nn.Module) -> torch.Tensor:
+        """Return a dense BF16 view of this linear's checkpoint weight.
+
+        Kimi-K3 uses this during model finalization to build small-batch FP8
+        projection caches.  Keeping the conversion on the scheme avoids
+        coupling the model to Quark's packed MXFP4 representation.
+        """
+        if getattr(layer, "dequantized_bf16", False):
+            return layer.weight
+        return _dequant_mxfp4_to_bf16(layer.weight.data, layer.weight_scale.data)
+
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         if not self.is_checkpoint_mxfp4_serialized:
             assert layer.weight.dtype == torch.uint8
             assert layer.weight_scale.dtype == torch.uint8
 
         if _dequant_linear_to_bf16:
-            w_bf16 = _dequant_mxfp4_to_bf16(layer.weight.data, layer.weight_scale.data)
+            w_bf16 = self.materialize_bf16_weight(layer)
             layer.weight = torch.nn.Parameter(w_bf16, requires_grad=False)
             # FP4 block scales are folded into the bf16 weight; drop them.
             layer.weight_scale = None

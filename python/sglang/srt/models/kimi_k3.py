@@ -886,6 +886,26 @@ class KimiK3MoE(nn.Module):
             and num_tokens >= _moe_latent_mxfp4_min_tokens
         )
 
+    @staticmethod
+    def _preroute_dense_weight(linear: torch.nn.Module) -> torch.Tensor:
+        """Materialize a dense weight only while building decode-side caches."""
+        weight = linear.weight
+        if weight.dtype in (torch.bfloat16, torch.float16):
+            return weight
+        scheme = getattr(linear, "scheme", None)
+        materialize = (
+            getattr(scheme, "materialize_bf16_weight", None)
+            if scheme is not None
+            else None
+        )
+        if materialize is None:
+            materialize = getattr(
+                getattr(linear, "quant_method", None),
+                "materialize_bf16_weight",
+                None,
+            )
+        return materialize(linear) if materialize is not None else weight
+
     def _prepare_preroute_fp8(self) -> None:
         if (
             not _aiter_moe_preroute_fp8
@@ -900,9 +920,9 @@ class KimiK3MoE(nn.Module):
             quantize_fp8_rows,
         )
 
-        routed = self.routed_expert_down_proj.weight
-        shared = self.shared_experts.gate_up_proj.weight
-        shared_down = self.shared_experts.down_proj.weight
+        routed = self._preroute_dense_weight(self.routed_expert_down_proj)
+        shared = self._preroute_dense_weight(self.shared_experts.gate_up_proj)
+        shared_down = self._preroute_dense_weight(self.shared_experts.down_proj)
         if (
             tuple(routed.shape) != (3584, 7168)
             or tuple(shared.shape) != (1536, 7168)
