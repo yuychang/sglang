@@ -67,19 +67,32 @@ def _dequant_mxfp4_to_bf16(
     ``(N, K//32)`` uint8 into a dense bf16 weight ``(N, K)``."""
     N, k_packed = weight.shape
     K = k_packed * 2
-    lut = torch.tensor(_MXFP4_VALUES, device=weight.device, dtype=torch.float32)
-    lo = (weight & 0xF).long()
-    hi = (weight >> 4).long()
-    vals = torch.empty(N, K, device=weight.device, dtype=torch.float32)
-    vals[:, 0::2] = lut[lo]
-    vals[:, 1::2] = lut[hi]
+
+    # Decode directly in bf16.  Using a LUT requires int64 indices and the old
+    # implementation also built a full-size fp32 temporary; repeated across
+    # K3's MoE layers those allocations make post-load cache construction both
+    # slow and memory hungry.
+    def decode_nibble(nibble: torch.Tensor) -> torch.Tensor:
+        magnitude = nibble & 0x7
+        decoded = torch.where(
+            magnitude <= 4,
+            magnitude.to(torch.bfloat16) * 0.5,
+            (magnitude - 2).to(torch.bfloat16),
+        )
+        decoded = torch.where(magnitude == 7, 6.0, decoded)
+        return torch.where(nibble < 8, decoded, -decoded)
+
     # e8m0 byte b decodes to 2^(b-127); 255 is the NaN/Inf sentinel (unused by
     # real weights) -> map to 0 so it can't poison the matmul.
-    scale = torch.exp2(weight_scale.to(torch.float32) - 127.0)
+    scale = torch.exp2(weight_scale.to(torch.bfloat16) - 127.0)
     scale = torch.where(weight_scale == 255, torch.zeros_like(scale), scale)
-    scale = scale.view(N, K // 32, 1)
-    w = (vals.view(N, K // 32, 32) * scale).view(N, K)
-    return w.to(torch.bfloat16)
+    # Each scale covers 32 unpacked values, or 16 packed bytes.
+    scale = scale.repeat_interleave(16, dim=1)
+
+    w = torch.empty(N, K, device=weight.device, dtype=torch.bfloat16)
+    w[:, 0::2] = decode_nibble(weight & 0xF) * scale
+    w[:, 1::2] = decode_nibble(weight >> 4) * scale
+    return w
 
 
 if _is_hip:
