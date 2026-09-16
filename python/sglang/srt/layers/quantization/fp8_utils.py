@@ -1886,7 +1886,7 @@ def apply_fp8_linear_bmm_flashinfer(
 
 
 def apply_fp8_linear(
-    input: torch.Tensor,
+    input: Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]],
     weight: torch.Tensor,
     weight_scale: torch.Tensor,
     input_scale: Optional[torch.Tensor] = None,
@@ -1909,22 +1909,34 @@ def apply_fp8_linear(
         )
     output_padding = 17 if pad_output else None
 
-    # View input as 2D matrix for fp8 methods
-    input_2d = input.view(-1, input.shape[-1])
-    output_shape = [*input.shape[:-1], weight.shape[1]]
-
-    # A pre-quantized fp8 activation (e.g. from a fused RMSNorm+quant kernel)
-    # carries no original dtype: skip re-quant, reuse the supplied per-tensor
-    # input_scale, and emit ``pre_quant_output_dtype`` (the model's activation
-    # dtype, propagated by the producer) or bf16 if it was not provided.
-    input_prequantized = input_2d.dtype in (
-        torch.float8_e4m3fn,
-        torch.float8_e4m3fnuz,
-    )
-    if input_prequantized:
+    # Producer fusion may pass (fp8, per-token scale[, orig_dtype]). Skip
+    # re-quant and keep the same GEMM as the split PTPC path.
+    if isinstance(input, tuple):
+        q_in, input_scale = input[0], input[1]
+        if len(input) > 2 and input[2] is not None:
+            pre_quant_output_dtype = input[2]
+        input_2d = q_in.view(-1, q_in.shape[-1])
+        output_shape = [*q_in.shape[:-1], weight.shape[1]]
         output_dtype = pre_quant_output_dtype or torch.bfloat16
+        input_prequantized = True
+        use_per_token_if_dynamic = True
     else:
-        output_dtype = input.dtype
+        # View input as 2D matrix for fp8 methods
+        input_2d = input.view(-1, input.shape[-1])
+        output_shape = [*input.shape[:-1], weight.shape[1]]
+
+        # A pre-quantized fp8 activation (e.g. from a fused RMSNorm+quant kernel)
+        # carries no original dtype: skip re-quant, reuse the supplied per-tensor
+        # input_scale, and emit ``pre_quant_output_dtype`` (the model's activation
+        # dtype, propagated by the producer) or bf16 if it was not provided.
+        input_prequantized = input_2d.dtype in (
+            torch.float8_e4m3fn,
+            torch.float8_e4m3fnuz,
+        )
+        if input_prequantized:
+            output_dtype = pre_quant_output_dtype or torch.bfloat16
+        else:
+            output_dtype = input.dtype
 
     channelwise_cutlass = (
         cutlass_fp8_supported and weight_scale.numel() == weight.shape[1]
@@ -1944,13 +1956,17 @@ def apply_fp8_linear(
     )
 
     if input_prequantized:
-        assert input_scale is not None and input_scale.numel() == 1
+        assert input_scale is not None
         qinput = input_2d
-        if channelwise_cutlass and not native_scalar_a_scale:
-            # Unsupported CUTLASS epilogues require one A scale per row.
-            x_scale = input_scale.repeat(input_2d.shape[0]).view(-1, 1)
+        if input_scale.numel() == 1:
+            if channelwise_cutlass and not native_scalar_a_scale:
+                # Unsupported CUTLASS epilogues require one A scale per row.
+                x_scale = input_scale.repeat(input_2d.shape[0]).view(-1, 1)
+            else:
+                x_scale = input_scale
         else:
-            x_scale = input_scale
+            # Per-token scale from fused RMSNorm+quant: shape [M, 1].
+            x_scale = input_scale.view(-1, 1)
     elif compressed_tensor_quant:
         # Maybe apply padding to output, see comment in __init__
         num_token_padding = output_padding

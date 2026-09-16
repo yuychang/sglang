@@ -169,13 +169,28 @@ def _k3_ptpc_fp8_batch_ok(num_tokens: int) -> bool:
 
 
 def _k3_linear_accepts_ptpc_tuple(module: nn.Module) -> bool:
-    """Whether a compressed-tensors linear consumes ``(fp8, token_scale)``.
+    """Whether a linear consumes ``(fp8, per_token_scale)`` without re-quant.
 
-    Keep this capability check structural: channel-scaled FP8 is the only
-    scheme routed through apply_fp8_ptpc_linear on ROCm.
+    Quark W8A8-FP8 (K3 AttnFP8 o_proj) uses ``per_token`` + ``per_channel``
+    weights, not compressed-tensors ``strategy``. Both land in
+    ``apply_fp8_linear`` / ``apply_fp8_ptpc_linear`` on ROCm.
     """
-    strategy = getattr(getattr(module, "scheme", None), "strategy", None)
-    return _k3_ptpc_fp8 and getattr(strategy, "value", None) == "channel"
+    if not _k3_ptpc_fp8:
+        return False
+    scheme = getattr(module, "scheme", None)
+    if scheme is None:
+        return False
+    if getattr(module, "weight_scale", None) is None:
+        return False
+    if getattr(scheme, "per_token", False) and getattr(
+        scheme, "weight_qscheme", None
+    ) in (None, "per_channel"):
+        return True
+    strategy = getattr(scheme, "strategy", None)
+    if strategy is None:
+        return False
+    value = getattr(strategy, "value", strategy)
+    return str(value).lower() == "channel"
 
 
 def _cdiv(a: int, b: int) -> int:
@@ -2843,9 +2858,9 @@ class KimiK3DeltaAttention(nn.Module):
             token_count = core_attn_out.shape[-3]
             if (
                 _use_aiter
-                and not self.all_reduce_fusion
                 and _k3_ptpc_fp8_batch_ok(token_count)
                 and _k3_linear_accepts_ptpc_tuple(self.o_proj)
+                and not (self.all_reduce_fusion and k3_ar_fusion.enabled())
             ):
                 # The split path materializes gated RMSNorm in bf16 and then
                 # launches dynamic per-token quant for o_proj. AITER's sigmoid
@@ -2876,6 +2891,14 @@ class KimiK3DeltaAttention(nn.Module):
                 )
                 core_attn_out = (quant_out, quant_scale)
                 output_prequantized = True
+                if not getattr(self, "_k3_onorm_ptpc_logged", False):
+                    self._k3_onorm_ptpc_logged = True
+                    logger.info(
+                        "KDA o_norm+PTPC producer fusion enabled "
+                        "(scheme=%s, tokens=%d)",
+                        type(self.o_proj.scheme).__name__,
+                        token_count,
+                    )
             else:
                 core_attn_out = self.o_norm(core_attn_out, norm_gate)
         if not output_prequantized:
