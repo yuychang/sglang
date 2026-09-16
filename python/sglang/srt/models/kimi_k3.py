@@ -168,6 +168,16 @@ def _k3_ptpc_fp8_batch_ok(num_tokens: int) -> bool:
     return _k3_ptpc_fp8_min_tokens <= num_tokens <= _k3_ptpc_fp8_max_tokens
 
 
+def _k3_linear_accepts_ptpc_tuple(module: nn.Module) -> bool:
+    """Whether a compressed-tensors linear consumes ``(fp8, token_scale)``.
+
+    Keep this capability check structural: channel-scaled FP8 is the only
+    scheme routed through apply_fp8_ptpc_linear on ROCm.
+    """
+    strategy = getattr(getattr(module, "scheme", None), "strategy", None)
+    return _k3_ptpc_fp8 and getattr(strategy, "value", None) == "channel"
+
+
 def _cdiv(a: int, b: int) -> int:
     return (a + b - 1) // b
 
@@ -2827,10 +2837,49 @@ class KimiK3DeltaAttention(nn.Module):
             fused_onorm = self.attn._k3_onorm_consumed
         if defer_f_b:
             self.attn._k3_deferred_f_b = False
+        output_prequantized = False
         if not fused_onorm:
             norm_gate = g_proj_states.unflatten(-1, (-1, self.head_dim))
-            core_attn_out = self.o_norm(core_attn_out, norm_gate)
-        core_attn_out = core_attn_out.squeeze(0).flatten(-2)
+            token_count = core_attn_out.shape[-3]
+            if (
+                _use_aiter
+                and not self.all_reduce_fusion
+                and _k3_ptpc_fp8_batch_ok(token_count)
+                and _k3_linear_accepts_ptpc_tuple(self.o_proj)
+            ):
+                # The split path materializes gated RMSNorm in bf16 and then
+                # launches dynamic per-token quant for o_proj. AITER's sigmoid
+                # variant preserves that bf16 rounding boundary and emits the
+                # tuple consumed directly by apply_fp8_ptpc_linear.
+                from aiter import dtypes as aiter_dtypes
+                from aiter.ops.gated_rmsnorm_fp8_per_token_quant import (
+                    gated_rmsnorm_fp8_per_token_quant,
+                )
+
+                norm_input = core_attn_out.squeeze(0)
+                quant_out = torch.empty(
+                    (token_count, norm_input.shape[-2] * norm_input.shape[-1]),
+                    dtype=aiter_dtypes.fp8,
+                    device=norm_input.device,
+                )
+                quant_scale = torch.empty(
+                    (token_count, 1), dtype=torch.float32, device=norm_input.device
+                )
+                gated_rmsnorm_fp8_per_token_quant(
+                    quant_out,
+                    quant_scale,
+                    norm_input,
+                    norm_gate,
+                    self.o_norm.weight,
+                    self.o_norm.eps,
+                    sigmoid_gate=True,
+                )
+                core_attn_out = (quant_out, quant_scale)
+                output_prequantized = True
+            else:
+                core_attn_out = self.o_norm(core_attn_out, norm_gate)
+        if not output_prequantized:
+            core_attn_out = core_attn_out.squeeze(0).flatten(-2)
         if self.all_reduce_fusion and k3_ar_fusion.enabled():
             out = _k3_symm_o_proj_out(self.o_proj, core_attn_out)
             partial, _ = self.o_proj(core_attn_out, output_tensor=out)
