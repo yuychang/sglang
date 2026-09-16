@@ -847,7 +847,8 @@ class KimiK3MoE(nn.Module):
             not _moe_latent_mxfp4
             or not self.use_latent_moe
             or not (
-                self._eligible_for_fused_front or self._eligible_for_partial_fused_front
+                self._eligible_for_fused_front
+                or self._eligible_for_partial_fused_front
             )
             or self._front_sizes is None
             or len(self._front_sizes) not in (2, 3)
@@ -1522,7 +1523,7 @@ class KimiK3MoE(nn.Module):
         finally:
             route_quant_handoff.clear()
 
-    def _try_run_shared_down_ptpc(self, x: torch.Tensor, out: torch.Tensor) -> bool:
+    def _run_shared_down(self, x: torch.Tensor, out: torch.Tensor) -> None:
         shared = self.shared_experts
         assert shared is not None
         if self._shared_down_fp8_w is not None and _k3_ptpc_fp8_batch_ok(x.shape[0]):
@@ -1536,14 +1537,7 @@ class KimiK3MoE(nn.Module):
                     self._shared_down_fp8_n,
                     out=out,
                 )
-                return True
-        return False
-
-    def _run_shared_down(self, x: torch.Tensor, out: torch.Tensor) -> None:
-        shared = self.shared_experts
-        assert shared is not None
-        if self._try_run_shared_down_ptpc(x, out):
-            return
+                return
         _k3_bf16_gemm(x, shared.down_proj.weight, out=out)
 
     def _forward_shared(
@@ -1600,9 +1594,7 @@ class KimiK3MoE(nn.Module):
         scheme = getattr(linear, "scheme", None)
         apply_into = getattr(scheme, "apply_into", None) if scheme is not None else None
         if apply_into is None:
-            apply_into = getattr(
-                getattr(linear, "quant_method", None), "apply_into", None
-            )
+            apply_into = getattr(getattr(linear, "quant_method", None), "apply_into", None)
         if apply_into is None:
             return False
         apply_into(linear, x, output)
@@ -1619,7 +1611,9 @@ class KimiK3MoE(nn.Module):
         # Fused quant+GEMM helps decode (M<=64). At prefill widths the
         # unfused MXFP4 GEMM remains faster, and TTT is prefill-heavy.
         use_fused = num_tokens <= 64
-        gate_up = hidden_states.new_empty(num_tokens, n_out, dtype=hidden_states.dtype)
+        gate_up = hidden_states.new_empty(
+            num_tokens, n_out, dtype=hidden_states.dtype
+        )
         if not (
             use_fused
             and self._mxfp4_apply_into(shared.gate_up_proj, hidden_states, gate_up)
@@ -1627,11 +1621,7 @@ class KimiK3MoE(nn.Module):
             gate_up, _ = shared.gate_up_proj(hidden_states)
         activated = shared.act_fn(gate_up)
         if not (
-            self._try_run_shared_down_ptpc(activated, shared_output)
-            or (
-                use_fused
-                and self._mxfp4_apply_into(shared.down_proj, activated, shared_output)
-            )
+            use_fused and self._mxfp4_apply_into(shared.down_proj, activated, shared_output)
         ):
             output, _ = shared.down_proj(activated)
             shared_output.copy_(output)
@@ -1985,7 +1975,8 @@ class KimiK3MoE(nn.Module):
             dp_gather_replicate(hidden_states, local_hidden_states, forward_batch)
             dp_prefix_sum, prefix_sum = prefix_sum, None
         if hidden_states.shape[0] > 0 and (
-            self._eligible_for_fused_front or self._eligible_for_partial_fused_front
+            self._eligible_for_fused_front
+            or self._eligible_for_partial_fused_front
         ):
             out = self._forward_fused(
                 hidden_states,
@@ -2302,10 +2293,8 @@ class KimiK3DeltaAttention(nn.Module):
             use_dp_attention_reduce=not self.all_reduce_fusion,
             prefix=f"{prefix}.o_proj",
         )
-        if (
-            self.all_reduce_fusion
-            and k3_ar_fusion.enabled()
-            and not _o_proj_takes_output(self.o_proj)
+        if self.all_reduce_fusion and k3_ar_fusion.enabled() and not _o_proj_takes_output(
+            self.o_proj
         ):
             # the fused AR reduces o_proj's output in place out of a symmetric
             # buffer, which needs the GEMM to write into caller-owned storage
@@ -2381,7 +2370,9 @@ class KimiK3DeltaAttention(nn.Module):
             # the merged buffer would drop their scales.
             if not _merge_dtype_ok([mod.weight for mod in mods]):
                 return
-            self._bfa_w, sizes = _merge_weights_as_views(mods, pad_rows_to=8)
+            self._bfa_w, sizes = _merge_weights_as_views(
+                mods, pad_rows_to=8
+            )
             self._bfa_f_b_w = self.f_b_proj.weight
         self._bfa_fa_size, self._bfa_b_size = sizes
 
@@ -2957,10 +2948,8 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
             self.register_buffer("_k3_mla_q_cache_scale", None, persistent=False)
         # Installed before the output-gate wrap below so the gate multiply is
         # applied to x before the fused GEMM+AR sees it.
-        if (
-            self.all_reduce_fusion
-            and k3_ar_fusion.enabled()
-            and not _o_proj_takes_output(self.o_proj)
+        if self.all_reduce_fusion and k3_ar_fusion.enabled() and not _o_proj_takes_output(
+            self.o_proj
         ):
             # the fused AR reduces o_proj's output in place out of a symmetric
             # buffer, which needs the GEMM to write into caller-owned storage
@@ -3140,7 +3129,9 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
             q_dtype=torch.bfloat16,
         )
         q_out_dtype = (
-            q_nope_out.dtype if triton_decode or gluon_decode else kv_cache.dtype
+            q_nope_out.dtype
+            if triton_decode or gluon_decode
+            else kv_cache.dtype
         )
         if (
             q_nope_out.shape != (tokens, heads, self.kv_lora_rank)
@@ -3744,7 +3735,9 @@ class KimiK3DecoderLayer(nn.Module):
                 hidden_states = k3_ar_fusion.all_reduce(hidden_states, prefix_sum)
                 prefix_sum = None
             else:
-                fused = k3_hip_ar_residual.try_all_reduce_add(hidden_states, prefix_sum)
+                fused = k3_hip_ar_residual.try_all_reduce_add(
+                    hidden_states, prefix_sum
+                )
                 if fused is not None:
                     hidden_states = fused
                     prefix_sum = None
@@ -4325,14 +4318,10 @@ class KimiK3LinearForCausalLM(nn.Module):
             kv_b_proj = self_attn.kv_b_proj
             kv_b_weight = _get_k3_dense_weight(kv_b_proj)
             tensor_scale = None
-            if (
-                kv_b_weight.dtype
-                in (
-                    torch.float8_e4m3fn,
-                    torch.float8_e4m3fnuz,
-                )
-                and getattr(kv_b_proj, "weight_scale", None) is not None
-            ):
+            if kv_b_weight.dtype in (
+                torch.float8_e4m3fn,
+                torch.float8_e4m3fnuz,
+            ) and getattr(kv_b_proj, "weight_scale", None) is not None:
                 if kv_b_proj.weight_scale.numel() > 1:
                     kv_b_weight, tensor_scale = _k3_channel_fp8_to_tensor_fp8(
                         kv_b_proj, kv_b_weight
