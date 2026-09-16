@@ -25,10 +25,13 @@ _is_npu = is_npu()
 def _jit_mla_output_gate_module() -> Module:
     args = make_cpp_args(_THREADS, is_arch_support_pdl())
     return load_jit(
-        "kimi_k3_mla_output_gate_" + str(_THREADS),
+        "kimi_k3_mla_output_gate_fp8quant2_" + str(_THREADS),
         *args,
         cuda_files=["kimi_k3/mla_output_gate.cuh"],
-        cuda_wrappers=[("run", f"MlaOutputGateKernel<{args}>::run")],
+        cuda_wrappers=[
+            ("run", f"MlaOutputGateKernel<{args}>::run"),
+            ("run_fp8_quant", f"MlaOutputGateFp8QuantKernel<{args}>::run"),
+        ],
         extra_cuda_cflags=["-O3"],
     )
 
@@ -46,9 +49,32 @@ def covered(x: torch.Tensor, gate: torch.Tensor) -> bool:
     )
 
 
+def covered_fp8_quant(x: torch.Tensor, gate: torch.Tensor) -> bool:
+    return (
+        covered(x, gate)
+        and x.dim() == 2
+        and x.shape[-1] % 8 == 0
+        and x.shape[0] > 0
+    )
+
+
 def kimi_k3_mla_output_gate(x: torch.Tensor, gate: torch.Tensor) -> torch.Tensor:
     """out = bf16(x * bf16(sigmoid(gate))); double rounding matches the
     unfused torch.sigmoid + mul pair bit-for-bit. Caller checks covered()."""
     out = torch.empty_like(x)
     _jit_mla_output_gate_module().run(x.view(-1), gate.view(-1), out.view(-1))
     return out
+
+
+def kimi_k3_mla_output_gate_fp8_quant(
+    x: torch.Tensor, gate: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Gate multiply + per-token FP8 quant. Returns ``(fp8, [T, 1] scale)``."""
+    from sglang.kernels.ops.quantization.fp8_kernel import fp8_dtype
+
+    out_q = torch.empty(x.shape, dtype=fp8_dtype, device=x.device)
+    out_s = torch.empty(x.shape[0], dtype=torch.float32, device=x.device)
+    _jit_mla_output_gate_module().run_fp8_quant(
+        x, gate, out_q.view(torch.uint8), out_s
+    )
+    return out_q, out_s.unsqueeze(1)

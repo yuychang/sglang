@@ -2612,7 +2612,45 @@ class KimiK3DeltaAttention(nn.Module):
             self._qkvgbfa_fp8_n,
             weights[0].shape[1],
         )
+        self._prepare_f_b_tiny_gemm()
         return True
+
+    def _prepare_f_b_tiny_gemm(self) -> None:
+        """Dequant Quark PTPC ``f_b`` into the BF16 tiny-GEMM buffer.
+
+        Decode ``f_b`` is ``[M, 128] @ [1536, 128].T``. The FP8 path is a
+        contiguous copy + group-quant + ck_tile FlatMM; tiny-GEMM already
+        lists this shape and consumes the ``f_a`` split view without the
+        extra launches.
+        """
+        if self._bfa_f_b_w is not None:
+            return
+        fb = getattr(self, "f_b_proj", None)
+        if fb is None:
+            return
+        weight = getattr(fb, "weight", None)
+        scale = getattr(fb, "weight_scale", None)
+        if (
+            not isinstance(weight, torch.Tensor)
+            or weight.dim() != 2
+            or weight.dtype != torch.float8_e4m3fn
+            or not isinstance(scale, torch.Tensor)
+            or scale.numel() != weight.shape[0]
+        ):
+            return
+        n, k = int(weight.shape[0]), int(weight.shape[1])
+        from sglang.kernels.ops.kimi_k3 import _K3_TINY_GEMM_MAX_TOKENS
+
+        if (n, k) not in _K3_TINY_GEMM_MAX_TOKENS:
+            return
+        self._bfa_f_b_w = (
+            (weight.data.float() * scale.data.reshape(-1, 1).float())
+            .to(torch.bfloat16)
+            .contiguous()
+        )
+        if not getattr(self, "_k3_fb_tiny_logged", False):
+            self._k3_fb_tiny_logged = True
+            logger.info("K3 KDA f_b BF16 tiny-GEMM enabled (N=%d K=%d)", n, k)
 
     def _use_qkvgbfa_ptpc_fp8(self, hidden_states) -> bool:
         x = hidden_states[0] if isinstance(hidden_states, tuple) else hidden_states
@@ -2836,6 +2874,8 @@ class KimiK3DeltaAttention(nn.Module):
             return self.f_b_proj(f_a.contiguous())[0]
         from sglang.kernels.ops.kimi_k3 import kimi_k3_tiny_gemm
 
+        if f_a.stride(-1) != 1:
+            f_a = f_a.contiguous()
         return kimi_k3_tiny_gemm(f_a, self._bfa_f_b_w)
 
     def forward_qkvbfg_fused(
@@ -3271,7 +3311,19 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
                             if precomputed is not None
                             else self.g_proj(gate_input)[0]
                         )
-                        if mla_output_gate.covered(x, gate):
+                        if (
+                            _k3_linear_accepts_ptpc_tuple(self.o_proj)
+                            and mla_output_gate.covered_fp8_quant(x, gate)
+                        ):
+                            x = mla_output_gate.kimi_k3_mla_output_gate_fp8_quant(
+                                x, gate
+                            )
+                            if not getattr(self, "_k3_mla_gate_fp8_logged", False):
+                                self._k3_mla_gate_fp8_logged = True
+                                logger.info(
+                                    "K3 MLA o_proj gate+PTPC producer fusion enabled"
+                                )
+                        elif mla_output_gate.covered(x, gate):
                             # One kernel for x * sigmoid(gate); double rounding
                             # matches the unfused pair bit-for-bit.
                             x = mla_output_gate.kimi_k3_mla_output_gate(x, gate)
