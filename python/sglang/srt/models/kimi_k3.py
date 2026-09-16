@@ -263,6 +263,14 @@ def _k3_should_fuse_inproj_quant(
     )
 
 
+def _k3_stash_mla_gate_hidden(self_attn: nn.Module, hidden_states: torch.Tensor) -> None:
+    """Keep BF16 hidden for MLA output-gate GEMMs when in_proj fusion follows."""
+    if getattr(self_attn, "use_output_gate", False) and isinstance(
+        hidden_states, torch.Tensor
+    ):
+        self_attn._gate_hidden_states = hidden_states
+
+
 def _k3_maybe_fuse_inproj_quant(
     hidden_states: torch.Tensor,
     rms: RMSNorm,
@@ -3478,8 +3486,12 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
         **kwargs,
     ):
         if self.use_output_gate:
-            self._gate_hidden_states = hidden_states
-            self._precompute_output_gate(hidden_states)
+            if not isinstance(hidden_states, tuple):
+                self._gate_hidden_states = hidden_states
+            gate_hidden = self._gate_hidden_states
+            if gate_hidden is None or isinstance(gate_hidden, tuple):
+                raise RuntimeError("MLA output gate requires BF16 hidden_states")
+            self._precompute_output_gate(gate_hidden)
         return super().forward(
             positions, hidden_states, forward_batch, zero_allocator, **kwargs
         )
@@ -3801,6 +3813,7 @@ class KimiK3DecoderLayer(nn.Module):
         # Standard residual path
         if residual is None:
             residual = hidden_states
+            _k3_stash_mla_gate_hidden(self.self_attn, hidden_states)
             hidden_states = _k3_maybe_fuse_inproj_quant(
                 hidden_states,
                 self.input_layernorm,
@@ -3891,6 +3904,7 @@ class KimiK3DecoderLayer(nn.Module):
                 skip_out_norm=skip_out_norm,
             )
         if skip_out_norm:
+            _k3_stash_mla_gate_hidden(self.self_attn, hidden_states)
             hidden_states = _k3_maybe_fuse_inproj_quant(
                 hidden_states,
                 self.input_layernorm,

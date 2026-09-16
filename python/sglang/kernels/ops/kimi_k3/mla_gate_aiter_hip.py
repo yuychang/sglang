@@ -32,6 +32,8 @@ def covered(
 ) -> bool:
     if not enabled():
         return False
+    if isinstance(hidden, tuple) or isinstance(attention_output, tuple):
+        return False
     _, supports = _ops()
     return bool(
         supports is not None and supports(hidden, gate_weight, attention_output)
