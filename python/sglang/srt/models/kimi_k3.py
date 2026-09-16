@@ -263,12 +263,31 @@ def _k3_should_fuse_inproj_quant(
     )
 
 
-def _k3_stash_mla_gate_hidden(self_attn: nn.Module, hidden_states: torch.Tensor) -> None:
-    """Keep BF16 hidden for MLA output-gate GEMMs when in_proj fusion follows."""
-    if getattr(self_attn, "use_output_gate", False) and isinstance(
-        hidden_states, torch.Tensor
-    ):
+def _k3_hidden_num_tokens(hidden_states) -> int:
+    if isinstance(hidden_states, tuple):
+        return hidden_states[0].shape[0]
+    return hidden_states.shape[0]
+
+
+def _k3_stash_mla_gate_hidden(self_attn: nn.Module, hidden_states) -> None:
+    """Stash post-RMS hidden for MLA ``g_proj``.
+
+    ``g_proj`` and in_proj share ``input_layernorm``. When fusion emitted
+    ``(fp8, per-token scale)``, reuse that tuple so ``g_proj`` does not
+    launch a second ``_per_token_group_quant_8bit``. Pre-RMS BF16 is wrong:
+    the gate multiplies ``sigmoid(g_proj(RMSNorm(x)))``.
+    """
+    if getattr(self_attn, "use_output_gate", False):
         self_attn._gate_hidden_states = hidden_states
+        if (
+            isinstance(hidden_states, tuple)
+            and not getattr(self_attn, "_k3_gproj_tuple_logged", False)
+        ):
+            self_attn._k3_gproj_tuple_logged = True
+            logger.info(
+                "K3 MLA g_proj reusing in_proj RMS+quant tuple (tokens=%d)",
+                _k3_hidden_num_tokens(hidden_states),
+            )
 
 
 def _k3_maybe_fuse_inproj_quant(
@@ -3461,6 +3480,7 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
         tensor stays referenced via _gate_precomputed until the wrap joins,
         so its memory cannot be reused while the alt stream still writes."""
         self._gate_precomputed = None
+        n_tokens = _k3_hidden_num_tokens(hidden_states)
         if (
             not _aiter_mla_gate
             and self._gate_alt_stream is not None
@@ -3469,7 +3489,7 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
             # event record and the o_proj-side wait, so under breakable capture
             # the wait would cross graph segments; use the lazy path instead.
             and not is_in_breakable_cuda_graph()
-            and (0 < hidden_states.shape[0] <= self._gate_bs_limit)
+            and (0 < n_tokens <= self._gate_bs_limit)
         ):
             alt = self._gate_alt_stream
             alt.wait_stream(torch.cuda.current_stream())
@@ -3489,8 +3509,8 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
             if not isinstance(hidden_states, tuple):
                 self._gate_hidden_states = hidden_states
             gate_hidden = self._gate_hidden_states
-            if gate_hidden is None or isinstance(gate_hidden, tuple):
-                raise RuntimeError("MLA output gate requires BF16 hidden_states")
+            if gate_hidden is None:
+                raise RuntimeError("MLA output gate missing hidden_states")
             self._precompute_output_gate(gate_hidden)
         return super().forward(
             positions, hidden_states, forward_batch, zero_allocator, **kwargs
@@ -3813,7 +3833,6 @@ class KimiK3DecoderLayer(nn.Module):
         # Standard residual path
         if residual is None:
             residual = hidden_states
-            _k3_stash_mla_gate_hidden(self.self_attn, hidden_states)
             hidden_states = _k3_maybe_fuse_inproj_quant(
                 hidden_states,
                 self.input_layernorm,
@@ -3821,6 +3840,7 @@ class KimiK3DecoderLayer(nn.Module):
                 hidden_states.shape[0],
                 self.self_attn,
             )
+            _k3_stash_mla_gate_hidden(self.self_attn, hidden_states)
         else:
             hidden_states, residual = self.input_layernorm(hidden_states, residual)
 
@@ -3904,7 +3924,6 @@ class KimiK3DecoderLayer(nn.Module):
                 skip_out_norm=skip_out_norm,
             )
         if skip_out_norm:
-            _k3_stash_mla_gate_hidden(self.self_attn, hidden_states)
             hidden_states = _k3_maybe_fuse_inproj_quant(
                 hidden_states,
                 self.input_layernorm,
@@ -3912,6 +3931,7 @@ class KimiK3DecoderLayer(nn.Module):
                 hidden_states.shape[0],
                 self.self_attn,
             )
+            _k3_stash_mla_gate_hidden(self.self_attn, hidden_states)
         if self.is_block_write_layer:
             prefix_sum = None
 
