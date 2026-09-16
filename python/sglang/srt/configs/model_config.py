@@ -206,7 +206,12 @@ def uses_kda_attention(config) -> bool:
 
 
 def is_dspark_draft(config) -> bool:
-    return _hf_arch(config) == "DSparkDraftModel"
+    return _hf_arch(config) in (
+        "DSparkDraftModel",
+        "K3DSparkModel",
+        "Qwen3DSparkModel",
+        "LingDSparkModel",
+    )
 
 
 def is_qwen3_5(config) -> bool:

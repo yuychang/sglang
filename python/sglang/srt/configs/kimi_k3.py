@@ -3,6 +3,19 @@ from transformers.configuration_utils import PretrainedConfig
 from sglang.srt.configs.kimi_linear import KimiLinearConfig
 
 
+class K3DSparkConfig(PretrainedConfig):
+    """HF config for Inferact/RadixArk Kimi-K3 DSpark drafts (`model_type=k3_dspark`).
+
+    Transformers does not ship this architecture yet, so AutoConfig.from_pretrained
+    fails unless SGLang registers it.
+    """
+
+    model_type = "k3_dspark"
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+
 class KimiK3VisionConfig(PretrainedConfig):
     model_type = "kimi_k3_vision"
 

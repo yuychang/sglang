@@ -863,6 +863,12 @@ class DSparkDraftModel(DSparkDraftMixin, DFlashDraftModel):
         torch.cuda.empty_cache()
 
 
+class K3DSparkModel(DSparkDraftModel):
+    """Kimi-K3 DSpark draft (`architectures: K3DSparkModel`)."""
+
+    pass
+
+
 class Qwen3DSparkModel(DSparkDraftModel):
     pass
 
@@ -881,4 +887,4 @@ class LingDSparkModel(DSparkDraftModel):
     pass
 
 
-EntryClass = [Qwen3DSparkModel, LingDSparkModel, DSparkDraftModel]
+EntryClass = [Qwen3DSparkModel, LingDSparkModel, DSparkDraftModel, K3DSparkModel]

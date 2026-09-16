@@ -74,6 +74,21 @@ def _try_load_longcat_config(model, revision: Optional[str], **kwargs):
     )
 
 
+def _try_load_k3_dspark_config(model, revision: Optional[str], **kwargs):
+    """Kimi-K3 DSpark drafts use model_type `k3_dspark`, which Transformers
+    does not recognize. Load via SGLang's K3DSparkConfig instead of AutoConfig.
+    """
+    config_dict, _ = PretrainedConfig.get_config_dict(
+        model, revision=revision, **kwargs
+    )
+    architectures = config_dict.get("architectures") or []
+    if config_dict.get("model_type") != "k3_dspark" and "K3DSparkModel" not in architectures:
+        return None
+    return _CONFIG_REGISTRY["k3_dspark"].from_pretrained(
+        model, revision=revision, **kwargs
+    )
+
+
 def _try_load_raw_mamba_config(model, revision: Optional[str], **kwargs):
     """Recognize the original state-spaces Mamba-1 checkpoints.
 
@@ -127,6 +142,8 @@ class HfModelConfigParser(ModelConfigParserBase):
         config = _try_load_longcat_config(model, revision, **kwargs)
         if config is None:
             config = _try_load_raw_mamba_config(model, revision, **kwargs)
+        if config is None:
+            config = _try_load_k3_dspark_config(model, revision, **kwargs)
         if config is None:
             config = AutoConfig.from_pretrained(
                 model,
