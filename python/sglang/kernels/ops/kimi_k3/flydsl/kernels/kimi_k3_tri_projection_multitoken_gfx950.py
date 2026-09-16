@@ -72,8 +72,8 @@ def build_kimi_k3_multitoken_tri_projection_module(
     situ_linear_beta: float = 25.0,
 ):
     cooperative_preactivate_shared = True
-    if num_tokens not in (2, 4):
-        raise ValueError("num_tokens must be 2 or 4")
+    if num_tokens not in (2, 4, 8):
+        raise ValueError("num_tokens must be 2, 4, or 8")
     if token_tile != num_tokens:
         raise ValueError("token_tile must match num_tokens")
     if waves_per_block not in (4, 8):
