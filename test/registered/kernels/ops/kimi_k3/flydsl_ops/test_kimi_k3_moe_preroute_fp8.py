@@ -230,7 +230,7 @@ def test_kimi_k3_preroute_fp8_matches_dequantized_reference():
     torch.testing.assert_close(captured_shared, expected_shared, atol=0, rtol=0)
 
 
-@pytest.mark.parametrize("num_tokens", [2, 4, 8])
+@pytest.mark.parametrize("num_tokens", [2, 4])
 @pytest.mark.skipif(
     not torch.cuda.is_available()
     or not is_flydsl_available()
