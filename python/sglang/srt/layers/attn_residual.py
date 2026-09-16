@@ -364,7 +364,7 @@ def _aggregate_fused_add(
     nvb: int,
     score_proj: ReplicatedLinear,
     score_norm: RMSNorm,
-    out_norm: RMSNorm,
+    out_norm: Optional[RMSNorm],
     write_bank_row: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Aggregation point with a pending upstream residual add: materialize
@@ -403,7 +403,7 @@ def _aggregate(
     nvb: int,
     score_proj: ReplicatedLinear,
     score_norm: RMSNorm,
-    out_norm: RMSNorm,
+    out_norm: Optional[RMSNorm],
     write_bank_row: bool = False,
 ) -> torch.Tensor:
     """Single aggregation point: score → softmax → mix → norm.
@@ -415,7 +415,7 @@ def _aggregate(
     """
     if prefix_sum.shape[0] == 0:
         return prefix_sum
-    if _use_fast(prefix_sum.shape[1]):
+    if out_norm is not None and _use_fast(prefix_sum.shape[1]):
         return _aggregate_fast(
             prefix_sum,
             bank,
@@ -483,18 +483,31 @@ class AttnResidual:
         out_norm: RMSNorm,
         rows: Optional[slice] = None,
         write: bool = False,
+        skip_out_norm: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Aggregate; with write=True also snapshot the aggregated prefix
         (the second return value) into the next bank row — fused into the
         fast kernel (the row streams through its score pass anyway), a
-        standalone .write() copy on every other path."""
+        standalone .write() copy on every other path.
+
+        ``skip_out_norm`` leaves the mixture unnormalized so a fused
+        RMSNorm+FP8 quant kernel can consume it. HIP ``_agg_kernel`` already
+        accepts a null out-norm; the CUDA TMA path does not, so skip is
+        ignored there.
+        """
         nvb = self.num_valid_blocks
+        can_skip = skip_out_norm and (
+            nvb == 0 or _use_hip_fused(hidden_states.shape[1], nvb)
+        )
+        applied_out_norm = None if can_skip else out_norm
         # Layer 0 attention side: nothing banked yet
         if nvb == 0:
             assert prefix_sum is None
             if write:
                 self.write(hidden_states, rows)
-            return out_norm(hidden_states), hidden_states
+            if applied_out_norm is None:
+                return hidden_states, hidden_states
+            return applied_out_norm(hidden_states), hidden_states
 
         # SP-MoE: the caller holds only its token shard; align the banked
         # residual rows to it (dim-0 slice of a contiguous buffer stays
@@ -516,7 +529,7 @@ class AttnResidual:
                 nvb,
                 score_proj,
                 score_norm,
-                out_norm,
+                applied_out_norm,
                 write_bank_row=fused_write,
             )
             prefix = hidden_states
@@ -529,7 +542,7 @@ class AttnResidual:
                 nvb,
                 score_proj,
                 score_norm,
-                out_norm,
+                applied_out_norm,
                 write_bank_row=fused_write,
             )
         if fused_write:

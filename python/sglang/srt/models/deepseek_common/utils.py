@@ -76,6 +76,14 @@ FORWARD_ABSORB_CORE_ATTENTION_BACKENDS = [
 ]
 
 
+def _fp8_activation_dtypes():
+    dtypes = {torch.float8_e4m3fn}
+    fnuz = getattr(torch, "float8_e4m3fnuz", None)
+    if fnuz is not None:
+        dtypes.add(fnuz)
+    return dtypes
+
+
 def _is_block_scale_fp8(proj: torch.nn.Module) -> bool:
     """Return True if proj uses block-scale fp8 quantization.
 
@@ -85,12 +93,40 @@ def _is_block_scale_fp8(proj: torch.nn.Module) -> bool:
     are only compatible with block-scale layouts — per-channel layers must fall
     through to the plain bf16 path instead.
     """
-    if not hasattr(proj, "weight") or proj.weight.dtype != torch.float8_e4m3fn:
+    if not hasattr(proj, "weight") or proj.weight.dtype not in _fp8_activation_dtypes():
         return False
-    weight_scale = getattr(proj, "weight_scale", None)
-    if weight_scale is None or weight_scale.dim() != 2:
+    for name in ("weight_scale", "weight_scale_inv"):
+        weight_scale = getattr(proj, name, None)
+        if (
+            weight_scale is not None
+            and weight_scale.dim() == 2
+            and weight_scale.shape[-1] > 1
+        ):
+            return True
+    weight_block_size = getattr(
+        getattr(proj, "quant_method", None), "weight_block_size", None
+    )
+    return list(weight_block_size or []) == [128, 128]
+
+
+def _linear_accepts_ptpc_fp8_tuple(module: torch.nn.Module) -> bool:
+    """Whether ``apply_fp8_linear`` can consume ``(fp8, per_token_scale)``.
+
+    Quark W8A8-FP8 uses ``per_token`` + ``per_channel``; compressed-tensors
+    uses ``strategy=channel``.
+    """
+    scheme = getattr(module, "scheme", None)
+    if scheme is None or getattr(module, "weight_scale", None) is None:
         return False
-    return weight_scale.shape[-1] > 1
+    if getattr(scheme, "per_token", False) and getattr(
+        scheme, "weight_qscheme", None
+    ) in (None, "per_channel"):
+        return True
+    strategy = getattr(scheme, "strategy", None)
+    if strategy is None:
+        return False
+    value = getattr(strategy, "value", strategy)
+    return str(value).lower() == "channel"
 
 
 def awq_dequantize_func():

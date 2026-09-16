@@ -65,10 +65,22 @@ class TestIsBlockScaleFp8(unittest.TestCase):
         proj = _make_proj(torch.float8_e4m3fn, weight_scale_shape=(64,))
         self.assertFalse(self.fn(proj))
 
-    def test_no_weight_attribute_returns_false(self):
-        """No weight attribute — should return False gracefully."""
-        proj = SimpleNamespace()
-        self.assertFalse(self.fn(proj))
+    def test_fnuz_block_scale_fp8_returns_true(self):
+        fnuz = getattr(torch, "float8_e4m3fnuz", None)
+        if fnuz is None:
+            self.skipTest("float8_e4m3fnuz is unavailable")
+        proj = _make_proj(fnuz, weight_scale_shape=(64, 4))
+        self.assertTrue(self.fn(proj))
+
+    def test_weight_scale_inv_block_scale_returns_true(self):
+        proj = _make_proj(torch.float8_e4m3fn)
+        proj.weight_scale_inv = torch.empty(64, 4, dtype=torch.float32)
+        self.assertTrue(self.fn(proj))
+
+    def test_quant_method_block_size_returns_true(self):
+        proj = _make_proj(torch.float8_e4m3fn)
+        proj.quant_method = SimpleNamespace(weight_block_size=[128, 128])
+        self.assertTrue(self.fn(proj))
 
 
 if __name__ == "__main__":
