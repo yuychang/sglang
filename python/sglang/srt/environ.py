@@ -950,6 +950,9 @@ class Envs:
     # output columns ride along nearly free.
     SGLANG_ROCM_K3_FUSE_KDA_INPROJ = EnvBool(True)
     SGLANG_ROCM_K3_FUSE_KDA_INPROJ_MAX_TOKENS = EnvInt(256)
+    # "fp4" keeps W4A4; "bf16" dequantizes MXFP4 dense weights at load.
+    # Measured on K3: bf16 GSM8K 0.947 vs fp4 0.908. Ignored off ROCm.
+    SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT = EnvStr("bf16")
     # ROCm decode attention kernel: auto (aiter_sparse on gfx950, tilelang elsewhere) |
     # aiter_sparse | tilelang | triton | torch | comparison | unified_kv_triton
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("auto")
