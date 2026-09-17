@@ -1676,6 +1676,10 @@ class Envs:
     # kernel. Only applies when the combined buffer is already in the 2-stage
     # AR regime (>= 80 KiB on TP8); smaller sizes stay on split AR + RMSNorm.
     SGLANG_ROCM_K3_FUSED_AR_RMSNORM = EnvBool(True)
+    # Upper token bound for the fused AR+RMSNorm above; 0 disables the cap.
+    # Measured on MI355X TP8 (bench_fused_ar_rmsnorm.py): fused wins by 5.3% at
+    # 8 tokens, 2.5% at 24, then loses 2.8% at 32 and 13% at 96.
+    SGLANG_ROCM_K3_FUSED_AR_RMSNORM_MAX_TOKENS = EnvInt(24)
     # HIP: fold the K3 attn-res prefix add into AITER's element-parallel
     # 1-stage custom all-reduce. Only decode M in {1, 2, 4}; M >= 8 takes the
     # 2-stage kernel and stays on split AR + agg HAS_ADD.

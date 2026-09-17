@@ -73,6 +73,45 @@ class TestK3FusedArRmsnorm(CustomTestCase):
             self.assertIsNone(try_fused_ar_rmsnorm(x, weight, 1e-6, use_1stage=True))
             fused.assert_not_called()
 
+    def _run_with_cap(self, x, weight, max_tokens, **kwargs):
+        with (
+            patch("sglang.srt.layers.k3_fused_ar_rmsnorm.is_hip", return_value=True),
+            patch(
+                "sglang.srt.layers.k3_fused_ar_rmsnorm.envs.SGLANG_ROCM_K3_FUSED_AR_RMSNORM.get",
+                return_value=True,
+            ),
+            patch(
+                "sglang.srt.layers.k3_fused_ar_rmsnorm.envs."
+                "SGLANG_ROCM_K3_FUSED_AR_RMSNORM_MAX_TOKENS.get",
+                return_value=max_tokens,
+            ),
+            patch(
+                "sglang.srt.distributed.tensor_model_parallel_fused_allreduce_rmsnorm"
+            ) as fused,
+        ):
+            try_fused_ar_rmsnorm(x, weight, 1e-6, **kwargs)
+            return fused.called
+
+    def test_max_tokens_caps_the_fusion(self):
+        # 24 rows = c8, well inside the 2-stage regime the fusion targets.
+        x = torch.zeros(24, 3584, dtype=torch.bfloat16)
+        weight = torch.ones(3584, dtype=torch.bfloat16)
+        for max_tokens, expect_fused in ((0, True), (32, True), (16, True), (8, False)):
+            with self.subTest(max_tokens=max_tokens):
+                self.assertEqual(
+                    self._run_with_cap(x, weight, max_tokens, num_norm_rows=16),
+                    expect_fused,
+                )
+
+    def test_max_tokens_counts_model_tokens_not_buffer_rows(self):
+        # The combined front passes num_norm_rows=num_tokens over a buffer
+        # holding several rows per token; the cap follows the tokens.
+        x = torch.zeros(24, 3584, dtype=torch.bfloat16)
+        weight = torch.ones(3584, dtype=torch.bfloat16)
+        self.assertTrue(self._run_with_cap(x, weight, 16, num_norm_rows=8))
+        # Without num_norm_rows the rows are the tokens.
+        self.assertFalse(self._run_with_cap(x, weight, 16))
+
     def test_helper_fail_closed_on_missing_communicator(self):
         x = torch.zeros(2, 3584)
         weight = torch.ones(3584)

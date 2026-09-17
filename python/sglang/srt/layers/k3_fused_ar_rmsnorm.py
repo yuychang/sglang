@@ -76,10 +76,18 @@ def try_fused_ar_rmsnorm(
     run 2-stage fused with ``skip_residual`` and in-place ``residual_out=x``.
     ``use_1stage=True`` still dispatches the one-shot kernel (tests / override)
     with a cached zeros residual.
+
+    ``SGLANG_ROCM_K3_FUSED_AR_RMSNORM_MAX_TOKENS`` (0 = no cap) bounds it from
+    above: past ~24 tokens the split pair wins, and the gap widens with M.
     """
     if not is_hip() or not envs.SGLANG_ROCM_K3_FUSED_AR_RMSNORM.get():
         return None
     if x.numel() == 0 or weight.numel() != x.shape[-1]:
+        return None
+    max_tokens = envs.SGLANG_ROCM_K3_FUSED_AR_RMSNORM_MAX_TOKENS.get()
+    # Model tokens, not buffer rows: the combined front has 3 rows per token.
+    tokens = x.shape[0] if num_norm_rows is None else int(num_norm_rows)
+    if max_tokens > 0 and tokens > max_tokens:
         return None
     if use_1stage is None:
         if aiter_ar_uses_1stage(x):
