@@ -131,6 +131,35 @@ class TestK3HipArResidual(CustomTestCase):
             self.assertIs(try_all_reduce_add(x, residual), out)
         ca_comm.custom_all_reduce_residual.assert_called_once_with(x, residual)
 
+    def test_helper_normalizes_kda_residual_view(self):
+        x = torch.zeros(8, 7168, dtype=torch.bfloat16)
+        residual = torch.ones(1, 8, 7168, dtype=torch.bfloat16)
+        out = torch.full_like(x, 3)
+        ca_comm = Mock()
+        ca_comm.disabled = False
+        ca_comm.custom_all_reduce_residual.return_value = out
+        group = Mock()
+        group.ca_comm = ca_comm
+        with (
+            patch("sglang.srt.layers.k3_hip_ar_residual.is_hip", return_value=True),
+            patch(
+                "sglang.srt.layers.k3_hip_ar_residual.envs.SGLANG_ROCM_K3_AR_RESIDUAL.get",
+                return_value=True,
+            ),
+            patch(
+                "sglang.srt.layers.k3_hip_ar_residual.envs.SGLANG_ROCM_K3_AR_RESIDUAL_MAX_TOKENS.get",
+                return_value=8,
+            ),
+            patch(
+                "sglang.srt.distributed.parallel_state.get_tp_group",
+                return_value=group,
+            ),
+        ):
+            self.assertIs(try_all_reduce_add(x, residual), out)
+        actual_residual = ca_comm.custom_all_reduce_residual.call_args.args[1]
+        self.assertEqual(actual_residual.shape, x.shape)
+        self.assertEqual(actual_residual.data_ptr(), residual.data_ptr())
+
     def test_helper_covers_m4(self):
         x = torch.zeros(4, 7168, dtype=torch.bfloat16)
         residual = torch.ones_like(x)
