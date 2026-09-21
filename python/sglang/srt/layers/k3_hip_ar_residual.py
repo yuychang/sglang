@@ -6,12 +6,10 @@ NVIDIA folds the pending attn-res prefix into the fused MNNVL all-reduce
 token-parallel fused AR+RMSNorm 1-stage kernel loses to the element-parallel
 1-stage AR used for c2/c4 decode.
 
-This helper launches that same element-parallel 1-stage kernel with the
-prefix add folded into the fp32 writeback. Decode M in {1, 2, 4} sit
-inside AITER's TP8 1-stage AR sizes (28 KiB / 56 KiB). M=8 is 112 KiB,
-past the 80 KiB 2-stage crossover for *plain* AR, but the residual
-kernel can still run 1-stage without flipping other collectives. M=16
-is 224 KiB and stays on split AR + ``_agg_kernel`` HAS_ADD.
+This helper folds the prefix into AITER custom AR. Decode M in {1, 2, 4}
+uses the element-parallel 1-stage kernel. M=8 is 112 KiB and uses the
+2-stage kernel with the residual add in the all-gather writeback. M=16
+stays on split AR + ``_agg_kernel`` HAS_ADD.
 
 Aggregation 2 (the MLP-side mixer) is *before* MoE, so it cannot be folded
 into ``latent_tail``. The adjacent MoE-side pair is AR2 then latent_tail;
@@ -30,8 +28,7 @@ from sglang.srt.utils import is_hip
 
 logger = logging.getLogger(__name__)
 
-# Steady-state decode M plus the M=1 CUDA-graph drain bucket. Default cap is
-# 4: M=8 1-stage residual lost to 2-stage AR + HAS_ADD (19.40 vs 17.23 us).
+# Steady-state decode M plus the M=1 CUDA-graph drain bucket.
 _RESIDUAL_BATCHES = (1, 2, 4, 8)
 
 
@@ -49,7 +46,7 @@ def try_all_reduce_add(
     x: torch.Tensor,
     residual: Optional[torch.Tensor],
 ) -> Optional[torch.Tensor]:
-    """``AR(x) + residual`` in one 1-stage custom AR, or ``None``.
+    """``AR(x) + residual`` in one custom AR, or ``None``.
 
     ``residual`` must be identical on every rank. Residual fusion runs for
     decode M covered by ``SGLANG_ROCM_K3_AR_RESIDUAL_MAX_TOKENS``. When
