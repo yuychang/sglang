@@ -46,6 +46,7 @@ from sglang.srt.layers.communication import (
     k3_hip_ar_residual,
     k3_sp_collective,
 )
+from sglang.srt.layers.communication.k3_moe_pair_ar import all_reduce_moe_latent_shared
 from sglang.srt.layers.dcp.planner import prepare_decode_context_parallel_metadata
 from sglang.srt.layers.dp_attention import (
     dp_gather_replicate,
@@ -1873,6 +1874,7 @@ class KimiK3MoE(nn.Module):
         )
         fused_norm = False
         fused_normed_latent = None
+        pair_reduced = False
         if self.alt_stream is not None and k3_ar_fusion.enabled():
             defer_finalize = (
                 self._defer_moe_finalize
@@ -1980,10 +1982,19 @@ class KimiK3MoE(nn.Module):
                         fused_normed_latent = normed[:num_tokens]
                         fused_norm = True
                 if fused_normed_latent is None:
-                    buf = tensor_model_parallel_all_reduce(buf)
+                    # 16K concat (~336 MiB) misses the 256 MiB QR cap and
+                    # becomes NCCL Generic. Split so each slice fits QR.
+                    latent, shared_output = all_reduce_moe_latent_shared(
+                        buf,
+                        num_tokens=num_tokens,
+                        moe_hidden_size=self.moe_hidden_size,
+                        hidden_size=hidden_size,
+                    )
+                    pair_reduced = True
 
-        latent = buf[:latent_numel].view(num_tokens, self.moe_hidden_size)
-        shared_output = buf[latent_numel:].view(num_tokens, hidden_size)
+        if not pair_reduced:
+            latent = buf[:latent_numel].view(num_tokens, self.moe_hidden_size)
+            shared_output = buf[latent_numel:].view(num_tokens, hidden_size)
         if fused_normed_latent is not None:
             latent = fused_normed_latent
         if use_latent_tail:
