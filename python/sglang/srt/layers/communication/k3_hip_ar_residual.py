@@ -69,6 +69,14 @@ def try_all_reduce_add(
                 out = ca_comm.custom_all_reduce(x)
                 return out
             return None
+        # KDA preserves a leading singleton/head view around the residual while
+        # o_proj returns the same token-major storage flattened. Aggregation
+        # treats these as the same elementwise tensor; normalize the view so
+        # AITER's shape guard does not send the seven KDA layers down split AR.
+        if residual.shape != x.shape:
+            if residual.numel() != x.numel() or not residual.is_contiguous():
+                return None
+            residual = residual.view_as(x)
         if not hasattr(ca_comm, "custom_all_reduce_residual"):
             return None
         return ca_comm.custom_all_reduce_residual(x, residual)
