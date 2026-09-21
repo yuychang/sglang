@@ -1680,6 +1680,11 @@ class Envs:
     # Measured on MI355X TP8 (bench_fused_ar_rmsnorm.py): fused wins by 5.3% at
     # 8 tokens, 2.5% at 24, then loses 2.8% at 32 and 13% at 96.
     SGLANG_ROCM_K3_FUSED_AR_RMSNORM_MAX_TOKENS = EnvInt(24)
+    # HIP: when the fused-front [latent | shared] buffer is larger than the
+    # quick-reduce IPC cap, all-reduce the two slices separately instead of
+    # one NCCL Generic. Keeps ROCM_QUICK_REDUCE_MAX_SIZE_BYTES_MB=256 (16K
+    # scratch). Decode-sized concatenations stay on a single collective.
+    SGLANG_ROCM_K3_SPLIT_OVERSIZED_MOE_AR = EnvBool(True)
     # HIP: fold the K3 attn-res prefix add into AITER's element-parallel
     # 1-stage custom all-reduce. Only decode M in {1, 2, 4}; M >= 8 takes the
     # 2-stage kernel and stays on split AR + agg HAS_ADD.
