@@ -30,9 +30,8 @@ from sglang.srt.utils import is_hip
 
 logger = logging.getLogger(__name__)
 
-# Steady-state decode M plus the M=1 CUDA-graph drain bucket. The env cap
-# defaults to 8 so conc=8 can use residual fusion; set it to 4 to restore
-# the previous {1, 2, 4}-only policy.
+# Steady-state decode M plus the M=1 CUDA-graph drain bucket. Default cap is
+# 4: M=8 1-stage residual lost to 2-stage AR + HAS_ADD (19.40 vs 17.23 us).
 _RESIDUAL_BATCHES = (1, 2, 4, 8)
 
 
