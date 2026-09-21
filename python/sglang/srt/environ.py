@@ -1686,9 +1686,12 @@ class Envs:
     # scratch). Decode-sized concatenations stay on a single collective.
     SGLANG_ROCM_K3_SPLIT_OVERSIZED_MOE_AR = EnvBool(True)
     # HIP: fold the K3 attn-res prefix add into AITER's element-parallel
-    # 1-stage custom all-reduce. Only decode M in {1, 2, 4}; M >= 8 takes the
-    # 2-stage kernel and stays on split AR + agg HAS_ADD.
+    # 1-stage custom all-reduce. Covers decode M in {1, 2, 4, 8}; M=8 is
+    # 112 KiB, past the 80 KiB 2-stage crossover for plain AR, but residual
+    # fusion keeps the 1-stage kernel. Set MAX_TOKENS=4 to restore the
+    # previous policy. M=16 stays on split AR + agg HAS_ADD.
     SGLANG_ROCM_K3_AR_RESIDUAL = EnvBool(True)
+    SGLANG_ROCM_K3_AR_RESIDUAL_MAX_TOKENS = EnvInt(8)
     # K3 SP-MoE fused residual + reduce-scatter and matching all-gather over
     # CustomAllReduceV2's MNNVL push workspace. Auto-probed for the validated
     # TP8 GB300 configuration; set 0/1 to override. See
