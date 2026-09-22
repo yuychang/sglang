@@ -15,7 +15,7 @@ import sys
 import torch
 import torch.distributed as dist
 
-M = 2
+M = int(os.environ.get("K3_HIP_AR_RESIDUAL_M", "2"))
 H = 7168
 NVB = 4
 WARMUP = 20
