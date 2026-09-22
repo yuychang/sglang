@@ -1725,6 +1725,17 @@ class Envs:
     # them only for large token batches. BF16 weights remain live as fallback.
     SGLANG_ROCM_K3_MOE_LATENT_MXFP4 = EnvBool(False)
     SGLANG_ROCM_K3_MOE_LATENT_MXFP4_MIN_TOKENS = EnvInt(2048)
+    # The same structural split as MOE_LATENT_MXFP4 -- run the fused front's
+    # router head as its own small BF16 GEMM so the 3584x7168 latent
+    # down-projection beside it can be quantized -- but in PTPC FP8 rather than
+    # MXFP4, and from decode-sized batches rather than only from 2048 tokens.
+    # MXFP4 is a quarter of the bytes but costs GSM8K 0.951 -> 0.923 on these
+    # two projections; e4m3 keeps a per-channel scale over 7168 values where
+    # MXFP4 keeps 4 bits and a shared exponent per 32.
+    SGLANG_ROCM_K3_MOE_LATENT_FP8 = EnvBool(False)
+    # Defaults to the PTPC FP8 batch floor below, which is where the
+    # activation-quant launch starts paying for itself.
+    SGLANG_ROCM_K3_MOE_LATENT_FP8_MIN_TOKENS = EnvInt(8)
     # PTPC FP8 (per-token activation, per-channel weight) for the BF16 decode
     # projections the checkpoint leaves unquantized, halving the weight bytes
     # those HBM-bound GEMMs stream. The router gate must stay BF16: FP8 logits

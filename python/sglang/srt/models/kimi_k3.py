@@ -682,6 +682,11 @@ class KimiK3MoE(nn.Module):
         self._front_head = None
         self._front_down_w4 = None
         self._front_down_scale4 = None
+        # ROCm only; packed by kimi_k3_rocm_quant.k3_prepare_front_down_fp8.
+        self._front_down_fp8_w = None
+        self._front_down_fp8_s = None
+        self._front_down_fp8_n = 0
+        self._front_down_fp8_min_tokens = 0
         self._latent_up_w4 = None
         self._latent_up_scale4 = None
         self._situ_beta = float(config.activation_situ_beta)
@@ -1696,6 +1701,18 @@ class KimiK3MoE(nn.Module):
                 )
                 preroute = True
         if preroute is None:
+            # ROCm only, and only once the batch has outgrown the preroute
+            # megakernel above: quantize the latent down-projection to FP8
+            # instead of leaving the whole merged front on one BF16 GEMM.
+            front_down_fp8 = None
+            if _is_hip and not use_mxfp4:
+                from sglang.srt.models.kimi_k3_rocm_quant import (
+                    k3_run_front_down_fp8,
+                    k3_use_front_down_fp8,
+                )
+
+                if k3_use_front_down_fp8(self, num_tokens):
+                    front_down_fp8 = k3_run_front_down_fp8(self, hidden_states)
             if use_mxfp4:
                 from sglang.kernels.ops.kimi_k3 import latent_mxfp4_aiter_hip
 
@@ -1714,6 +1731,18 @@ class KimiK3MoE(nn.Module):
                 routed_input = latent_mxfp4_aiter_hip.run(
                     hidden_states, self._front_down_w4, self._front_down_scale4
                 )
+            elif front_down_fp8 is not None:
+                # Same split as the MXFP4 branch above: BF16 router head, and
+                # the latent down-projection quantized beside it.
+                head = _k3_bf16_gemm(hidden_states, self._front_head)
+                if partial_front:
+                    router_logits = head
+                    gate_up = None
+                else:
+                    gate_up, router_logits = torch.split(
+                        head, self._front_sizes[:2], dim=-1
+                    )
+                routed_input = front_down_fp8
             elif partial_front:
                 fused = _k3_bf16_gemm(hidden_states, self._front_w)
                 router_logits, routed_input = torch.split(
@@ -4352,6 +4381,12 @@ class KimiK3LinearForCausalLM(nn.Module):
             if isinstance(layer.mlp, KimiK3MoE):
                 layer.mlp._merge_front_weights()
                 layer.mlp._prepare_moe_latent_mxfp4()
+                if _is_hip:
+                    from sglang.srt.models.kimi_k3_rocm_quant import (
+                        k3_prepare_front_down_fp8,
+                    )
+
+                    k3_prepare_front_down_fp8(layer.mlp)
                 layer.mlp._prepare_preroute_fp8()
                 layer.mlp._prepare_latent_tail_fp8()
                 layer.mlp._prepare_latent_up_ptpc_fp8()
