@@ -1735,6 +1735,23 @@ class Envs:
     # Below this batch the projections are launch-latency bound, so the extra
     # activation-quant launch costs more than the halved weight traffic saves.
     SGLANG_ROCM_K3_PTPC_FP8_MIN_TOKENS = EnvInt(8)
+    # Quantize the linears an unquantized K3 checkpoint leaves dense to
+    # per-output-channel FP8 after load, giving them the same layout a Quark
+    # export ships so the PTPC paths above can serve them.
+    # The attention block minus the KDA input projection: both o_projs, the MLA
+    # gate and the MLA q/kv projections.
+    SGLANG_ROCM_K3_ONLINE_FP8_ATTN = EnvBool(False)
+    # The KDA input projection, the largest dense block in the model, but one
+    # decode already reads through the group-64 AITER pack
+    # (SGLANG_ROCM_K3_AITER_KDA_GROUP64) while it is BF16. Quantizing it trades
+    # that kernel for an FP8 prefill GEMM plus the merged PTPC decode GEMM, so
+    # it is gated separately.
+    SGLANG_ROCM_K3_ONLINE_FP8_KDA_INPROJ = EnvBool(False)
+    # The shared-expert gate/up projections. The shared-expert down projection
+    # is never converted here -- K3 consumes it as a raw dense [out, in] tensor
+    # outside quant_method -- use SGLANG_ROCM_K3_PTPC_FP8_SHARED_DOWN instead,
+    # which packs a separate FP8 copy and leaves the BF16 weight live.
+    SGLANG_ROCM_K3_ONLINE_FP8_SHARED_EXPERTS = EnvBool(False)
     # Master switch for the ROCm AITER K3 decode path: the MXFP4 SiTU MoE
     # runner, the fused MoE front and the AITER-backed attention projections.
     SGLANG_ROCM_K3_AITER_OPT = EnvBool(False)
