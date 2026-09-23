@@ -793,6 +793,12 @@ class KimiK3MoE(nn.Module):
         # control of weight layout.
         if _is_npu:
             return
+        if _is_hip and envs.SGLANG_ROCM_K3_QUARK_SHARED_FULL_FRONT.get():
+            from sglang.srt.models.kimi_k3_rocm_quant import (
+                k3_densify_quark_shared_experts,
+            )
+
+            k3_densify_quark_shared_experts(self)
         if self.shared_experts is not None and get_moe_a2a_backend().is_none():
             full_front = [
                 self.shared_experts.gate_up_proj,
@@ -986,6 +992,10 @@ class KimiK3MoE(nn.Module):
     def _prepare_shared_down_ptpc_fp8(self) -> None:
         """Quantize the shared-expert down projection for decode."""
         if not _k3_ptpc_fp8_shared_down or self.shared_experts is None:
+            return
+        # Requantizing Quark's dequantized MXFP4 weight to FP8 stacks two
+        # rounding steps; full GSM8K fell to 0.937 (vs 0.949 in BF16).
+        if getattr(self.shared_experts.down_proj, "dequantized_bf16", False):
             return
         from sglang.kernels.ops.kimi_k3 import ptpc_fp8_aiter_hip
 
@@ -2524,6 +2534,11 @@ class KimiK3DeltaAttention(nn.Module):
             layer = self.attn
             w = layer.conv_weights
             f_b_weight = self.f_b_proj.weight
+            # Quark ships f_b as PTPC FP8; _merge_bfa_weights already
+            # dequantized it into the BF16 tiny-GEMM buffer.
+            f_b_dense = getattr(self, "_bfa_f_b_w", None)
+            if f_b_weight.dtype != torch.bfloat16 and f_b_dense is not None:
+                f_b_weight = f_b_dense
             backend = envs.SGLANG_ROCM_K3_KDA_FUSED_BACKEND.get().lower()
             backend_available = (
                 backend == "aiter"

@@ -1743,6 +1743,10 @@ class Envs:
     SGLANG_ROCM_K3_PTPC_FP8 = EnvBool(False)
     SGLANG_ROCM_K3_PTPC_FP8_MAX_TOKENS = EnvInt(256)
     SGLANG_ROCM_K3_PTPC_FP8_SHARED_DOWN = EnvBool(False)
+    # Dequantize Quark MXFP4 shared experts before the MoE front merge so they
+    # join the full fused front and the PTPC shared-down path (needs
+    # SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT=bf16).
+    SGLANG_ROCM_K3_QUARK_SHARED_FULL_FRONT = EnvBool(False)
     # Below this batch the projections are launch-latency bound, so the extra
     # activation-quant launch costs more than the halved weight traffic saves.
     SGLANG_ROCM_K3_PTPC_FP8_MIN_TOKENS = EnvInt(8)

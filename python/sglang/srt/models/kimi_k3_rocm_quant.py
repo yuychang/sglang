@@ -278,3 +278,29 @@ def k3_run_front_down_fp8(
         mlp._front_down_fp8_s,
         mlp._front_down_fp8_n,
     )
+
+
+def k3_densify_quark_shared_experts(mlp: nn.Module) -> None:
+    """Dequantize Quark MXFP4 shared experts before the MoE front merge.
+
+    With ``SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT=bf16`` Quark turns these linears
+    into dense BF16 in ``process_weights_after_loading``, which the loader only
+    runs after ``load_weights`` has already merged the front. Doing the same
+    dequant here lets the shared gate_up join the full fused front and the
+    shared down take the PTPC FP8 decode path, as with the official
+    checkpoint. The later loader pass is then a no-op on these layers.
+    """
+    from sglang.srt.layers.quantization.quark.schemes import quark_w4a4_mxfp4
+
+    if not quark_w4a4_mxfp4._dequant_linear_to_bf16:
+        return
+    shared = getattr(mlp, "shared_experts", None)
+    if shared is None:
+        return
+    for linear in (shared.gate_up_proj, shared.down_proj):
+        scheme = getattr(linear, "scheme", None)
+        if not isinstance(scheme, quark_w4a4_mxfp4.QuarkW4A4MXFP4) or getattr(
+            linear, "dequantized_bf16", False
+        ):
+            continue
+        scheme.process_weights_after_loading(linear)
