@@ -245,6 +245,21 @@ register_kernel(
         capabilities=frozenset({CapabilityRequirement.CUDA}),
     )
 )
+for _fn in (
+    "kimi_k3_moe_dual_projection_fp8",
+    "kimi_k3_moe_tri_projection_fp8",
+    "kimi_k3_moe_tri_projection_cooperative_preactivated_fp8",
+    "kimi_k3_shared_down_fp8",
+):
+    register_kernel(
+        KernelSpec(
+            op=f"moe.{_fn}",
+            backend=KernelBackend.FLYDSL,
+            target=f"sglang.kernels.ops.moe.kimi_k3_flydsl.kimi_k3_moe_preroute_fp8:{_fn}",
+            capabilities=_HIP,
+        )
+    )
+del _fn
 
 
 # Public entry points inventoried by logical operator group (RFC #29630).
