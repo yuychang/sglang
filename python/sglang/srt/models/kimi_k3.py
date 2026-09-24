@@ -708,6 +708,12 @@ class KimiK3MoE(nn.Module):
         # control of weight layout.
         if _is_npu:
             return
+        if _is_hip:
+            from sglang.srt.models.kimi_k3_rocm_quant import (
+                _k3_densify_quark_shared_experts,
+            )
+
+            _k3_densify_quark_shared_experts(self)
         if self.shared_experts is not None and get_moe_a2a_backend().is_none():
             mods = [
                 self.shared_experts.gate_up_proj,
