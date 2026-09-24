@@ -918,6 +918,17 @@ class Envs:
     # Fused AITER KDA decode. Empty keeps the unfused chain; "aiter" selects
     # the gfx950 FlyDSL kernel.
     SGLANG_ROCM_K3_KDA_FUSED_BACKEND = EnvStr("")
+    # Run the 1-4 token K3 MoE front (routed down, shared gate_up, router) as
+    # one FlyDSL FP8 kernel on gfx950.
+    SGLANG_ROCM_K3_AITER_MOE_PREROUTE_FP8 = EnvBool(True)
+    # Apply SiTU inside that kernel for 2-4 tokens.
+    SGLANG_ROCM_K3_PREROUTE_PREACTIVATED_SHARED = EnvBool(True)
+    # Launch geometry of the 2-4 token kernel: compute units, waves per block,
+    # waves per EU and the weight-load cache modifier.
+    SGLANG_ROCM_K3_PREROUTE_COOP_CU = EnvInt(256)
+    SGLANG_ROCM_K3_PREROUTE_COOP_WPB = EnvInt(8)
+    SGLANG_ROCM_K3_PREROUTE_COOP_WPE = EnvInt(3)
+    SGLANG_ROCM_K3_PREROUTE_COOP_WCM = EnvInt(3)
     # Activation precision for MXFP4-weight dense linears, independent of the
     # MoE: "fp4" is the checkpoint's own W4A4, "bf16" dequantizes the weights
     # at load. bf16 by default: K3 GSM8K scores 0.947 vs fp4's 0.908, for

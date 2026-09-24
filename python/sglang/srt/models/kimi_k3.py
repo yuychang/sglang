@@ -1310,15 +1310,22 @@ class KimiK3MoE(nn.Module):
         finally:
             route_quant_handoff.clear()
 
-    def _forward_shared(self, gate_up, shared_output):
+    def _forward_shared(self, gate_up, shared_output, preactivated=False):
         shared = self.shared_experts
         if TYPE_CHECKING:
             assert shared is not None and isinstance(
                 shared.down_proj.weight, torch.Tensor
             )
         assert shared is not None
+        if _is_hip and not preactivated:
+            from sglang.srt.models.kimi_k3_rocm_preroute import (
+                k3_run_preroute_shared_down,
+            )
+
+            if k3_run_preroute_shared_down(self, gate_up, shared_output):
+                return
         _k3_bf16_gemm(
-            shared.act_fn(gate_up),
+            gate_up if preactivated else shared.act_fn(gate_up),
             shared.down_proj.weight,
             out=shared_output,
         )
@@ -1349,14 +1356,23 @@ class KimiK3MoE(nn.Module):
             )
 
         num_tokens, hidden_size = hidden_states.shape
-        fused = _k3_bf16_gemm(
-            hidden_states,
-            self._front_w,
-            out_dtype=torch.float32 if self._front_fp32 else None,
-        )
-        gate_up, router_logits, routed_input = torch.split(
-            fused, self._front_sizes, dim=-1
-        )
+        preroute = None
+        if _is_hip:
+            from sglang.srt.models.kimi_k3_rocm_preroute import k3_run_preroute
+
+            preroute = k3_run_preroute(self, hidden_states)
+        shared_preactivated = False
+        if preroute is not None:
+            gate_up, router_logits, routed_input, shared_preactivated = preroute
+        else:
+            fused = _k3_bf16_gemm(
+                hidden_states,
+                self._front_w,
+                out_dtype=torch.float32 if self._front_fp32 else None,
+            )
+            gate_up, router_logits, routed_input = torch.split(
+                fused, self._front_sizes, dim=-1
+            )
         if num_tokens > 1 and _is_hip and not _aiter_k3_opt:
             router_logits = router_logits.contiguous()
         if self._moe_front_needs_dense_bf16:
@@ -1397,7 +1413,7 @@ class KimiK3MoE(nn.Module):
             else:
                 self._forward_routed(hidden_states, router_logits, routed_input, latent)
             with torch.cuda.stream(self.alt_stream):
-                self._forward_shared(gate_up, shared_output)
+                self._forward_shared(gate_up, shared_output, shared_preactivated)
                 # low-SM pull so the side-stream AR leaves the SMs to the
                 # routed GEMMs it overlaps (K3 dims are fixed; tuned here)
                 k3_ar_fusion.all_reduce_low_sm(shared_output, num_blocks=4, unroll=8)
@@ -1438,7 +1454,7 @@ class KimiK3MoE(nn.Module):
                     prefix_sum,
                 )
         else:  # single collective over the flat [latent | shared] pair
-            self._forward_shared(gate_up, shared_output)
+            self._forward_shared(gate_up, shared_output, shared_preactivated)
             self._forward_routed(hidden_states, router_logits, routed_input, latent)
             if self.fuse_ar_norm and k3_ar_fusion.enabled():
                 fused_norm = True
@@ -3519,6 +3535,12 @@ class KimiK3LinearForCausalLM(nn.Module):
                 continue
             if isinstance(layer.mlp, KimiK3MoE):
                 layer.mlp._merge_front_weights()
+                if _is_hip:
+                    from sglang.srt.models.kimi_k3_rocm_preroute import (
+                        k3_prepare_preroute_fp8,
+                    )
+
+                    k3_prepare_preroute_fp8(layer.mlp)
                 # Convert the correction bias to fp32 once so the per-call
                 # .to(float32) in topk is a no-op, not one upcast kernel per
                 # MoE layer per step.
