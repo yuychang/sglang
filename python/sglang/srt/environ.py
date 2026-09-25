@@ -921,9 +921,6 @@ class Envs:
     # Run the 1-4 token K3 MoE front (routed down, shared gate_up, router) as
     # one FlyDSL FP8 kernel on gfx950.
     SGLANG_ROCM_K3_AITER_MOE_PREROUTE_FP8 = EnvBool(True)
-    # Fuse the 1/2/4-token K3 latent RMSNorm, FP8 up-projection and shared add
-    # into one FlyDSL kernel on gfx950.
-    SGLANG_ROCM_K3_AITER_LATENT_TAIL_FP8 = EnvBool(True)
     # Apply SiTU inside that kernel for 2-4 tokens.
     SGLANG_ROCM_K3_PREROUTE_PREACTIVATED_SHARED = EnvBool(True)
     # Launch geometry of the 2-4 token kernel: compute units, waves per block,
@@ -932,6 +929,13 @@ class Envs:
     SGLANG_ROCM_K3_PREROUTE_COOP_WPB = EnvInt(8)
     SGLANG_ROCM_K3_PREROUTE_COOP_WPE = EnvInt(3)
     SGLANG_ROCM_K3_PREROUTE_COOP_WCM = EnvInt(3)
+    # Fuse the 1/2/4-token K3 latent RMSNorm, FP8 up-projection and shared add
+    # into one FlyDSL kernel on gfx950.
+    SGLANG_ROCM_K3_AITER_LATENT_TAIL_FP8 = EnvBool(True)
+    # Fold the K3 attn-res prefix add into AITER custom all-reduce: 1-stage
+    # for M in {1, 2, 4}, 2-stage epilogue for M=8.
+    SGLANG_ROCM_K3_AR_RESIDUAL = EnvBool(True)
+    SGLANG_ROCM_K3_AR_RESIDUAL_MAX_TOKENS = EnvInt(8)
     # Fuse K3 MLA decode's Q concat and latent KV-cache write into one AITER
     # kernel on gfx950.
     SGLANG_ROCM_K3_AITER_MLA_Q_CACHE_FUSION = EnvBool(True)
