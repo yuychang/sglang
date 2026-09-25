@@ -260,6 +260,14 @@ for _fn in (
         )
     )
 del _fn
+register_kernel(
+    KernelSpec(
+        op="moe.latent_moe_tail_fp8",
+        backend=KernelBackend.FLYDSL,
+        target="sglang.kernels.ops.moe.kimi_k3_flydsl.latent_moe_tail_fp8:latent_moe_tail_fp8",
+        capabilities=_HIP,
+    )
+)
 
 
 # Public entry points inventoried by logical operator group (RFC #29630).
