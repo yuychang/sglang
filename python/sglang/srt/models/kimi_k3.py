@@ -1423,6 +1423,7 @@ class KimiK3MoE(nn.Module):
             # contiguous() behind it is free; off a bf16 front it is the copy
             routed_input = routed_input.to(hidden_states.dtype).contiguous()
         latent_numel = num_tokens * self.moe_hidden_size
+        pair = None
         if k3_ar_fusion.enabled():
             # the shared-expert AR is pull-only, so its input must be a
             # symm_buffer slice for every rank to resolve the same offset
@@ -1508,11 +1509,25 @@ class KimiK3MoE(nn.Module):
                 )
             elif k3_ar_fusion.enabled():
                 k3_ar_fusion.all_reduce(buf)
+            elif _is_hip:
+                from sglang.srt.layers.k3_moe_pair_ar import (
+                    all_reduce_moe_latent_shared,
+                )
+
+                pair = all_reduce_moe_latent_shared(
+                    buf,
+                    num_tokens=num_tokens,
+                    moe_hidden_size=self.moe_hidden_size,
+                    hidden_size=hidden_size,
+                )
             else:
                 buf = tensor_model_parallel_all_reduce(buf)
 
-        latent = buf[:latent_numel].view(num_tokens, self.moe_hidden_size)
-        shared_output = buf[latent_numel:].view(num_tokens, hidden_size)
+        if pair is not None:
+            latent, shared_output = pair
+        else:
+            latent = buf[:latent_numel].view(num_tokens, self.moe_hidden_size)
+            shared_output = buf[latent_numel:].view(num_tokens, hidden_size)
         if _is_hip:
             from sglang.srt.models.kimi_k3_rocm_latent_tail import k3_run_latent_tail
 
