@@ -939,6 +939,14 @@ class Envs:
     # Use the per-bank-depth num_warps / waves_per_eu for the ROCm
     # attention-residual kernels; set 0 for the untuned launch.
     SGLANG_ROCM_K3_ATTN_RES_TUNED_LAUNCH = EnvBool(True)
+    # Run the merged BF16 K3 MoE front through AITER tuned_gemm in this window.
+    SGLANG_ROCM_K3_AITER_TUNED_MOE_FRONT = EnvBool(True)
+    SGLANG_ROCM_K3_AITER_TUNED_MOE_FRONT_MIN_TOKENS = EnvInt(1)
+    SGLANG_ROCM_K3_AITER_TUNED_MOE_FRONT_MAX_TOKENS = EnvInt(192)
+    # Run the K3 latent down/up projections as AITER MXFP4 GEMMs for large
+    # batches; the BF16 weights stay as the fallback.
+    SGLANG_ROCM_K3_MOE_LATENT_MXFP4 = EnvBool(True)
+    SGLANG_ROCM_K3_MOE_LATENT_MXFP4_MIN_TOKENS = EnvInt(2048)
     # Fuse K3 MLA decode's Q concat and latent KV-cache write into one AITER
     # kernel on gfx950.
     SGLANG_ROCM_K3_AITER_MLA_Q_CACHE_FUSION = EnvBool(True)
