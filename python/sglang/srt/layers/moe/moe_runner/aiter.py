@@ -12,6 +12,7 @@ import torch
 
 _SMALLM_MOE_ON = os.environ.get("SGLANG_ROCM_SMALLM_MOE", "1") != "0"
 
+from sglang.srt.layers import zero_copy_context
 from sglang.srt.layers.moe.moe_runner.base import (
     MoeQuantInfo,
     MoeRunnerConfig,
@@ -151,6 +152,14 @@ def _aiter_fused_moe_supports_no_combine() -> bool:
     from aiter.fused_moe import fused_moe
 
     return "no_combine" in inspect.signature(fused_moe).parameters
+
+
+@functools.cache
+def _aiter_fused_moe_supports_output() -> bool:
+    """Whether aiter.fused_moe takes an `output` kwarg for zero-copy writes."""
+    from aiter.fused_moe import fused_moe
+
+    return "output" in inspect.signature(fused_moe).parameters
 
 
 _RECV_BOUND_LOGGED: set[int] = set()
@@ -365,6 +374,23 @@ class AiterRunnerCore(MoeRunnerCore):
         activation = extra.pop("activation", None) if is_gfx95 else None
         if activation is None:
             activation = _aiter_activation(self.config)
+
+        # Write into the published zero-copy buffer; the caller still copies
+        # if aiter declines. no_combine output has an extra top-k dim.
+        if not self.config.no_combine and _aiter_fused_moe_supports_output():
+            zero_copy_out = zero_copy_context.get_moe_output_spec(
+                torch.Size(
+                    (runner_input.hidden_states.shape[0], quant_info.w2_weight.shape[1])
+                ),
+                (
+                    runner_input.output_dtype
+                    if runner_input.output_dtype is not None
+                    else runner_input.hidden_states.dtype
+                ),
+                runner_input.hidden_states.device,
+            )
+            if zero_copy_out is not None:
+                extra["output"] = zero_copy_out
 
         output = fused_moe(
             hidden_states=runner_input.hidden_states,
