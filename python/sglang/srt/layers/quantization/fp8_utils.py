@@ -2042,7 +2042,7 @@ def apply_fp8_linear_bmm_flashinfer(
 
 
 def apply_fp8_linear(
-    input: torch.Tensor,
+    input: Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]],
     weight: torch.Tensor,
     weight_scale: torch.Tensor,
     input_scale: Optional[torch.Tensor] = None,
@@ -2064,6 +2064,11 @@ def apply_fp8_linear(
             "SGLANG_ENABLE_TORCH_COMPILE"
         )
     output_padding = 17 if pad_output else None
+
+    if _is_hip and isinstance(input, tuple):
+        # A producer fusion hands over (fp8, per-token scale).
+        input, input_scale = input
+        use_per_token_if_dynamic = True
 
     # View input as 2D matrix for fp8 methods
     input_2d = input.view(-1, input.shape[-1])
@@ -2100,9 +2105,17 @@ def apply_fp8_linear(
     )
 
     if input_prequantized:
-        assert input_scale is not None and input_scale.numel() == 1
+        # Only the producer fusion above supplies a per-token [M, 1] scale.
+        per_token_prequant = (
+            _is_hip and input_scale is not None and input_scale.numel() > 1
+        )
+        assert input_scale is not None and (
+            per_token_prequant or input_scale.numel() == 1
+        )
         qinput = input_2d
-        if channelwise_cutlass and not native_scalar_a_scale:
+        if per_token_prequant:
+            x_scale = input_scale.view(-1, 1)
+        elif channelwise_cutlass and not native_scalar_a_scale:
             # Unsupported CUTLASS epilogues require one A scale per row.
             x_scale = input_scale.repeat(input_2d.shape[0]).view(-1, 1)
         else:

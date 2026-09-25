@@ -932,6 +932,10 @@ class Envs:
     # Fuse K3 MLA decode's Q concat and latent KV-cache write into one AITER
     # kernel on gfx950.
     SGLANG_ROCM_K3_AITER_MLA_Q_CACHE_FUSION = EnvBool(True)
+    # Let the kernel producing a K3 FP8 linear's input (RMSNorm, output gate)
+    # also quantize it, handing the linear (fp8, per-token scale) directly.
+    SGLANG_ROCM_K3_FP8_PRODUCER_FUSION = EnvBool(True)
+    SGLANG_ROCM_K3_FP8_PRODUCER_FUSION_MAX_TOKENS = EnvInt(256)
     # Activation precision for MXFP4-weight dense linears, independent of the
     # MoE: "fp4" is the checkpoint's own W4A4, "bf16" dequantizes the weights
     # at load. bf16 by default: K3 GSM8K scores 0.947 vs fp4's 0.908, for
