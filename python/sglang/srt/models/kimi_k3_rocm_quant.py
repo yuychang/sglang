@@ -43,3 +43,24 @@ def _k3_channel_fp8_to_bf16(module: nn.Module, weight: torch.Tensor) -> torch.Te
     return (weight.to(torch.float32) * weight_scale.to(torch.float32)).to(
         torch.bfloat16
     )
+
+
+def _k3_channel_fp8_to_tensor_fp8(
+    module: nn.Module, weight: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Requantize a per-output-channel FP8 weight to (per-tensor FP8, scalar
+    scale) for the aiter absorb GEMM. Must run before the kv_b head split."""
+    from sglang.kernels.ops.quantization.fp8_kernel import is_fp8_fnuz
+    from sglang.srt.layers.quantization.fp8_utils import (
+        channel_quant_to_tensor_quant,
+        normalize_e4m3fn_to_e4m3fnuz,
+    )
+
+    weight_scale = module.weight_scale
+    if is_fp8_fnuz():
+        weight, weight_scale, _ = normalize_e4m3fn_to_e4m3fnuz(
+            weight=weight, weight_scale=weight_scale, input_scale=None
+        )
+    if weight_scale.dim() == 1:
+        weight_scale = weight_scale.view(-1, 1)
+    return channel_quant_to_tensor_quant(weight, weight_scale)
