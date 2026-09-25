@@ -921,6 +921,9 @@ class Envs:
     # Run the 1-4 token K3 MoE front (routed down, shared gate_up, router) as
     # one FlyDSL FP8 kernel on gfx950.
     SGLANG_ROCM_K3_AITER_MOE_PREROUTE_FP8 = EnvBool(True)
+    # Fuse the 1/2/4-token K3 latent RMSNorm, FP8 up-projection and shared add
+    # into one FlyDSL kernel on gfx950.
+    SGLANG_ROCM_K3_AITER_LATENT_TAIL_FP8 = EnvBool(True)
     # Apply SiTU inside that kernel for 2-4 tokens.
     SGLANG_ROCM_K3_PREROUTE_PREACTIVATED_SHARED = EnvBool(True)
     # Launch geometry of the 2-4 token kernel: compute units, waves per block,

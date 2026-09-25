@@ -1351,7 +1351,11 @@ class KimiK3MoE(nn.Module):
         return norm.weight, norm.variance_epsilon
 
     def _forward_fused(
-        self, hidden_states: torch.Tensor, *, prefix_sum: Optional[torch.Tensor]
+        self,
+        hidden_states: torch.Tensor,
+        *,
+        prefix_sum: Optional[torch.Tensor],
+        forward_batch: Optional[ForwardBatch] = None,
     ) -> torch.Tensor:
         """Fused-front pipeline: read hidden_states once through the merged
         [H, gate_up + E + latent] weight, then land both TP-partial sums in
@@ -1485,6 +1489,19 @@ class KimiK3MoE(nn.Module):
 
         latent = buf[:latent_numel].view(num_tokens, self.moe_hidden_size)
         shared_output = buf[latent_numel:].view(num_tokens, hidden_size)
+        if _is_hip:
+            from sglang.srt.models.kimi_k3_rocm_latent_tail import k3_run_latent_tail
+
+            out = k3_run_latent_tail(
+                self,
+                latent,
+                shared_output,
+                prefix_sum,
+                forward_batch,
+                skip_rms=fused_norm,
+            )
+            if out is not None:
+                return out
         if not fused_norm:
             latent = self._latent_norm(latent)
         out, _ = self.routed_expert_up_proj(latent)
@@ -1523,7 +1540,9 @@ class KimiK3MoE(nn.Module):
             dp_gather_replicate(hidden_states, local_hidden_states, forward_batch)
             dp_prefix_sum, prefix_sum = prefix_sum, None
         if hidden_states.shape[0] > 0 and self._eligible_for_fused_front:
-            out = self._forward_fused(hidden_states, prefix_sum=prefix_sum)
+            out = self._forward_fused(
+                hidden_states, prefix_sum=prefix_sum, forward_batch=forward_batch
+            )
         else:
             out = self._forward_unfused(hidden_states, prefix_sum=prefix_sum)
         if use_dp:
@@ -3612,11 +3631,15 @@ class KimiK3LinearForCausalLM(nn.Module):
             if isinstance(layer.mlp, KimiK3MoE):
                 layer.mlp._merge_front_weights()
                 if _is_hip:
+                    from sglang.srt.models.kimi_k3_rocm_latent_tail import (
+                        k3_prepare_latent_tail_fp8,
+                    )
                     from sglang.srt.models.kimi_k3_rocm_preroute import (
                         k3_prepare_preroute_fp8,
                     )
 
                     k3_prepare_preroute_fp8(layer.mlp)
+                    k3_prepare_latent_tail_fp8(layer.mlp)
                 # Convert the correction bias to fp32 once so the per-call
                 # .to(float32) in topk is a no-op, not one upcast kernel per
                 # MoE layer per step.
