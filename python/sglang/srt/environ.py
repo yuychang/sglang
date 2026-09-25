@@ -929,6 +929,9 @@ class Envs:
     SGLANG_ROCM_K3_PREROUTE_COOP_WPB = EnvInt(8)
     SGLANG_ROCM_K3_PREROUTE_COOP_WPE = EnvInt(3)
     SGLANG_ROCM_K3_PREROUTE_COOP_WCM = EnvInt(3)
+    # Fuse K3 MLA decode's Q concat and latent KV-cache write into one AITER
+    # kernel on gfx950.
+    SGLANG_ROCM_K3_AITER_MLA_Q_CACHE_FUSION = EnvBool(True)
     # Activation precision for MXFP4-weight dense linears, independent of the
     # MoE: "fp4" is the checkpoint's own W4A4, "bf16" dequantizes the weights
     # at load. bf16 by default: K3 GSM8K scores 0.947 vs fp4's 0.908, for
