@@ -1509,15 +1509,12 @@ class KimiK3MoE(nn.Module):
             elif k3_ar_fusion.enabled():
                 k3_ar_fusion.all_reduce(buf)
             elif _is_hip:
-                from sglang.srt.layers.communication.k3_moe_pair_ar import (
-                    all_reduce_moe_latent_shared,
+                from sglang.srt.models.kimi_k3_rocm_moe_ar import (
+                    k3_all_reduce_moe_pair,
                 )
 
-                pair = all_reduce_moe_latent_shared(
-                    buf,
-                    num_tokens=num_tokens,
-                    moe_hidden_size=self.moe_hidden_size,
-                    hidden_size=hidden_size,
+                pair, fused_norm = k3_all_reduce_moe_pair(
+                    self, buf, num_tokens, hidden_size, forward_batch
                 )
             else:
                 buf = tensor_model_parallel_all_reduce(buf)
