@@ -947,6 +947,10 @@ class Envs:
     # batches; the BF16 weights stay as the fallback.
     SGLANG_ROCM_K3_MOE_LATENT_MXFP4 = EnvBool(True)
     SGLANG_ROCM_K3_MOE_LATENT_MXFP4_MIN_TOKENS = EnvInt(2048)
+    # PTPC FP8 copy of the latent up-projection for decode-sized batches.
+    SGLANG_ROCM_K3_PTPC_FP8 = EnvBool(True)
+    SGLANG_ROCM_K3_PTPC_FP8_MIN_TOKENS = EnvInt(1)
+    SGLANG_ROCM_K3_PTPC_FP8_MAX_TOKENS = EnvInt(256)
     # Fuse K3 MLA decode's Q concat and latent KV-cache write into one AITER
     # kernel on gfx950.
     SGLANG_ROCM_K3_AITER_MLA_Q_CACHE_FUSION = EnvBool(True)

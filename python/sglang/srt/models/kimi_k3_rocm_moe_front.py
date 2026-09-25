@@ -14,8 +14,9 @@
 """Kimi-K3 ROCm MoE front and latent GEMM dispatch.
 
 The merged BF16 MoE front runs through AITER tuned_gemm inside its tuned token
-window. Large batches run the latent down/up projections as AITER MXFP4 GEMMs;
-the BF16 weights stay live as the fallback. ``kimi_k3.py`` calls these behind
+window. Large batches run the latent down/up projections as AITER MXFP4 GEMMs
+and decode batches run the latent up-projection as PTPC FP8; the BF16 weights
+stay live as the fallback. ``kimi_k3.py`` calls these behind
 ``_is_hip``.
 """
 
@@ -111,3 +112,42 @@ def k3_run_latent_up_mxfp4(mlp: nn.Module, latent: torch.Tensor) -> torch.Tensor
 
     p = mlp._k3_latent_mxfp4
     return ops.run(latent, p.up_w, p.up_s)
+
+
+def k3_prepare_latent_up_ptpc_fp8(mlp: nn.Module) -> None:
+    """Pack a PTPC FP8 copy of the latent up-projection."""
+    mlp._k3_latent_up_ptpc = None
+    up = getattr(mlp, "routed_expert_up_proj", None)
+    if not envs.SGLANG_ROCM_K3_PTPC_FP8.get() or up is None:
+        return
+    from sglang.kernels.ops.kimi_k3 import ptpc_fp8_aiter_hip as ops
+
+    weight = up.weight
+    if (
+        not ops.available()
+        or not isinstance(weight, torch.Tensor)
+        or weight.dtype != torch.bfloat16
+        or weight.ndim != 2
+    ):
+        return
+    w, s, n = ops.pack(weight.contiguous())
+    ops.warmup(w, s, n, weight.shape[1])
+    mlp._k3_latent_up_ptpc = (w, s, n)
+
+
+def k3_run_latent_up_ptpc_fp8(
+    mlp: nn.Module, latent: torch.Tensor
+) -> Optional[torch.Tensor]:
+    """Latent up-projection in PTPC FP8, or None if not covered."""
+    packed = getattr(mlp, "_k3_latent_up_ptpc", None)
+    if packed is None or not (
+        envs.SGLANG_ROCM_K3_PTPC_FP8_MIN_TOKENS.get()
+        <= latent.shape[0]
+        <= envs.SGLANG_ROCM_K3_PTPC_FP8_MAX_TOKENS.get()
+    ):
+        return None
+    from sglang.kernels.ops.kimi_k3 import ptpc_fp8_aiter_hip as ops
+
+    if not ops.covered(latent, packed[0]):
+        return None
+    return ops.run(latent, *packed)

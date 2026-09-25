@@ -1382,6 +1382,7 @@ class KimiK3MoE(nn.Module):
             from sglang.srt.models.kimi_k3_rocm_moe_front import (
                 k3_run_front_mxfp4,
                 k3_run_latent_up_mxfp4,
+                k3_run_latent_up_ptpc_fp8,
                 k3_tuned_front_gemm,
                 k3_use_latent_mxfp4,
             )
@@ -1521,9 +1522,12 @@ class KimiK3MoE(nn.Module):
                 return out
         if not fused_norm:
             latent = self._latent_norm(latent)
+        out = None
         if use_mxfp4:
             out = k3_run_latent_up_mxfp4(self, latent)
-        else:
+        elif _is_hip:
+            out = k3_run_latent_up_ptpc_fp8(self, latent)
+        if out is None:
             out, _ = self.routed_expert_up_proj(latent)
 
         # prefetch_bc: b and c complete before the norm / up_proj chain
@@ -3672,6 +3676,7 @@ class KimiK3LinearForCausalLM(nn.Module):
                         k3_prepare_latent_tail_fp8,
                     )
                     from sglang.srt.models.kimi_k3_rocm_moe_front import (
+                        k3_prepare_latent_up_ptpc_fp8,
                         k3_prepare_moe_latent_mxfp4,
                         k3_router_bias_dtype,
                     )
@@ -3680,6 +3685,7 @@ class KimiK3LinearForCausalLM(nn.Module):
                     )
 
                     k3_prepare_moe_latent_mxfp4(layer.mlp)
+                    k3_prepare_latent_up_ptpc_fp8(layer.mlp)
                     k3_prepare_preroute_fp8(layer.mlp)
                     k3_prepare_latent_tail_fp8(layer.mlp)
                 # Convert the correction bias to the router dtype once so the
