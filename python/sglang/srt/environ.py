@@ -943,6 +943,10 @@ class Envs:
     SGLANG_ROCM_K3_PREROUTE_COOP_WPB = EnvInt(8)
     SGLANG_ROCM_K3_PREROUTE_COOP_WPE = EnvInt(3)
     SGLANG_ROCM_K3_PREROUTE_COOP_WCM = EnvInt(3)
+    # Fold the K3 attn-res prefix add into AITER custom all-reduce: 1-stage
+    # for M in {1, 2, 4}, 2-stage epilogue for M=8.
+    SGLANG_ROCM_K3_AR_RESIDUAL = EnvBool(True)
+    SGLANG_ROCM_K3_AR_RESIDUAL_MAX_TOKENS = EnvInt(8)
     # Fuse K3 MLA decode's Q concat and latent KV-cache write into one AITER
     # kernel on gfx950.
     SGLANG_ROCM_K3_AITER_MLA_Q_CACHE_FUSION = EnvBool(True)
