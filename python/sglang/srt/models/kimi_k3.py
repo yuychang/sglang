@@ -1272,8 +1272,13 @@ class KimiK3MoE(nn.Module):
         takes both a strided row and an fp32 row. The SM90/SM120 cutlass mxfp4
         kernels return from apply() before that quant, and precision="bf16"
         skips it as well, so those keep the bf16 contract even though the
-        runner backend is the same."""
+        runner backend is the same. AITER indexes rows by stride, so it
+        also takes the split view."""
         from sglang.srt.layers.quantization.mxfp4 import Mxfp4MoEMethod
+
+        runner = getattr(self.experts, "runner", None)
+        if runner is not None and runner.runner_backend.is_aiter():
+            return False
 
         method = self.experts.quant_method
         return not (
@@ -1305,8 +1310,9 @@ class KimiK3MoE(nn.Module):
         if self._route_quant_fuse_eligible:
             route_quant_handoff.stage(routed_input)
         try:
-            topk_output = self.topk(hidden_states, router_logits)
+            # topk sits inside so the ROCm fused sort can zero `latent` for gemm2.
             with zero_copy_context.set_moe_output(latent):
+                topk_output = self.topk(hidden_states, router_logits)
                 expert_output = self.experts(routed_input, topk_output)
         finally:
             route_quant_handoff.clear()
