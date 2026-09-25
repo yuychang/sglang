@@ -49,6 +49,17 @@ def k3_prepare_latent_tail_fp8(mlp: nn.Module) -> None:
     mlp._k3_latent_tail = (up_w, up_s)
 
 
+def k3_latent_tail_eligible(
+    mlp: nn.Module, num_tokens: int, forward_batch: Optional[ForwardBatch]
+) -> bool:
+    return (
+        getattr(mlp, "_k3_latent_tail", None) is not None
+        and num_tokens in _TOKENS
+        and forward_batch is not None
+        and forward_batch.forward_mode.is_decode_or_idle()
+    )
+
+
 def k3_run_latent_tail(
     mlp: nn.Module,
     latent: torch.Tensor,
@@ -58,17 +69,11 @@ def k3_run_latent_tail(
     skip_rms: bool,
 ) -> Optional[torch.Tensor]:
     """Return out + shared_output (+ prefix_sum), or None if not covered."""
-    packed = getattr(mlp, "_k3_latent_tail", None)
-    if (
-        packed is None
-        or latent.shape[0] not in _TOKENS
-        or forward_batch is None
-        or not forward_batch.forward_mode.is_decode_or_idle()
-    ):
+    if not k3_latent_tail_eligible(mlp, latent.shape[0], forward_batch):
         return None
     from sglang.kernels.ops.kimi_k3 import latent_tail_aiter_hip as ops
 
-    up_w, up_s = packed
+    up_w, up_s = mlp._k3_latent_tail
     norm_weight, epsilon = mlp._get_fused_norm_params()
     if not ops.covered(
         latent, shared_output, norm_weight, up_w, up_s, epsilon, prefix_sum

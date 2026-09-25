@@ -1510,15 +1510,12 @@ class KimiK3MoE(nn.Module):
             elif k3_ar_fusion.enabled():
                 k3_ar_fusion.all_reduce(buf)
             elif _is_hip:
-                from sglang.srt.layers.k3_moe_pair_ar import (
-                    all_reduce_moe_latent_shared,
+                from sglang.srt.models.kimi_k3_rocm_moe_ar import (
+                    k3_all_reduce_moe_pair,
                 )
 
-                pair = all_reduce_moe_latent_shared(
-                    buf,
-                    num_tokens=num_tokens,
-                    moe_hidden_size=self.moe_hidden_size,
-                    hidden_size=hidden_size,
+                pair, fused_norm = k3_all_reduce_moe_pair(
+                    self, buf, num_tokens, hidden_size, forward_batch
                 )
             else:
                 buf = tensor_model_parallel_all_reduce(buf)
@@ -3644,10 +3641,8 @@ class KimiK3LinearForCausalLM(nn.Module):
                     # Fold the per-channel scale while dim 0 is still the
                     # channel axis it indexes, i.e. before the head split.
                     if envs.SGLANG_ROCM_K3_MLA_ABSORB_FP8.get():
-                        kv_b_weight, kv_b_tensor_scale = (
-                            _k3_channel_fp8_to_tensor_fp8(
-                                self_attn.kv_b_proj, kv_b_weight
-                            )
+                        kv_b_weight, kv_b_tensor_scale = _k3_channel_fp8_to_tensor_fp8(
+                            self_attn.kv_b_proj, kv_b_weight
                         )
                     else:
                         kv_b_weight = _k3_channel_fp8_to_bf16(

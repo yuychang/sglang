@@ -1822,6 +1822,10 @@ class Envs:
     SGLANG_ROCM_K3_RADIX4_FUSE_SORT = EnvBool(True)
     # All-reduce the K3 [latent | shared] slices separately when the pair exceeds the QR cap.
     SGLANG_ROCM_K3_SPLIT_OVERSIZED_MOE_AR = EnvBool(True)
+    # Fuse the K3 MoE all-reduce with the latent RMSNorm (AITER 2-stage AR only).
+    SGLANG_ROCM_K3_FUSED_AR_RMSNORM = EnvBool(True)
+    # Token cap for the above (0 = no cap); split AR + RMSNorm wins past ~24.
+    SGLANG_ROCM_K3_FUSED_AR_RMSNORM_MAX_TOKENS = EnvInt(24)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_CACHE_CAPACITY = EnvInt(2)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_MIN_HITS = EnvInt(2)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_MAX_SEQLEN = EnvInt(6144)
