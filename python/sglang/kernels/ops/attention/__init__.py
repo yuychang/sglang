@@ -259,6 +259,12 @@ for _mod, _fn, _backend, _device in [
         CapabilityRequirement.CUDA,
     ),
     (
+        "mla_output_gate_fp8_quant",
+        "kimi_k3_mla_output_gate_fp8_quant",
+        KernelBackend.JIT,
+        CapabilityRequirement.HIP,
+    ),
+    (
         "kda_decode_mtp",
         "fused_kda_decode_mtp_dspark",
         KernelBackend.CUTE_DSL,
