@@ -918,6 +918,9 @@ class Envs:
     # Fused AITER KDA decode. Empty keeps the unfused chain; "aiter" selects
     # the gfx950 FlyDSL kernel.
     SGLANG_ROCM_K3_KDA_FUSED_BACKEND = EnvStr("")
+    # Requantize Quark per-channel FP8 kv_b to per-tensor FP8 so the MLA absorb
+    # BMMs run the AITER a8w8 kernel (~2.3% weight error vs dequant to bf16).
+    SGLANG_ROCM_K3_MLA_ABSORB_FP8 = EnvBool(False)
     # Run the 1-4 token K3 MoE front (routed down, shared gate_up, router) as
     # one FlyDSL FP8 kernel on gfx950.
     SGLANG_ROCM_K3_AITER_MOE_PREROUTE_FP8 = EnvBool(True)
