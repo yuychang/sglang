@@ -953,8 +953,8 @@ class Envs:
     # Empty keeps the unfused KDA chain; "aiter" selects the gfx950 FlyDSL kernel.
     SGLANG_ROCM_K3_KDA_FUSED_BACKEND = EnvStr("")
     # Requantize Quark per-channel FP8 kv_b to per-tensor FP8 for the MLA absorb.
-    # Off by default: the requant costs about 2.3% weight error versus bf16.
-    SGLANG_ROCM_K3_MLA_ABSORB_FP8 = EnvBool(False)
+    # On by default. Measured: TPOT drops 0.05-0.11 ms; set 0 for the bf16 path.
+    SGLANG_ROCM_K3_MLA_ABSORB_FP8 = EnvBool(True)
     # "fp4" keeps W4A4; "bf16" dequantizes MXFP4 dense weights at load.
     # Measured on K3: bf16 GSM8K 0.947 vs fp4 0.908. Ignored off ROCm.
     SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT = EnvStr("bf16")
