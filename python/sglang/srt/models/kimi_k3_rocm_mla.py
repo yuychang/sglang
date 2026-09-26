@@ -104,15 +104,21 @@ def k3_try_fused_mla_q_cache(
     ):
         return None
 
-    # Triton and Gluon decode take BF16 Q at the native head count; the asm
-    # decode takes FP8 Q padded to 16 heads. Pad heads must stay zeroed.
+    # Triton and Gluon decode take BF16 Q. Gluon keeps the native head count.
+    # The asm decode takes FP8 Q padded to 16 heads: write the real heads into
+    # a persistent zeroed buffer so decode can skip the per-layer Fill.
     triton_decode = attn.current_attention_backend in ("triton", "triton_mla")
     gluon_decode = not triton_decode and prefer_mla_gluon_decode(
-        head_pad_mode="zero", num_head=heads, kv_cache_dtype=kv_cache.dtype
+        head_pad_mode="zero",
+        num_head=heads,
+        kv_cache_dtype=kv_cache.dtype,
+        q_dtype=torch.bfloat16,
     )
     bf16_q = triton_decode or gluon_decode
     q_out_dtype = q_nope_out.dtype if bf16_q else kv_cache.dtype
-    pad_heads = 16 if (not bf16_q and heads < 16 and 16 % heads != 0) else heads
+    pad_heads = (
+        heads if gluon_decode else (16 if (heads < 16 and 16 % heads != 0) else heads)
+    )
     head_dim = attn.kv_lora_rank + attn.qk_rope_head_dim
     q_out = _cached_buffer(
         attn,
