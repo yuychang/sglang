@@ -6,11 +6,18 @@ register_cpu_ci(est_time=12, suite="base-a-test-cpu")
 
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 import torch
 
+from sglang.srt.layers.quantization.quark.schemes.quark_w4a4_mxfp4 import (
+    QuarkW4A4MXFP4,
+)
 from sglang.srt.models.kimi_k3 import _is_unquantized_mergeable
-from sglang.srt.models.kimi_k3_rocm_quant import _k3_channel_fp8_to_bf16
+from sglang.srt.models.kimi_k3_rocm_quant import (
+    _k3_channel_fp8_to_bf16,
+    _k3_densify_quark_shared_experts,
+)
 from sglang.test.test_utils import CustomTestCase
 
 
@@ -92,6 +99,58 @@ class TestMergeDtypeGuard(CustomTestCase):
         check that only asks whether the operands match each other."""
         weights = [torch.zeros(4, 4, dtype=torch.float32) for _ in range(2)]
         self.assertFalse(_is_unquantized_mergeable(weights))
+
+
+class TestDensifyQuarkSharedExperts(CustomTestCase):
+    """Quark MXFP4 shared experts become BF16 before the MoE front merge."""
+
+    @staticmethod
+    def _mlp():
+        scheme = object.__new__(QuarkW4A4MXFP4)
+        scheme.is_checkpoint_mxfp4_serialized = True
+
+        def linear():
+            # Packed nibbles 1/2 decode to 0.5/1.0 with a unit e8m0 scale.
+            return SimpleNamespace(
+                weight=torch.full((2, 16), 0x21, dtype=torch.uint8),
+                weight_scale=torch.full((2, 1), 127, dtype=torch.uint8),
+                scheme=scheme,
+            )
+
+        return SimpleNamespace(
+            shared_experts=SimpleNamespace(gate_up_proj=linear(), down_proj=linear())
+        )
+
+    def test_dequantizes_shared_experts_once(self):
+        mlp = self._mlp()
+        path = (
+            "sglang.srt.layers.quantization.quark.schemes."
+            "quark_w4a4_mxfp4._dequant_linear_to_bf16"
+        )
+        with mock.patch(path, True):
+            _k3_densify_quark_shared_experts(mlp)
+            weight = mlp.shared_experts.gate_up_proj.weight
+            # The loader's own pass must reuse the BF16 weight.
+            _k3_densify_quark_shared_experts(mlp)
+
+        expected = torch.tensor([0.5, 1.0], dtype=torch.bfloat16).repeat(2, 16)
+        for linear in (mlp.shared_experts.gate_up_proj, mlp.shared_experts.down_proj):
+            torch.testing.assert_close(linear.weight.data, expected)
+            self.assertIsNone(linear.weight_scale)
+        self.assertEqual(
+            mlp.shared_experts.gate_up_proj.weight.data_ptr(), weight.data_ptr()
+        )
+
+    def test_fp4_activation_keeps_packed_weights(self):
+        mlp = self._mlp()
+        path = (
+            "sglang.srt.layers.quantization.quark.schemes."
+            "quark_w4a4_mxfp4._dequant_linear_to_bf16"
+        )
+        with mock.patch(path, False):
+            _k3_densify_quark_shared_experts(mlp)
+
+        self.assertEqual(mlp.shared_experts.down_proj.weight.dtype, torch.uint8)
 
 
 if __name__ == "__main__":
