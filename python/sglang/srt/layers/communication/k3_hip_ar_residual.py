@@ -42,6 +42,21 @@ def covers(num_tokens: int) -> bool:
     return num_tokens <= envs.SGLANG_ROCM_K3_AR_RESIDUAL_MAX_TOKENS.get()
 
 
+def fresh_output(like: torch.Tensor) -> torch.Tensor:
+    """Allocate the fused AR output. Never cache it by shape.
+
+    M=8 is past the 80 KiB 1-stage cutoff, so the collective is
+    ``cross_device_reduce_2stage_res``: stage 1 matches plain 2-stage AR,
+    and stage 2 adds the residual after the reduced value has rounded to
+    the storage dtype. The residual pointer is the caller's tensor. An
+    earlier fusion stashed that pointer (and the output) in a shape-keyed
+    cache and replaced the entry on the next capture, which freed storage
+    a CUDA graph still replayed. This allocator returns a new buffer every
+    call. During capture that buffer comes from the graph pool.
+    """
+    return torch.empty_like(like)
+
+
 def try_all_reduce_add(
     x: torch.Tensor,
     residual: Optional[torch.Tensor],
@@ -79,6 +94,10 @@ def try_all_reduce_add(
             residual = residual.view_as(x)
         if not hasattr(ca_comm, "custom_all_reduce_residual"):
             return None
+        # Capture allocates here, on the capturing stream, and passes that
+        # buffer through. The residual itself is not copied or retained.
+        if x.is_cuda and torch.cuda.is_current_stream_capturing():
+            return ca_comm.custom_all_reduce_residual(x, residual, fresh_output(x))
         return ca_comm.custom_all_reduce_residual(x, residual)
     except Exception as exc:
         logger.debug("K3 HIP AR+residual unavailable: %s", exc)

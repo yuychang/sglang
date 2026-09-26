@@ -93,6 +93,10 @@ def _agg_kernel(
 
     Taking the global max before exponentiating makes this bit-comparable to
     the 2-kernel pipeline rather than to the SM100 kernel.
+
+    Prefill (T=512/4096/8192, H=7168, nvb=8) stays on this kernel. A blocked-H
+    rewrite that rereads each row, and an H-parallel score/mix/norm rewrite,
+    were both slower on MI355X (about 1.1x at T=512 and 1.6–2.6x at T=8192).
     """
     t = tl.program_id(0)
     offs = tl.arange(0, BLOCK_H)
