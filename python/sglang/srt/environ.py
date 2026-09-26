@@ -950,6 +950,8 @@ class Envs:
     # output columns ride along nearly free.
     SGLANG_ROCM_K3_FUSE_KDA_INPROJ = EnvBool(True)
     SGLANG_ROCM_K3_FUSE_KDA_INPROJ_MAX_TOKENS = EnvInt(256)
+    # Empty keeps the unfused KDA chain; "aiter" selects the gfx950 FlyDSL kernel.
+    SGLANG_ROCM_K3_KDA_FUSED_BACKEND = EnvStr("")
     # "fp4" keeps W4A4; "bf16" dequantizes MXFP4 dense weights at load.
     # Measured on K3: bf16 GSM8K 0.947 vs fp4 0.908. Ignored off ROCm.
     SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT = EnvStr("bf16")
