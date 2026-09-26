@@ -1100,6 +1100,11 @@ class QuarkFusedMoEMethod(FusedMoEMethodBase):
         self, layer: torch.nn.Module, moe_runner_config: MoeRunnerConfig
     ):
         layer.scheme.create_moe_runner(layer, moe_runner_config)
+        # The scheme owns the MoeRunner. FusedMoE copies quant_method.runner
+        # onto the layer; the class-level None leaves that pointer empty, so
+        # K3's fused front treats an AITER row-strided slice as dense and
+        # inserts a same-dtype direct_copy per MoE layer.
+        self.runner = getattr(layer.scheme, "runner", None)
 
     def apply(
         self,

@@ -425,6 +425,29 @@ def _add3(
 _EP_FRONT_LOGGED = False
 
 
+def _moe_front_runner_is_aiter(experts) -> bool:
+    """Whether any MoE runner attached to ``experts`` indexes rows by stride.
+
+    Quark MXFP4 stores the runner on ``experts.scheme`` and, unless the quant
+    method republishes it, leaves ``experts.runner`` as the class-level None.
+    """
+    if experts is None:
+        return False
+    for obj in (
+        experts,
+        getattr(experts, "quant_method", None),
+        getattr(experts, "scheme", None),
+    ):
+        if obj is None:
+            continue
+        runner = getattr(obj, "runner", None)
+        backend = getattr(runner, "runner_backend", None)
+        is_aiter = getattr(backend, "is_aiter", None)
+        if callable(is_aiter) and is_aiter():
+            return True
+    return False
+
+
 def _o_proj_takes_output(o_proj: RowParallelLinear) -> bool:
     """Whether o_proj can write into caller-owned storage. ``apply_into`` is an
     optional quant-method capability; only the unquantized method has it."""
@@ -1273,11 +1296,12 @@ class KimiK3MoE(nn.Module):
         kernels return from apply() before that quant, and precision="bf16"
         skips it as well, so those keep the bf16 contract even though the
         runner backend is the same. AITER indexes rows by stride, so it
-        also takes the split view."""
+        also takes the split view. Quark keeps that runner on the scheme
+        (``experts.scheme.runner``); ``FusedMoE.runner`` is only set when the
+        quant method republishes it."""
         from sglang.srt.layers.quantization.mxfp4 import Mxfp4MoEMethod
 
-        runner = getattr(self.experts, "runner", None)
-        if runner is not None and runner.runner_backend.is_aiter():
+        if _moe_front_runner_is_aiter(self.experts):
             return False
 
         method = self.experts.quant_method
@@ -1420,8 +1444,18 @@ class KimiK3MoE(nn.Module):
             router_logits = router_logits.contiguous()
         if self._moe_front_needs_dense_bf16:
             # off an fp32 front the cast allocates the dense buffer, so the
-            # contiguous() behind it is free; off a bf16 front it is the copy
-            routed_input = routed_input.to(hidden_states.dtype).contiguous()
+            # contiguous() behind it is free; off a bf16 front it is the copy.
+            # AITER (including Quark MXFP4) indexes rows by stride, so a
+            # unit-last-stride slice of the fused front must not be densified:
+            # that same-dtype contiguous() is a nocast direct_copy between the
+            # front GEMM and SiTU.
+            routed_input = routed_input.to(hidden_states.dtype)
+            if not (
+                _moe_front_runner_is_aiter(self.experts)
+                and routed_input.dim() == 2
+                and routed_input.stride(-1) == 1
+            ):
+                routed_input = routed_input.contiguous()
         latent_numel = num_tokens * self.moe_hidden_size
         pair = None
         if k3_ar_fusion.enabled():
