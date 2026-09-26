@@ -936,6 +936,9 @@ class Envs:
     # for M in {1, 2, 4}, 2-stage epilogue for M=8.
     SGLANG_ROCM_K3_AR_RESIDUAL = EnvBool(True)
     SGLANG_ROCM_K3_AR_RESIDUAL_MAX_TOKENS = EnvInt(8)
+    # Use the per-bank-depth num_warps / waves_per_eu for the ROCm
+    # attention-residual kernels; set 0 for the untuned launch.
+    SGLANG_ROCM_K3_ATTN_RES_TUNED_LAUNCH = EnvBool(True)
     # Fuse K3 MLA decode's Q concat and latent KV-cache write into one AITER
     # kernel on gfx950.
     SGLANG_ROCM_K3_AITER_MLA_Q_CACHE_FUSION = EnvBool(True)
