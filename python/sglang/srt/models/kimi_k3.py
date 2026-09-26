@@ -7,7 +7,6 @@
 #   - Full-rank KDA gate (use_full_rank_gate)
 
 import logging
-import os
 import re
 from collections.abc import Iterable
 from functools import cached_property
@@ -1948,7 +1947,7 @@ class KimiK3DeltaAttention(nn.Module):
             f_b_weight = getattr(self, "_bfa_f_b_w", None)
             if f_b_weight is None:
                 f_b_weight = self.f_b_proj.weight
-            backend = os.environ.get("SGLANG_K3_KDA_FUSED_BACKEND", "").lower()
+            backend = envs.SGLANG_ROCM_K3_KDA_FUSED_BACKEND.get().lower()
             backend_available = (
                 backend == "aiter"
                 and kda_fused_decode_aiter_hip.available(f_b_weight.device)
