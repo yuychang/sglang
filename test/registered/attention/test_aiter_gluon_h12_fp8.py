@@ -134,6 +134,14 @@ class TestPreferMlaGluonDecode(CustomTestCase):
         with mock.patch(_GLUON_FN, return_value=mock.Mock()):
             self.assertFalse(self._prefer(kv_cache_dtype=torch.bfloat16))
 
+    def test_false_for_fp8_q(self):
+        with mock.patch(_GLUON_FN, return_value=mock.Mock()):
+            self.assertFalse(self._prefer(q_dtype=fp8_dtype))
+
+    def test_true_for_bf16_q(self):
+        with mock.patch(_GLUON_FN, return_value=mock.Mock()):
+            self.assertTrue(self._prefer(q_dtype=torch.bfloat16))
+
 
 def _layer(num_head=12, qk_head_dim=576, v_head_dim=512):
     layer = mock.Mock()
