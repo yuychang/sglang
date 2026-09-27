@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import torch
 
+from sglang.srt.environ import envs
 from sglang.srt.utils import is_hip
 
 # aiter's a8w8 bpreshuffle instances reject N that is not a multiple of 64
@@ -161,6 +162,47 @@ def run(
     return result if result.shape[1] == out_features else result[:, :out_features]
 
 
+def run_add3(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    scale: torch.Tensor,
+    out_features: int,
+    residual0: torch.Tensor,
+    residual1: torch.Tensor,
+    out: torch.Tensor | None = None,
+) -> torch.Tensor | None:
+    """Use the selected FlyDSL GEMM's rounded two-residual epilogue."""
+    if (
+        not envs.SGLANG_ROCM_K3_PTPC_FP8_ADD3.get()
+        or not covered(x, weight)
+        or weight.shape[0] != out_features
+        or not (
+            envs.SGLANG_ROCM_K3_PTPC_FP8_ADD3_MIN_TOKENS.get()
+            <= x.shape[0]
+            <= envs.SGLANG_ROCM_K3_PTPC_FP8_ADD3_MAX_TOKENS.get()
+        )
+    ):
+        return None
+    ops = _ops()
+    if ops is None:
+        return None
+    fp8, _, per_token_quant, _ = ops
+    try:
+        from aiter.ops.gemm_op_a8w8 import gemm_a8w8_bpreshuffle_add3
+    except (ImportError, ModuleNotFoundError):
+        return None
+    xq, xs = per_token_quant(x, quant_dtype=fp8)
+    return gemm_a8w8_bpreshuffle_add3(
+        xq,
+        weight,
+        xs.view(xq.shape[0], 1),
+        scale,
+        residual0,
+        residual1,
+        out=out,
+    )
+
+
 def warmup(
     weight: torch.Tensor,
     scale: torch.Tensor,
@@ -174,4 +216,15 @@ def warmup(
         x = torch.zeros((num_tokens, in_features), dtype=torch.bfloat16, device=device)
         if covered(x, weight):
             run(x, weight, scale, out_features)
+            residual = torch.zeros(
+                (num_tokens, out_features), dtype=torch.bfloat16, device=device
+            )
+            run_add3(
+                x,
+                weight,
+                scale,
+                out_features,
+                residual,
+                residual,
+            )
     torch.cuda.synchronize(device)

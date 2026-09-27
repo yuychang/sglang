@@ -963,6 +963,12 @@ class Envs:
     SGLANG_ROCM_K3_PTPC_FP8 = EnvBool(True)
     SGLANG_ROCM_K3_PTPC_FP8_MIN_TOKENS = EnvInt(1)
     SGLANG_ROCM_K3_PTPC_FP8_MAX_TOKENS = EnvInt(256)
+    # Fold the shared-expert and attn-res prefix additions into a tuned
+    # FlyDSL PTPC GEMM epilogue. Shapes whose selected kernel is CK/CKTile
+    # fail closed to the existing GEMM plus add3 path.
+    SGLANG_ROCM_K3_PTPC_FP8_ADD3 = EnvBool(False)
+    SGLANG_ROCM_K3_PTPC_FP8_ADD3_MIN_TOKENS = EnvInt(8)
+    SGLANG_ROCM_K3_PTPC_FP8_ADD3_MAX_TOKENS = EnvInt(64)
     # Fuse K3 MLA decode's Q concat and latent KV-cache write into one AITER
     # kernel on gfx950.
     SGLANG_ROCM_K3_AITER_MLA_Q_CACHE_FUSION = EnvBool(True)
