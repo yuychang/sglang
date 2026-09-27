@@ -173,7 +173,7 @@ def _write_bank_kernel(
     H: tl.constexpr,
     BLOCK_H: tl.constexpr,
 ):
-    """Snapshot one bank row and cache its score-normalization statistic."""
+    """Snapshot one bank row and cache its sum of squares."""
     t = tl.program_id(0)
     offs = tl.arange(0, BLOCK_H)
     mask = offs < H
@@ -189,7 +189,7 @@ def write_bank_hip(
     bank_ms: torch.Tensor,
     row: int,
 ) -> None:
-    """Write ``bank[:, row]`` and its mean-square in one pass."""
+    """Write ``bank[:, row]`` and its sum of squares in one pass."""
     T, H = src.shape
     _write_bank_kernel[(T,)](
         src,
