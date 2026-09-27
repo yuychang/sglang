@@ -1413,7 +1413,6 @@ class KimiK3MoE(nn.Module):
                 k3_run_front_mxfp4,
                 k3_run_latent_up_mxfp4,
                 k3_run_latent_up_ptpc_fp8,
-                k3_run_latent_up_ptpc_fp8_add3,
                 k3_tuned_front_gemm,
                 k3_use_latent_mxfp4,
             )
@@ -1575,12 +1574,6 @@ class KimiK3MoE(nn.Module):
                 return out
         if not fused_norm:
             latent = self._latent_norm(latent)
-        if _is_hip and prefix_sum is not None and not use_mxfp4:
-            fused_out = k3_run_latent_up_ptpc_fp8_add3(
-                self, latent, shared_output, prefix_sum
-            )
-            if fused_out is not None:
-                return fused_out
         out = None
         if use_mxfp4:
             out = k3_run_latent_up_mxfp4(self, latent)

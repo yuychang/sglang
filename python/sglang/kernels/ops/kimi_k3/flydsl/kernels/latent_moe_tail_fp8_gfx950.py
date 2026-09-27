@@ -3,9 +3,9 @@
 
 """Persistent-wave Kimi-K3 RMSNorm, FP8 GEMM, and shared-add kernel.
 
-The B1 schedule assigns output rows to persistent waves. B2/B4 keep that
+The B1 schedule assigns output rows to persistent waves.  B2/B4 keep that
 schedule but accumulate all tokens while each FP8 weight vector is resident in
-registers, so weight traffic is independent of batch size. Launching one B1
+registers, so weight traffic is independent of batch size.  Launching one B1
 grid per token would instead stream the 25.7 MB weight once per token and lose
 to the regular batched GEMM almost immediately.
 """

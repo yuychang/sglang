@@ -151,22 +151,3 @@ def k3_run_latent_up_ptpc_fp8(
     if not ops.covered(latent, packed[0]):
         return None
     return ops.run(latent, *packed)
-
-
-def k3_run_latent_up_ptpc_fp8_add3(
-    mlp: nn.Module,
-    latent: torch.Tensor,
-    shared: torch.Tensor,
-    prefix: torch.Tensor,
-) -> Optional[torch.Tensor]:
-    """Fuse the two rounded residual additions into a FlyDSL PTPC epilogue."""
-    packed = getattr(mlp, "_k3_latent_up_ptpc", None)
-    if packed is None or not (
-        envs.SGLANG_ROCM_K3_PTPC_FP8_MIN_TOKENS.get()
-        <= latent.shape[0]
-        <= envs.SGLANG_ROCM_K3_PTPC_FP8_MAX_TOKENS.get()
-    ):
-        return None
-    from sglang.kernels.ops.kimi_k3 import ptpc_fp8_aiter_hip as ops
-
-    return ops.run_add3(latent, *packed, shared, prefix)
