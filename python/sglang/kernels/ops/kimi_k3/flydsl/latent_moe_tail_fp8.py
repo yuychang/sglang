@@ -15,7 +15,7 @@ from aiter.jit.utils.chip_info import get_gfx_runtime
 _LATENT_DIM = 3584
 _HIDDEN_DIM = 7168
 _FP8_MAX = 448.0
-_TOKEN_BUCKETS = (1, 2, 4, 8)
+_TOKEN_BUCKETS = (1, 2, 4)
 
 
 def quantize_latent_moe_tail_weight(

@@ -40,14 +40,7 @@ def k3_all_reduce_moe_pair(
     Folds the latent RMSNorm into the AR when the fused kernel wins; the FP8
     latent tail has its own norm, so its token counts keep the plain AR.
     """
-    # B1/B2/B4 keep RMSNorm in the persistent tail. At B8 the normalized
-    # latent rows nearly fill LDS, while the collective can produce them as
-    # part of its existing epilogue. Keep that fused AR+norm and run B8's
-    # tail with skip_rms=True.
-    tail_owns_norm = num_tokens <= 4 and k3_latent_tail_eligible(
-        mlp, num_tokens, forward_batch
-    )
-    if mlp.fuse_ar_norm and not tail_owns_norm:
+    if mlp.fuse_ar_norm and not k3_latent_tail_eligible(mlp, num_tokens, forward_batch):
         weight, eps = mlp._get_fused_norm_params()
         view = buf.view(-1, k3_ar_fusion.NORM_DIM)
         fused = try_fused_ar_rmsnorm(view, weight, eps, num_norm_rows=num_tokens)

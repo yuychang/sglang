@@ -3,13 +3,11 @@
 
 """Persistent-wave Kimi-K3 RMSNorm, FP8 GEMM, and shared-add kernel.
 
-The B1 schedule assigns output rows to persistent waves. B2/B4/B8 keep that
+The B1 schedule assigns output rows to persistent waves. B2/B4 keep that
 schedule but accumulate all tokens while each FP8 weight vector is resident in
-registers, so weight traffic is independent of batch size. B8 consumes about
-58 KiB LDS for the normalized latent rows and is the largest specialization
-that fits one workgroup on gfx950. Launching one B1 grid per token would
-instead stream the 25.7 MB weight once per token and lose to the regular
-batched GEMM almost immediately.
+registers, so weight traffic is independent of batch size. Launching one B1
+grid per token would instead stream the 25.7 MB weight once per token and lose
+to the regular batched GEMM almost immediately.
 """
 
 import flydsl.compiler as flyc
@@ -55,8 +53,8 @@ def build_latent_moe_tail_fp8_persistent_module(
 ):
     """Build a block-normalize/one-wave-per-output-group specialization."""
 
-    if num_tokens not in (1, 2, 4, 8):
-        raise ValueError("num_tokens must be 1, 2, 4, or 8")
+    if num_tokens not in (1, 2, 4):
+        raise ValueError("num_tokens must be 1, 2, or 4")
     if rows_per_wave not in (1, 2, 3, 4):
         raise ValueError("rows_per_wave must be 1, 2, 3, or 4")
     if not 1 <= cu_count <= 256:

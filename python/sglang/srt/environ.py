@@ -932,11 +932,9 @@ class Envs:
     SGLANG_ROCM_K3_PREROUTE_COOP_WPB = EnvInt(8)
     SGLANG_ROCM_K3_PREROUTE_COOP_WPE = EnvInt(3)
     SGLANG_ROCM_K3_PREROUTE_COOP_WCM = EnvInt(3)
-    # Fuse the K3 latent RMSNorm, FP8 up-projection and shared add into one
-    # FlyDSL kernel on gfx950. M=8 is available for evaluation but stays
-    # opt-in until its complete graph clears the serving gate.
+    # Fuse the 1/2/4-token K3 latent RMSNorm, FP8 up-projection and shared add
+    # into one FlyDSL kernel on gfx950.
     SGLANG_ROCM_K3_AITER_LATENT_TAIL_FP8 = EnvBool(True)
-    SGLANG_ROCM_K3_AITER_LATENT_TAIL_FP8_MAX_TOKENS = EnvInt(4)
     # Fold the K3 attn-res prefix add into AITER custom all-reduce: 1-stage
     # for M in {1, 2, 4}, 2-stage epilogue for M=8.
     SGLANG_ROCM_K3_AR_RESIDUAL = EnvBool(True)
@@ -967,7 +965,7 @@ class Envs:
     # FlyDSL PTPC GEMM epilogue. Shapes whose selected kernel is CK/CKTile
     # fail closed to the existing GEMM plus add3 path.
     SGLANG_ROCM_K3_PTPC_FP8_ADD3 = EnvBool(False)
-    SGLANG_ROCM_K3_PTPC_FP8_ADD3_MIN_TOKENS = EnvInt(8)
+    SGLANG_ROCM_K3_PTPC_FP8_ADD3_MIN_TOKENS = EnvInt(32)
     SGLANG_ROCM_K3_PTPC_FP8_ADD3_MAX_TOKENS = EnvInt(64)
     # Fuse K3 MLA decode's Q concat and latent KV-cache write into one AITER
     # kernel on gfx950.
