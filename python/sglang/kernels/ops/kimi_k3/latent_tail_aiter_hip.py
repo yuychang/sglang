@@ -95,7 +95,10 @@ def warmup(
 ) -> None:
     if not enabled():
         return
-    for num_tokens in (1, 2, 4):
+    max_tokens = envs.SGLANG_ROCM_K3_AITER_LATENT_TAIL_FP8_MAX_TOKENS.get()
+    for num_tokens in (1, 2, 4, 8):
+        if num_tokens > max_tokens:
+            continue
         routed = torch.zeros(
             (num_tokens, 3584), dtype=torch.bfloat16, device=up_weight.device
         )

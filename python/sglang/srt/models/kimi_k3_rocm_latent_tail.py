@@ -23,9 +23,10 @@ from typing import Optional
 import torch
 from torch import nn
 
+from sglang.srt.environ import envs
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 
-_TOKENS = (1, 2, 4)
+_TOKENS = (1, 2, 4, 8)
 
 
 def k3_prepare_latent_tail_fp8(mlp: nn.Module) -> None:
@@ -55,6 +56,8 @@ def k3_latent_tail_eligible(
     return (
         getattr(mlp, "_k3_latent_tail", None) is not None
         and num_tokens in _TOKENS
+        and num_tokens
+        <= envs.SGLANG_ROCM_K3_AITER_LATENT_TAIL_FP8_MAX_TOKENS.get()
         and forward_batch is not None
         and forward_batch.forward_mode.is_decode_or_idle()
     )
