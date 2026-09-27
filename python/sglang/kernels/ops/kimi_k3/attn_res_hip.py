@@ -51,6 +51,7 @@ def _agg_kernel(
     addend_ptr,  # [T, H]; the pending residual, or prefix_ptr when not HAS_ADD
     prefix_out_ptr,  # [T, H]; materialized prefix, written when HAS_ADD
     bank_ptr,  # [T, NB, H]
+    bank_ms_ptr,  # [T, NB] fp32; frozen row sums of squares
     cw_ptr,  # [H] fp32; score_norm weight * score_proj weight
     ow_ptr,  # [H]; out RMSNorm weight, unread when not APPLY_OUT_NORM
     out_ptr,  # [T, H]
@@ -61,6 +62,7 @@ def _agg_kernel(
     stride_om,
     stride_bm,
     stride_bb,
+    stride_ms,
     stride_o,
     H: tl.constexpr,
     BLOCK_H: tl.constexpr,
@@ -68,6 +70,7 @@ def _agg_kernel(
     R_PAD: tl.constexpr,
     HAS_ADD: tl.constexpr,
     WRITE_BANK: tl.constexpr,
+    USE_BANK_MS: tl.constexpr,
     APPLY_OUT_NORM: tl.constexpr,
 ):
     """One CTA per token: score the NVB+1 rows, softmax, mix, apply the output
@@ -119,7 +122,10 @@ def _agg_kernel(
     pv = row.to(tl.float32)
 
     cw = tl.load(cw_ptr + offs, mask=mask, other=0.0)
-    p_score = tl.sum(pv * cw) / tl.sqrt(tl.sum(pv * pv) / H + score_eps)
+    p_ss = tl.sum(pv * pv)
+    p_score = tl.sum(pv * cw) / tl.sqrt(p_ss / H + score_eps)
+    if WRITE_BANK and USE_BANK_MS:
+        tl.store(bank_ms_ptr + t * stride_ms + NVB, p_ss)
 
     # The whole bank, in registers: every row's load is in flight at once, and
     # the mix below reuses it instead of going back to HBM.
@@ -130,8 +136,14 @@ def _agg_kernel(
         mask=mask_r[:, None] & mask[None, :],
         other=0.0,
     ).to(tl.float32)
+    if USE_BANK_MS:
+        b_ss = tl.load(
+            bank_ms_ptr + t * stride_ms + offs_r, mask=mask_r, other=0.0
+        )
+    else:
+        b_ss = tl.sum(tile * tile, axis=1)
     b_score = tl.sum(tile * cw[None, :], axis=1) / tl.sqrt(
-        tl.sum(tile * tile, axis=1) / H + score_eps
+        b_ss / H + score_eps
     )
 
     m = tl.maximum(tl.max(tl.where(mask_r, b_score, -float("inf"))), p_score)
@@ -148,9 +160,57 @@ def _agg_kernel(
     tl.store(out_ptr + t * stride_o + offs, acc.to(out_ptr.dtype.element_ty), mask=mask)
 
 
+@triton.jit
+def _write_bank_kernel(
+    src_ptr,
+    bank_ptr,
+    bank_ms_ptr,
+    stride_sm,
+    stride_bm,
+    stride_bb,
+    stride_ms,
+    ROW: tl.constexpr,
+    H: tl.constexpr,
+    BLOCK_H: tl.constexpr,
+):
+    """Snapshot one bank row and cache its score-normalization statistic."""
+    t = tl.program_id(0)
+    offs = tl.arange(0, BLOCK_H)
+    mask = offs < H
+    row = tl.load(src_ptr + t * stride_sm + offs, mask=mask, other=0.0)
+    tl.store(bank_ptr + t * stride_bm + ROW * stride_bb + offs, row, mask=mask)
+    row_f = row.to(tl.float32)
+    tl.store(bank_ms_ptr + t * stride_ms + ROW, tl.sum(row_f * row_f))
+
+
+def write_bank_hip(
+    src: torch.Tensor,
+    bank: torch.Tensor,
+    bank_ms: torch.Tensor,
+    row: int,
+) -> None:
+    """Write ``bank[:, row]`` and its mean-square in one pass."""
+    T, H = src.shape
+    _write_bank_kernel[(T,)](
+        src,
+        bank,
+        bank_ms,
+        src.stride(0),
+        bank.stride(0),
+        bank.stride(1),
+        bank_ms.stride(0),
+        ROW=row,
+        H=H,
+        BLOCK_H=triton.next_power_of_2(H),
+        num_warps=4,
+        waves_per_eu=0,
+    )
+
+
 def attn_res_hip(
     prefix_sum: torch.Tensor,
     bank: torch.Tensor,
+    bank_ms: Optional[torch.Tensor],
     cw: torch.Tensor,
     ow: Optional[torch.Tensor],
     out: torch.Tensor,
@@ -171,6 +231,7 @@ def attn_res_hip(
     prefix_sum : [T, H] bf16 — the running prefix, or its first term if addend
                  is given
     bank       : [T, NB, H] bf16 (rows 0..nvb-1 are aggregated)
+    bank_ms    : [T, NB] fp32 cached mean-square, or None
     cw         : [H] fp32 — precomputed score_norm weight * proj weight
     ow         : [H] output RMSNorm weight, or None to return the pre-norm
                  softmax mixture (the aggregate-stream value)
@@ -199,6 +260,8 @@ def attn_res_hip(
     addend_arg = addend if has_add else prefix_sum
     prefix_out_arg = prefix_out if has_add else prefix_sum
     ow_arg = ow if ow is not None else cw
+    use_bank_ms = bank_ms is not None
+    bank_ms_arg = bank_ms if use_bank_ms else bank
 
     r_pad = triton.next_power_of_2(nvb)
     num_warps, waves_per_eu = _LAUNCH_TUNING[r_pad] if _USE_TUNED_LAUNCH else (4, 0)
@@ -207,6 +270,7 @@ def attn_res_hip(
         addend_arg,
         prefix_out_arg,
         bank,
+        bank_ms_arg,
         cw,
         ow_arg,
         out,
@@ -217,6 +281,7 @@ def attn_res_hip(
         prefix_out_arg.stride(0),
         bank.stride(0),
         bank.stride(1),
+        bank_ms_arg.stride(0),
         out.stride(0),
         H=H,
         BLOCK_H=triton.next_power_of_2(H),
@@ -224,6 +289,7 @@ def attn_res_hip(
         R_PAD=r_pad,
         HAS_ADD=has_add,
         WRITE_BANK=write_prefix,
+        USE_BANK_MS=use_bank_ms,
         APPLY_OUT_NORM=ow is not None,
         num_warps=num_warps,
         waves_per_eu=waves_per_eu,

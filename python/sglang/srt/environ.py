@@ -942,6 +942,11 @@ class Envs:
     # Use the per-bank-depth num_warps / waves_per_eu for the ROCm
     # attention-residual kernels; set 0 for the untuned launch.
     SGLANG_ROCM_K3_ATTN_RES_TUNED_LAUNCH = EnvBool(True)
+    # Cache each frozen residual-bank row's mean-square when it is written.
+    # Prefill then skips nvb full-width square reductions per aggregation.
+    # Keep decode on the original kernel; the extra scalar loads do not pay
+    # back below this token count. 0 disables the cache.
+    SGLANG_ROCM_K3_ATTN_RES_BANK_MS_MIN_TOKENS = EnvInt(512)
     # Run the merged BF16 K3 MoE front through AITER tuned_gemm in this window.
     SGLANG_ROCM_K3_AITER_TUNED_MOE_FRONT = EnvBool(True)
     SGLANG_ROCM_K3_AITER_TUNED_MOE_FRONT_MIN_TOKENS = EnvInt(1)
