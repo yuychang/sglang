@@ -950,6 +950,13 @@ class Envs:
     # Use the per-bank-depth num_warps / waves_per_eu for the ROCm
     # attention-residual kernels; set 0 for the untuned launch.
     SGLANG_ROCM_K3_ATTN_RES_TUNED_LAUNCH = EnvBool(True)
+    # Cache each frozen residual-bank row's sum of squares when it is written.
+    # Prefill then skips nvb full-width square reductions per aggregation.
+    # Uncontended 8k/1k with 512 moved total token throughput by at most
+    # +0.26% and GSM8K was 0.951, so the default stays off. The reduction is
+    # not bit-exact. Set 512 to enable it and keep decode on the original
+    # kernel. 0 disables it.
+    SGLANG_ROCM_K3_ATTN_RES_BANK_MS_MIN_TOKENS = EnvInt(0)
     # Fuse K3 MLA decode's Q concat and latent KV-cache write into one AITER
     # kernel on gfx950.
     SGLANG_ROCM_K3_AITER_MLA_Q_CACHE_FUSION = EnvBool(True)

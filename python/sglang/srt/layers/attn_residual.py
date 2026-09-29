@@ -22,6 +22,7 @@ import torch
 import triton
 import triton.language as tl
 
+from sglang.srt.environ import envs
 from sglang.srt.layers.layernorm import RMSNorm
 from sglang.srt.layers.linear import ReplicatedLinear
 from sglang.srt.utils import is_hip, is_npu
@@ -293,6 +294,7 @@ def _aggregate_hip(
     prefix_sum: torch.Tensor,
     addend: Optional[torch.Tensor],
     bank: torch.Tensor,
+    bank_ms: Optional[torch.Tensor],
     nvb: int,
     score_proj: ReplicatedLinear,
     score_norm: RMSNorm,
@@ -311,6 +313,7 @@ def _aggregate_hip(
     attn_res_hip(
         prefix_sum,
         bank,
+        bank_ms,
         cw,
         out_norm.weight if out_norm is not None else None,
         out,
@@ -359,7 +362,7 @@ def aggregate_stream(
         return prefix_sum
     if _use_hip_fused(prefix_sum.shape[1], nvb):
         return _aggregate_hip(
-            prefix_sum, None, bank, nvb, score_proj, score_norm, None
+            prefix_sum, None, bank, None, nvb, score_proj, score_norm, None
         )[0]
     if prefix_sum.shape[1] % _BLOCK_H != 0:
         return aggregate_stream_torch(prefix_sum, bank, nvb, score_proj, score_norm)
@@ -370,6 +373,7 @@ def _aggregate_fused_add(
     prefix_a: torch.Tensor,
     prefix_b: torch.Tensor,
     bank: torch.Tensor,
+    bank_ms: Optional[torch.Tensor],
     nvb: int,
     score_proj: ReplicatedLinear,
     score_norm: RMSNorm,
@@ -385,6 +389,7 @@ def _aggregate_fused_add(
             prefix_a,
             prefix_b,
             bank,
+            bank_ms,
             nvb,
             score_proj,
             score_norm,
@@ -396,6 +401,7 @@ def _aggregate_fused_add(
         _aggregate(
             prefix,
             bank,
+            bank_ms,
             nvb,
             score_proj,
             score_norm,
@@ -409,6 +415,7 @@ def _aggregate_fused_add(
 def _aggregate(
     prefix_sum: torch.Tensor,
     bank: torch.Tensor,
+    bank_ms: Optional[torch.Tensor],
     nvb: int,
     score_proj: ReplicatedLinear,
     score_norm: RMSNorm,
@@ -439,6 +446,7 @@ def _aggregate(
             prefix_sum,
             None,
             bank,
+            bank_ms,
             nvb,
             score_proj,
             score_norm,
@@ -468,10 +476,31 @@ class AttnResidual:
         self.block_residual = hidden_states.new_empty(
             (num_tokens, block_num, hidden_size)
         )
+        bank_ms_min_tokens = envs.SGLANG_ROCM_K3_ATTN_RES_BANK_MS_MIN_TOKENS.get()
+        self.block_residual_ms = (
+            torch.empty(
+                (num_tokens, block_num),
+                dtype=torch.float32,
+                device=hidden_states.device,
+            )
+            if is_hip() and bank_ms_min_tokens > 0 and num_tokens >= bank_ms_min_tokens
+            else None
+        )
         self.num_valid_blocks = 0
         if block_residual is not None:  # inherited from the previous PP rank
             self.num_valid_blocks = block_residual.size(1)
-            self.block_residual[:, : self.num_valid_blocks, :].copy_(block_residual)
+            if self.block_residual_ms is None:
+                self.block_residual[:, : self.num_valid_blocks, :].copy_(block_residual)
+            else:
+                from sglang.kernels.ops.attention.attn_res_hip import write_bank_hip
+
+                for row in range(self.num_valid_blocks):
+                    write_bank_hip(
+                        block_residual[:, row, :],
+                        self.block_residual,
+                        self.block_residual_ms,
+                        row,
+                    )
 
     def write(self, prefix_sum: torch.Tensor, rows: Optional[slice] = None) -> None:
         """Snapshot the pre-attention prefix into the next bank row.
@@ -480,7 +509,17 @@ class AttnResidual:
         slice, so only that slice is written and subsequently read locally.
         """
         bank = self.block_residual if rows is None else self.block_residual[rows]
-        bank[:, self.num_valid_blocks, :].copy_(prefix_sum)
+        bank_ms = (
+            self.block_residual_ms
+            if rows is None or self.block_residual_ms is None
+            else self.block_residual_ms[rows]
+        )
+        if bank_ms is None:
+            bank[:, self.num_valid_blocks, :].copy_(prefix_sum)
+        else:
+            from sglang.kernels.ops.attention.attn_res_hip import write_bank_hip
+
+            write_bank_hip(prefix_sum, bank, bank_ms, self.num_valid_blocks)
         self.num_valid_blocks += 1
 
     def forward(
@@ -522,6 +561,11 @@ class AttnResidual:
         block_residual = (
             self.block_residual if rows is None else self.block_residual[rows]
         )
+        block_residual_ms = (
+            self.block_residual_ms
+            if rows is None or self.block_residual_ms is None
+            else self.block_residual_ms[rows]
+        )
 
         fused_write = write and (
             _use_fast(hidden_states.shape[1])
@@ -533,6 +577,7 @@ class AttnResidual:
             normed = _aggregate(
                 hidden_states,
                 block_residual,
+                block_residual_ms,
                 nvb,
                 score_proj,
                 score_norm,
@@ -546,6 +591,7 @@ class AttnResidual:
                 prefix_sum,
                 hidden_states,
                 block_residual,
+                block_residual_ms,
                 nvb,
                 score_proj,
                 score_norm,
