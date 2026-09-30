@@ -2192,6 +2192,10 @@ class KimiK3DeltaAttention(nn.Module):
         # experts; attention linears resolve to UnquantizedLinearMethod, so a
         # non-None quant_config is fine for the merged projection.
         self.do_fuse_qkvbfg = quant_config is None and self.attn_tp_size == self.tp_size
+        # The ROCm in-proj merges only need full-TP sharding. do_fuse_qkvbfg also
+        # requires quant_config is None, which would turn them off for the Quark
+        # checkpoints they target; their own dtype checks guard the rest.
+        self._attn_tp_is_full_tp = self.attn_tp_size == self.tp_size
 
         if self.use_full_rank_gate:
             # Fuse only the wide projections [q, k, v, g]: folding b (12/rank)
@@ -2575,7 +2579,7 @@ class KimiK3DeltaAttention(nn.Module):
         """Return whether the KDA weights can safely share one ROCm GEMM."""
         if not (_is_hip and envs.SGLANG_ROCM_K3_FUSE_KDA_INPROJ.get()):
             return False
-        if not (self.do_fuse_qkvbfg and self.use_full_rank_gate):
+        if not (self._attn_tp_is_full_tp and self.use_full_rank_gate):
             return False
         weights = [
             module.weight
@@ -2596,7 +2600,7 @@ class KimiK3DeltaAttention(nn.Module):
     def _prepare_group64_projection(self) -> None:
         if (
             not _aiter_kda_group64
-            or not self.do_fuse_qkvbfg
+            or not self._attn_tp_is_full_tp
             or not self.use_full_rank_gate
         ):
             return

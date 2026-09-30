@@ -61,7 +61,7 @@ def _k3_kda_inproj_channel_fp8_scales(
     if not (
         _k3_ptpc_fp8
         and envs.SGLANG_ROCM_K3_FUSE_KDA_INPROJ.get()
-        and self_attn.do_fuse_qkvbfg
+        and self_attn._attn_tp_is_full_tp
         and self_attn.use_full_rank_gate
     ):
         return None
