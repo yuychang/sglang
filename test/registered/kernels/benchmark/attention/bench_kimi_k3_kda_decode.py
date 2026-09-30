@@ -48,7 +48,7 @@ def main() -> None:
         norm_eps=test["_NORM_EPS"],
         out=out,
     )
-    fn = test["flydsl_kimi_k3_kda_decode_with_f_b"]
+    fn = test["flydsl_kda_decode_with_f_b"]
     for _ in range(args.warmup):
         fn(**kwargs)
     torch.cuda.synchronize()
