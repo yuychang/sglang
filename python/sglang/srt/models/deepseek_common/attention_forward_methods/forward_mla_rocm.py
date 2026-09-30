@@ -61,6 +61,7 @@ from sglang.srt.models.deepseek_common.utils import (
     _use_aiter_bpreshuffle_gfx95,
     _use_aiter_gfx95,
 )
+from sglang.srt.models.deepseek_common.utils_rocm import accepts_ptpc_fp8_tuple
 from sglang.srt.runtime_context import get_exec, get_parallel
 from sglang.srt.state_capturer.indexer_topk import (
     maybe_capture_indexer_topk,
@@ -528,6 +529,40 @@ class DeepseekMLARocmForwardMixin:
                     )
                     if _use_aiter_bpreshuffle_gfx95:
                         q = materialize_bpreshuffle_fp8_scale_tuple(q)
+            elif (
+                _use_aiter
+                and getattr(self, "_k3_fuse_q_norm_quant", False)
+                and accepts_ptpc_fp8_tuple(self.q_b_proj)
+            ):
+                # Kimi-K3: fuse the q/k RMSNorm with q_b_proj's per-token quant.
+                from aiter import dtypes as aiter_dtypes
+                from aiter.ops.fused_qk_rmsnorm_group_quant import (
+                    fused_qk_rmsnorm_per_token_quant,
+                )
+
+                q_fp8 = torch.empty(q.shape, dtype=aiter_dtypes.fp8, device=q.device)
+                q_scale = torch.empty(
+                    (q.shape[0], 1), dtype=torch.float32, device=q.device
+                )
+                k_out = torch.empty_like(k_nope)
+                q_unq = torch.empty_like(q) if self.use_dsa else None
+                fused_qk_rmsnorm_per_token_quant(
+                    q_fp8,
+                    q_scale,
+                    q,
+                    self.q_a_layernorm.weight,
+                    self.q_a_layernorm.variance_epsilon,
+                    q_unq,
+                    k_out,
+                    None,
+                    k_nope,
+                    self.kv_a_layernorm.weight,
+                    self.kv_a_layernorm.variance_epsilon,
+                )
+                q = (q_fp8, q_scale)
+                k_nope = k_out
+                if self.use_dsa:
+                    q_lora = q_unq
             elif _use_aiter:
                 q, k_nope = fused_qk_rmsnorm_bf16(
                     q,
@@ -915,7 +950,28 @@ class DeepseekMLARocmForwardMixin:
                 **(dict(topk_indices=topk_indices) if topk_indices is not None else {}),
             )
         else:
-            if self._skip_rope_for_aiter_fused_mla():
+            q = None
+            # Kimi-K3 fuses the Q concat and cache write on decode.
+            k3_fused_q_cache = getattr(self, "_try_fused_mla_q_cache", None)
+            if (
+                k3_fused_q_cache is not None
+                and self.current_attention_backend in ("aiter", "triton", "triton_mla")
+                and not get_parallel().dcp_enabled
+                and forward_batch.forward_mode.is_decode_or_idle()
+            ):
+                result = k3_fused_q_cache(
+                    q_nope_out,
+                    q_pe,
+                    k_nope,
+                    k_pe,
+                    positions,
+                    forward_batch.out_cache_loc,
+                )
+                if result is not None:
+                    q, k = result
+                    save_kv_cache = False
+
+            if q is None and self._skip_rope_for_aiter_fused_mla():
                 q, _, _, k = _fused_rope_cat_and_cache(
                     self,
                     q_nope_out,
@@ -926,7 +982,7 @@ class DeepseekMLARocmForwardMixin:
                     forward_batch.out_cache_loc,
                 )
                 save_kv_cache = False
-            else:
+            elif q is None:
                 q = torch.cat([q_nope_out, q_pe], dim=-1)
                 k = torch.cat([k_nope, k_pe], dim=-1)
 

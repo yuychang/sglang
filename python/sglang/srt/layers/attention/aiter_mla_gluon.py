@@ -14,7 +14,7 @@ from __future__ import annotations
 import functools
 import inspect
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import torch
 
@@ -61,8 +61,16 @@ def log_mla_gluon_capability(log: logging.Logger | None = None) -> None:
 
 
 def prefer_mla_gluon_decode(
-    *, head_pad_mode: str, num_head: int, kv_cache_dtype: torch.dtype
+    *,
+    head_pad_mode: str,
+    num_head: int,
+    kv_cache_dtype: torch.dtype,
+    q_dtype: Optional[torch.dtype] = None,
 ) -> bool:
+    # The Gluon kernel consumes BF16 Q at the native 12-head count; an FP8 Q
+    # (the pre-padded 16-head decode buffer) must stay on zero-pad mla_decode_fwd.
+    if q_dtype is not None and q_dtype != torch.bfloat16:
+        return False
     return (
         head_pad_mode == "zero"
         and num_head == 12

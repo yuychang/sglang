@@ -943,6 +943,27 @@ class Envs:
     SGLANG_ROCM_K3_PREROUTE_COOP_WPB = EnvInt(8)
     SGLANG_ROCM_K3_PREROUTE_COOP_WPE = EnvInt(3)
     SGLANG_ROCM_K3_PREROUTE_COOP_WCM = EnvInt(3)
+    # Fold the K3 attn-res prefix add into AITER custom all-reduce: 1-stage
+    # for M in {1, 2, 4}, 2-stage epilogue for M=8.
+    SGLANG_ROCM_K3_AR_RESIDUAL = EnvBool(True)
+    SGLANG_ROCM_K3_AR_RESIDUAL_MAX_TOKENS = EnvInt(8)
+    # Use the per-bank-depth num_warps / waves_per_eu for the ROCm
+    # attention-residual kernels; set 0 for the untuned launch.
+    SGLANG_ROCM_K3_ATTN_RES_TUNED_LAUNCH = EnvBool(True)
+    # Cache each frozen residual-bank row's sum of squares when it is written.
+    # Prefill then skips nvb full-width square reductions per aggregation.
+    # Uncontended 8k/1k with 512 moved total token throughput by at most
+    # +0.26% and GSM8K was 0.951, so the default stays off. The reduction is
+    # not bit-exact. Set 512 to enable it and keep decode on the original
+    # kernel. 0 disables it.
+    SGLANG_ROCM_K3_ATTN_RES_BANK_MS_MIN_TOKENS = EnvInt(0)
+    # Fuse K3 MLA decode's Q concat and latent KV-cache write into one AITER
+    # kernel on gfx950.
+    SGLANG_ROCM_K3_AITER_MLA_Q_CACHE_FUSION = EnvBool(True)
+    # Let the kernel producing a K3 FP8 linear's input (RMSNorm, output gate)
+    # also quantize it, handing the linear (fp8, per-token scale) directly.
+    SGLANG_ROCM_K3_FP8_PRODUCER_FUSION = EnvBool(True)
+    SGLANG_ROCM_K3_FP8_PRODUCER_FUSION_MAX_TOKENS = EnvInt(256)
     # Activation precision for MXFP4-weight dense linears, independent of the
     # MoE: "fp4" is the checkpoint's own W4A4, "bf16" dequantizes the weights
     # at load. bf16 by default: K3 GSM8K scores 0.947 vs fp4's 0.908, for
