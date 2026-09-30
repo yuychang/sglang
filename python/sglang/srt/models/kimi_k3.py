@@ -428,6 +428,29 @@ def _add3(
 _EP_FRONT_LOGGED = False
 
 
+def _moe_front_runner_is_aiter(experts) -> bool:
+    """Whether any MoE runner attached to ``experts`` indexes rows by stride.
+
+    Quark MXFP4 stores the runner on ``experts.scheme`` and, unless the quant
+    method republishes it, leaves ``experts.runner`` as the class-level None.
+    """
+    if experts is None:
+        return False
+    for obj in (
+        experts,
+        getattr(experts, "quant_method", None),
+        getattr(experts, "scheme", None),
+    ):
+        if obj is None:
+            continue
+        runner = getattr(obj, "runner", None)
+        backend = getattr(runner, "runner_backend", None)
+        is_aiter = getattr(backend, "is_aiter", None)
+        if callable(is_aiter) and is_aiter():
+            return True
+    return False
+
+
 def _o_proj_takes_output(o_proj: RowParallelLinear) -> bool:
     """Whether o_proj can write into caller-owned storage. ``apply_into`` is an
     optional quant-method capability; only the unquantized method has it."""
@@ -1276,8 +1299,14 @@ class KimiK3MoE(nn.Module):
         takes both a strided row and an fp32 row. The SM90/SM120 cutlass mxfp4
         kernels return from apply() before that quant, and precision="bf16"
         skips it as well, so those keep the bf16 contract even though the
-        runner backend is the same."""
+        runner backend is the same. AITER indexes rows by stride, so it
+        also takes the split view. Quark keeps that runner on the scheme
+        (``experts.scheme.runner``); ``FusedMoE.runner`` is only set when the
+        quant method republishes it."""
         from sglang.srt.layers.quantization.mxfp4 import Mxfp4MoEMethod
+
+        if _moe_front_runner_is_aiter(self.experts):
+            return False
 
         method = self.experts.quant_method
         return not (
@@ -1309,8 +1338,9 @@ class KimiK3MoE(nn.Module):
         if self._route_quant_fuse_eligible:
             route_quant_handoff.stage(routed_input)
         try:
-            topk_output = self.topk(hidden_states, router_logits)
+            # topk sits inside so the ROCm fused sort can zero `latent` for gemm2.
             with zero_copy_context.set_moe_output(latent):
+                topk_output = self.topk(hidden_states, router_logits)
                 expert_output = self.experts(routed_input, topk_output)
         finally:
             route_quant_handoff.clear()
@@ -1356,7 +1386,11 @@ class KimiK3MoE(nn.Module):
         return norm.weight, norm.variance_epsilon
 
     def _forward_fused(
-        self, hidden_states: torch.Tensor, *, prefix_sum: Optional[torch.Tensor]
+        self,
+        hidden_states: torch.Tensor,
+        *,
+        prefix_sum: Optional[torch.Tensor],
+        forward_batch: Optional[ForwardBatch] = None,
     ) -> torch.Tensor:
         """Fused-front pipeline: read hidden_states once through the merged
         [H, gate_up + E + latent] weight, then land both TP-partial sums in
@@ -1377,19 +1411,36 @@ class KimiK3MoE(nn.Module):
 
         num_tokens, hidden_size = hidden_states.shape
         preroute = None
+        use_mxfp4 = False
         if _is_hip:
+            from sglang.srt.models.kimi_k3_rocm_moe_front import (
+                k3_run_front_mxfp4,
+                k3_run_latent_up_mxfp4,
+                k3_run_latent_up_ptpc_fp8,
+                k3_tuned_front_gemm,
+                k3_use_latent_mxfp4,
+            )
             from sglang.srt.models.kimi_k3_rocm_preroute import k3_run_preroute
 
             preroute = k3_run_preroute(self, hidden_states)
+            use_mxfp4 = k3_use_latent_mxfp4(self, num_tokens)
         shared_preactivated = False
         if preroute is not None:
             gate_up, router_logits, routed_input, shared_preactivated = preroute
-        else:
-            fused = _k3_bf16_gemm(
-                hidden_states,
-                self._front_w,
-                out_dtype=torch.float32 if self._front_fp32 else None,
+        elif use_mxfp4:
+            gate_up, router_logits, routed_input = k3_run_front_mxfp4(
+                self, hidden_states
             )
+        else:
+            fused = (
+                k3_tuned_front_gemm(hidden_states, self._front_w) if _is_hip else None
+            )
+            if fused is None:
+                fused = _k3_bf16_gemm(
+                    hidden_states,
+                    self._front_w,
+                    out_dtype=torch.float32 if self._front_fp32 else None,
+                )
             gate_up, router_logits, routed_input = torch.split(
                 fused, self._front_sizes, dim=-1
             )
@@ -1397,9 +1448,20 @@ class KimiK3MoE(nn.Module):
             router_logits = router_logits.contiguous()
         if self._moe_front_needs_dense_bf16:
             # off an fp32 front the cast allocates the dense buffer, so the
-            # contiguous() behind it is free; off a bf16 front it is the copy
-            routed_input = routed_input.to(hidden_states.dtype).contiguous()
+            # contiguous() behind it is free; off a bf16 front it is the copy.
+            # AITER (including Quark MXFP4) indexes rows by stride, so a
+            # unit-last-stride slice of the fused front must not be densified:
+            # that same-dtype contiguous() is a nocast direct_copy between the
+            # front GEMM and SiTU.
+            routed_input = routed_input.to(hidden_states.dtype)
+            if not (
+                _moe_front_runner_is_aiter(self.experts)
+                and routed_input.dim() == 2
+                and routed_input.stride(-1) == 1
+            ):
+                routed_input = routed_input.contiguous()
         latent_numel = num_tokens * self.moe_hidden_size
+        pair = None
         if k3_ar_fusion.enabled():
             # the shared-expert AR is pull-only, so its input must be a
             # symm_buffer slice for every rank to resolve the same offset
@@ -1485,14 +1547,44 @@ class KimiK3MoE(nn.Module):
                 )
             elif k3_ar_fusion.enabled():
                 k3_ar_fusion.all_reduce(buf)
+            elif _is_hip:
+                from sglang.srt.models.kimi_k3_rocm_moe_ar import (
+                    k3_all_reduce_moe_pair,
+                )
+
+                pair, fused_norm = k3_all_reduce_moe_pair(
+                    self, buf, num_tokens, hidden_size, forward_batch
+                )
             else:
                 buf = tensor_model_parallel_all_reduce(buf)
 
-        latent = buf[:latent_numel].view(num_tokens, self.moe_hidden_size)
-        shared_output = buf[latent_numel:].view(num_tokens, hidden_size)
+        if pair is not None:
+            latent, shared_output = pair
+        else:
+            latent = buf[:latent_numel].view(num_tokens, self.moe_hidden_size)
+            shared_output = buf[latent_numel:].view(num_tokens, hidden_size)
+        if _is_hip:
+            from sglang.srt.models.kimi_k3_rocm_latent_tail import k3_run_latent_tail
+
+            out = k3_run_latent_tail(
+                self,
+                latent,
+                shared_output,
+                prefix_sum,
+                forward_batch,
+                skip_rms=fused_norm,
+            )
+            if out is not None:
+                return out
         if not fused_norm:
             latent = self._latent_norm(latent)
-        out, _ = self.routed_expert_up_proj(latent)
+        out = None
+        if use_mxfp4:
+            out = k3_run_latent_up_mxfp4(self, latent)
+        elif _is_hip:
+            out = k3_run_latent_up_ptpc_fp8(self, latent)
+        if out is None:
+            out, _ = self.routed_expert_up_proj(latent)
 
         # prefetch_bc: b and c complete before the norm / up_proj chain
         # starts; only `a`'s producer can still be in flight at PDL entry.
@@ -1528,7 +1620,9 @@ class KimiK3MoE(nn.Module):
             dp_gather_replicate(hidden_states, local_hidden_states, forward_batch)
             dp_prefix_sum, prefix_sum = prefix_sum, None
         if hidden_states.shape[0] > 0 and self._eligible_for_fused_front:
-            out = self._forward_fused(hidden_states, prefix_sum=prefix_sum)
+            out = self._forward_fused(
+                hidden_states, prefix_sum=prefix_sum, forward_batch=forward_batch
+            )
         else:
             out = self._forward_unfused(hidden_states, prefix_sum=prefix_sum)
         if use_dp:
@@ -3678,17 +3772,31 @@ class KimiK3LinearForCausalLM(nn.Module):
             if isinstance(layer.mlp, KimiK3MoE):
                 layer.mlp._merge_front_weights()
                 if _is_hip:
+                    from sglang.srt.models.kimi_k3_rocm_latent_tail import (
+                        k3_prepare_latent_tail_fp8,
+                    )
+                    from sglang.srt.models.kimi_k3_rocm_moe_front import (
+                        k3_prepare_latent_up_ptpc_fp8,
+                        k3_prepare_moe_latent_mxfp4,
+                        k3_router_bias_dtype,
+                    )
                     from sglang.srt.models.kimi_k3_rocm_preroute import (
                         k3_prepare_preroute_fp8,
                     )
 
+                    k3_prepare_moe_latent_mxfp4(layer.mlp)
+                    k3_prepare_latent_up_ptpc_fp8(layer.mlp)
                     k3_prepare_preroute_fp8(layer.mlp)
-                # Convert the correction bias to fp32 once so the per-call
-                # .to(float32) in topk is a no-op, not one upcast kernel per
-                # MoE layer per step.
+                    k3_prepare_latent_tail_fp8(layer.mlp)
+                # Convert the correction bias to the router dtype once so the
+                # per-call cast in topk is a no-op, not one kernel per MoE
+                # layer per step.
                 bias = layer.mlp.gate.e_score_correction_bias
-                if bias.dtype != torch.float32:
-                    bias.data = bias.data.to(torch.float32)
+                bias_dtype = (
+                    k3_router_bias_dtype(layer.mlp) if _is_hip else torch.float32
+                )
+                if bias.dtype != bias_dtype:
+                    bias.data = bias.data.to(bias_dtype)
             if isinstance(layer.self_attn, KimiK3DeltaAttention):
                 layer.self_attn._merge_bfa_weights()
                 layer.self_attn._prepare_fused_decode()

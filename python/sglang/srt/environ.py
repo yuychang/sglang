@@ -939,6 +939,9 @@ class Envs:
     SGLANG_ROCM_K3_PREROUTE_COOP_WPB = EnvInt(8)
     SGLANG_ROCM_K3_PREROUTE_COOP_WPE = EnvInt(3)
     SGLANG_ROCM_K3_PREROUTE_COOP_WCM = EnvInt(3)
+    # Fuse the 1/2/4-token K3 latent RMSNorm, FP8 up-projection and shared add
+    # into one FlyDSL kernel on gfx950.
+    SGLANG_ROCM_K3_AITER_LATENT_TAIL_FP8 = EnvBool(True)
     # Fold the K3 attn-res prefix add into AITER custom all-reduce: 1-stage
     # for M in {1, 2, 4}, 2-stage epilogue for M=8.
     SGLANG_ROCM_K3_AR_RESIDUAL = EnvBool(True)
@@ -953,6 +956,18 @@ class Envs:
     # not bit-exact. Set 512 to enable it and keep decode on the original
     # kernel. 0 disables it.
     SGLANG_ROCM_K3_ATTN_RES_BANK_MS_MIN_TOKENS = EnvInt(0)
+    # Run the merged BF16 K3 MoE front through AITER tuned_gemm in this window.
+    SGLANG_ROCM_K3_AITER_TUNED_MOE_FRONT = EnvBool(True)
+    SGLANG_ROCM_K3_AITER_TUNED_MOE_FRONT_MIN_TOKENS = EnvInt(1)
+    SGLANG_ROCM_K3_AITER_TUNED_MOE_FRONT_MAX_TOKENS = EnvInt(192)
+    # Run the K3 latent down/up projections as AITER MXFP4 GEMMs for large
+    # batches; the BF16 weights stay as the fallback.
+    SGLANG_ROCM_K3_MOE_LATENT_MXFP4 = EnvBool(True)
+    SGLANG_ROCM_K3_MOE_LATENT_MXFP4_MIN_TOKENS = EnvInt(2048)
+    # PTPC FP8 copy of the latent up-projection for decode-sized batches.
+    SGLANG_ROCM_K3_PTPC_FP8 = EnvBool(True)
+    SGLANG_ROCM_K3_PTPC_FP8_MIN_TOKENS = EnvInt(1)
+    SGLANG_ROCM_K3_PTPC_FP8_MAX_TOKENS = EnvInt(256)
     # Fuse K3 MLA decode's Q concat and latent KV-cache write into one AITER
     # kernel on gfx950.
     SGLANG_ROCM_K3_AITER_MLA_Q_CACHE_FUSION = EnvBool(True)
@@ -1830,6 +1845,14 @@ class Envs:
     SGLANG_K3_FUSED_FRONT = EnvBool(True)
     # Use the ROCm radix-4 router for covered K3 top-k workloads.
     SGLANG_K3_RADIX4_TOPK = EnvBool(False)
+    # Fold the BM=16 MoE sort into the radix-4 launch for decode-sized M.
+    SGLANG_ROCM_K3_RADIX4_FUSE_SORT = EnvBool(True)
+    # All-reduce the K3 [latent | shared] slices separately when the pair exceeds the QR cap.
+    SGLANG_ROCM_K3_SPLIT_OVERSIZED_MOE_AR = EnvBool(True)
+    # Fuse the K3 MoE all-reduce with the latent RMSNorm (AITER 2-stage AR only).
+    SGLANG_ROCM_K3_FUSED_AR_RMSNORM = EnvBool(True)
+    # Token cap for the above (0 = no cap); split AR + RMSNorm wins past ~24.
+    SGLANG_ROCM_K3_FUSED_AR_RMSNORM_MAX_TOKENS = EnvInt(24)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_CACHE_CAPACITY = EnvInt(2)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_MIN_HITS = EnvInt(2)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_MAX_SEQLEN = EnvInt(6144)
