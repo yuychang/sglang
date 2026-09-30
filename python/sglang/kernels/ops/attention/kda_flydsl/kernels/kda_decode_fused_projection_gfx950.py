@@ -50,7 +50,7 @@ def _fdot2_f32_bf16(a, b, acc):
 
 
 @functools.cache
-def create_kimi_k3_kda_decode_fb_kernel(
+def create_kda_decode_fused_projection_kernel(
     norm_eps: float,
     lower_bound: float,
     *,
@@ -87,7 +87,7 @@ def create_kimi_k3_kda_decode_fb_kernel(
             recurrent_out: fx.Array[fx.BFloat16, _DIM, 16]
             norm_partial: fx.Array[fx.Float32, 4, 16]
 
-    kernel_name = "kimi_k3_kda_decode_fb_bf16_gfx950"
+    kernel_name = "kda_decode_fused_projection_bf16_gfx950"
     if (
         cooperative_f_a
         or parallel_front
@@ -619,4 +619,4 @@ def create_kimi_k3_kda_decode_fb_kernel(
     return launch
 
 
-__all__ = ["create_kimi_k3_kda_decode_fb_kernel"]
+__all__ = ["create_kda_decode_fused_projection_kernel"]
