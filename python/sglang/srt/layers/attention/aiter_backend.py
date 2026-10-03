@@ -575,6 +575,18 @@ class AiterAttnBackend(AttentionBackend):
                 and self.kv_cache_dtype == fp8_dtype
                 and self.dcp_world_size <= 1
             )
+            # gfx950 persistent fp8 asm has a native 16-head kernel only for
+            # qlen<=4. Longer queries are remapped onto
+            # mla_a8w8_qh32_qseqlen4_gqaratio32_ps, which is slower than Gluon
+            # for DSpark block 7 (verify width 8) at concurrency 1 and 4.
+            verify_qlen = int(self.num_draft_tokens or 1)
+            if self.use_mla_a8w8_asm and verify_qlen > 4:
+                logger.info(
+                    "aiter mla: verify qlen=%s stays on gluon; fp8-Q asm "
+                    "is only used for qlen<=4",
+                    verify_qlen,
+                )
+                self.use_mla_a8w8_asm = False
             if self.use_mla_a8w8_asm:
                 # Persistent kernel, fast_mode metadata without intra-batch
                 # splitting (see make_mla_meta_data).
