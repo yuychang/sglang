@@ -159,12 +159,6 @@ class ForwardMetadata:
     swa_out_cache_loc: Optional[torch.Tensor] = None
     local_kv_lens: Optional[torch.Tensor] = None
     verify_token_table: Optional[torch.Tensor] = None
-    # qlen-8 verify split into two native qlen-4 FP8-Q ASM launches.  The
-    # first half sees only prefix+4 KV rows; the second half uses the normal
-    # full prefix+8 table.
-    split4_kv_indptr: Optional[torch.Tensor] = None
-    split4_kv_indices: Optional[torch.Tensor] = None
-    split4_qo_indptr: Optional[torch.Tensor] = None
     # ASM context-chunk prefill: KV slots to gather and cu_seqlens_k, computed
     # once per batch by AiterAttnBackend._asm_context_prefill_indices.
     asm_ctx_ready: bool = False
@@ -347,7 +341,6 @@ class AiterAttnBackend(AttentionBackend):
         # Filled in once head padding is known. Decode/verify a8w8 ASM is
         # Kimi-K3 TP8 only: 12 heads, fp8 KV, and no DCP.
         self.use_mla_a8w8_asm = False
-        self.use_mla_a8w8_split4 = False
 
         # Get v_head_dim based on model type
         if self.use_mla:
@@ -418,13 +411,6 @@ class AiterAttnBackend(AttentionBackend):
             (max_bs + 1,), dtype=torch.int64, device=model_runner.device
         )
         self._kv_indices_scratch: Optional[torch.Tensor] = None
-        self._split4_kv_indices_scratch: Optional[torch.Tensor] = None
-        self.split4_kv_indptr = torch.zeros(
-            (max_bs + 1,), dtype=torch.int32, device=model_runner.device
-        )
-        self.split4_qo_indptr = torch.arange(
-            0, (max_bs + 1) * 4, step=4, dtype=torch.int32, device=model_runner.device
-        )
 
         # Create prefill indices updater
         if not skip_prefill:
@@ -589,23 +575,18 @@ class AiterAttnBackend(AttentionBackend):
                 and self.kv_cache_dtype == fp8_dtype
                 and self.dcp_world_size <= 1
             )
+            # gfx950 persistent fp8 asm has a native 16-head kernel only for
+            # qlen<=4. Longer queries are remapped onto
+            # mla_a8w8_qh32_qseqlen4_gqaratio32_ps, which is slower than Gluon
+            # for DSpark block 7 (verify width 8) at concurrency 1 and 4.
             verify_qlen = int(self.num_draft_tokens or 1)
-            self.use_mla_a8w8_split4 = self.use_mla_a8w8_asm and verify_qlen == 8
-            # gfx950 has no native qh16 qlen-8 kernel. Split qlen 8 into two
-            # qlen-4 launches instead of allowing aiter to fold it onto the
-            # slower qh32 kernel. Other widths above four stay on Gluon.
-            if self.use_mla_a8w8_asm and verify_qlen > 4 and not self.use_mla_a8w8_split4:
+            if self.use_mla_a8w8_asm and verify_qlen > 4:
                 logger.info(
                     "aiter mla: verify qlen=%s stays on gluon; fp8-Q asm "
                     "is only used for qlen<=4",
                     verify_qlen,
                 )
                 self.use_mla_a8w8_asm = False
-            if self.use_mla_a8w8_split4:
-                logger.info(
-                    "aiter mla: verify qlen=8 uses two native qlen-4 fp8-Q "
-                    "ASM launches"
-                )
             if self.use_mla_a8w8_asm:
                 # Persistent kernel, fast_mode metadata without intra-batch
                 # splitting (see make_mla_meta_data).
@@ -1214,19 +1195,6 @@ class AiterAttnBackend(AttentionBackend):
             )
         return self._kv_indices_scratch[:required_tokens]
 
-    def _get_split4_kv_indices_scratch(
-        self, required_tokens: int, device: torch.device
-    ) -> torch.Tensor:
-        if (
-            self._split4_kv_indices_scratch is None
-            or self._split4_kv_indices_scratch.device != device
-            or self._split4_kv_indices_scratch.numel() < required_tokens
-        ):
-            self._split4_kv_indices_scratch = torch.empty(
-                required_tokens, dtype=torch.int32, device=device
-            )
-        return self._split4_kv_indices_scratch[:required_tokens]
-
     def _asm_context_prefill_indices(
         self, forward_batch: ForwardBatch, bs: int, num_kv_slots: int
     ):
@@ -1389,59 +1357,17 @@ class AiterAttnBackend(AttentionBackend):
             q_fp8 = q_fp8.view(num_tokens, num_head, layer.qk_head_dim)
         q_in = q_fp8.new_zeros((num_tokens, self.num_head_padded, layer.qk_head_dim))
         q_in[:, :num_head, :] = q_fp8
-        def run_asm(q_part, call_kwargs):
-            o_part = q.new_empty(
-                (q_part.shape[0], self.num_head_padded, layer.v_head_dim),
-                dtype=self.input_dtype,
-            )
-            mla_decode_fwd(q_part, k_buffer_flat, o_part, **call_kwargs)
-            return o_part
-
+        o = q.new_empty(
+            (num_tokens, self.num_head_padded, layer.v_head_dim),
+            dtype=self.input_dtype,
+        )
         # Leave the split count to aiter.
         kwargs["num_kv_splits"] = None
         # The asm kernel loads KV row 0 for masked positions and weights it by
         # p = 0, so a NaN there turns every request NaN. Row 0 is the reserved
         # write target of CUDA-graph padding tokens, whose K/V can be NaN.
         k_buffer_flat[0].zero_()
-
-        if self.use_mla_a8w8_split4 and kwargs["max_seqlen_q"] == 8:
-            fm = self.forward_metadata
-            if (
-                fm.split4_kv_indptr is None
-                or fm.split4_kv_indices is None
-                or fm.split4_qo_indptr is None
-            ):
-                raise RuntimeError("qlen-8 ASM split selected without split4 metadata")
-            bs = fm.qo_indptr.numel() - 1
-            q_pair = q_in.view(bs, 8, self.num_head_padded, layer.qk_head_dim)
-
-            # The native non-persistent qlen-4 kernel accepts FP8 Q/FP8 KV and
-            # avoids the qh32 persistent fold. The two calls need independent
-            # KV indptrs because q[0:4] must not see the final four draft rows.
-            common = kwargs.copy()
-            common.update(
-                max_seqlen_q=4,
-                qo_indptr=fm.split4_qo_indptr,
-                work_meta_data=None,
-                work_indptr=None,
-                work_info_set=None,
-                reduce_indptr=None,
-                reduce_final_map=None,
-                reduce_partial_map=None,
-            )
-            first_kwargs = common.copy()
-            first_kwargs.update(
-                kv_indptr=fm.split4_kv_indptr,
-                kv_indices=fm.split4_kv_indices,
-            )
-            first = run_asm(q_pair[:, :4].reshape(-1, *q_in.shape[1:]), first_kwargs)
-            second = run_asm(q_pair[:, 4:].reshape(-1, *q_in.shape[1:]), common)
-            o = torch.stack(
-                (first.view(bs, 4, *first.shape[1:]), second.view(bs, 4, *second.shape[1:])),
-                dim=1,
-            ).reshape(num_tokens, self.num_head_padded, layer.v_head_dim)
-        else:
-            o = run_asm(q_in, kwargs)
+        mla_decode_fwd(q_in, k_buffer_flat, o, **kwargs)
         return o[:, :num_head, :]
 
     def _fp8_prefill_asm_enabled(self) -> bool:
@@ -2116,30 +2042,6 @@ class AiterAttnBackend(AttentionBackend):
                     TOKEN_BLOCK_PARALLEL=num_token_blocks > 1,
                 )
 
-                split4_kv_indptr = None
-                split4_kv_indices = None
-                split4_qo_indptr = None
-                if self.use_mla_a8w8_split4 and self.dcp_world_size <= 1:
-                    split4_kv_lens = kv_lens - 4
-                    split4_kv_indptr = self.split4_kv_indptr[: bs + 1]
-                    split4_kv_indptr[1 : bs + 1] = torch.cumsum(
-                        split4_kv_lens, dim=0
-                    )
-                    split4_kv_indices = self._get_split4_kv_indices_scratch(
-                        kv_lens_sum - 4 * bs, device
-                    )
-                    create_flashinfer_kv_indices_triton[(bs, num_token_blocks)](
-                        self.req_to_token,
-                        forward_batch.req_pool_indices,
-                        split4_kv_lens,
-                        split4_kv_indptr,
-                        None,
-                        split4_kv_indices,
-                        self.req_to_token.stride(0),
-                        TOKEN_BLOCK_PARALLEL=num_token_blocks > 1,
-                    )
-                    split4_qo_indptr = self.split4_qo_indptr[: bs + 1]
-
                 if self.dcp_world_size > 1:
                     self._plan_dcp_decode_metadata(
                         kv_indptr,
@@ -2206,9 +2108,6 @@ class AiterAttnBackend(AttentionBackend):
                     run_graph=False,
                     local_kv_lens=local_kv_lens,
                     verify_token_table=verify_token_table,
-                    split4_kv_indptr=split4_kv_indptr,
-                    split4_kv_indices=split4_kv_indices,
-                    split4_qo_indptr=split4_qo_indptr,
                 )
             else:
                 draft_num = forward_batch.input_ids.shape[0] // bs
@@ -2613,18 +2512,8 @@ class AiterAttnBackend(AttentionBackend):
                 dtype=torch.int32,
                 device=self.device,
             )
-            self.cuda_graph_split4_kv_indices = torch.zeros(
-                (buffer_numel,),
-                dtype=torch.int32,
-                device=self.device,
-            )
         else:
             self.cuda_graph_kv_indices = kv_indices_buf
-            self.cuda_graph_split4_kv_indices = (
-                torch.zeros_like(kv_indices_buf)
-                if self.use_mla_a8w8_split4
-                else None
-            )
 
         if self.use_triton_unified_attention:
             # Keep a distinct page-table buffer for unified attention.  Sharing
@@ -2928,28 +2817,6 @@ class AiterAttnBackend(AttentionBackend):
             )
             kv_last_page_len = self.cuda_graph_kv_last_page_len[:bs]
 
-            split4_kv_indptr = None
-            split4_kv_indices = None
-            split4_qo_indptr = None
-            if self.use_mla and self.use_mla_a8w8_split4:
-                split4_kv_lens = kv_lens - 4
-                split4_kv_indptr = self.split4_kv_indptr[: bs + 1]
-                split4_kv_indptr[1 : bs + 1] = torch.cumsum(
-                    split4_kv_lens, dim=0
-                )
-                split4_kv_indices = self.cuda_graph_split4_kv_indices
-                create_flashinfer_kv_indices_triton[(bs, num_token_blocks)](
-                    self.req_to_token,
-                    req_pool_indices,
-                    split4_kv_lens,
-                    split4_kv_indptr,
-                    None,
-                    split4_kv_indices,
-                    self.req_to_token.stride(0),
-                    TOKEN_BLOCK_PARALLEL=num_token_blocks > 1,
-                )
-                split4_qo_indptr = self.split4_qo_indptr[: bs + 1]
-
             if self.use_mla and self.dcp_world_size > 1:
                 self._plan_dcp_decode_metadata(
                     kv_indptr,
@@ -3020,9 +2887,6 @@ class AiterAttnBackend(AttentionBackend):
                     num_kv_splits=num_kv_splits,
                     local_kv_lens=local_kv_lens,
                     verify_token_table=verify_token_table,
-                    split4_kv_indptr=split4_kv_indptr,
-                    split4_kv_indices=split4_kv_indices,
-                    split4_qo_indptr=split4_qo_indptr,
                 )
             else:
                 max_q_len = verify_tokens_per_req
