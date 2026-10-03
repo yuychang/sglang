@@ -949,6 +949,13 @@ class Envs:
     # import and Triton cga_layout prerequisites hold. Set to 0 to force the
     # zero-pad mla_decode_fwd fallback (benchmarking / emergency disable).
     SGLANG_AITER_MLA_GLUON = EnvBool(True)
+    # 12-head zero-pad topology (Kimi-K3 TP8) with fp8 KV and no DCP: run MLA
+    # decode/verify on aiter's fp8-Q persistent asm kernels (mla_a8w8_*_ps)
+    # instead of Gluon. Off by default; the asm path is slower at concurrency 1.
+    SGLANG_AITER_MLA_A8W8_ASM = EnvBool(False)
+    # gfx950 fp8 PS-ASM prefill memory-faults for 12-head zero-pad models.
+    # Set to 1 to opt into the 12->16 padded ASM prefill path anyway.
+    SGLANG_AITER_MLA_ZERO_PAD_FP8_PREFILL = EnvBool(False)
     # Select the AITER MLA kernel for DCP decode. "gluon" preserves the native
     # low-head Triton path; "asm" quantizes the DCP-gathered query to FP8 and
     # runs mla_decode_fwd with persistent metadata and return_lse=True.

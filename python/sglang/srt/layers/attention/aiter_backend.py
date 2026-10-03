@@ -338,6 +338,9 @@ class AiterAttnBackend(AttentionBackend):
             and self.dcp_world_size > 1
             and self.mla_dcp_decode_backend == "asm"
         )
+        # Filled in once head padding is known. Decode/verify a8w8 ASM is
+        # Kimi-K3 TP8 only: 12 heads, fp8 KV, and no DCP.
+        self.use_mla_a8w8_asm = False
 
         # Get v_head_dim based on model type
         if self.use_mla:
@@ -566,8 +569,24 @@ class AiterAttnBackend(AttentionBackend):
                 _use_mla_ps_kernel = False
                 fast_mode = False
                 intra_batch_mode = False
+            self.use_mla_a8w8_asm = (
+                envs.SGLANG_AITER_MLA_A8W8_ASM.get()
+                and self.head_pad_mode == "zero"
+                and self.kv_cache_dtype == fp8_dtype
+                and self.dcp_world_size <= 1
+            )
+            if self.use_mla_a8w8_asm:
+                # Persistent kernel, fast_mode metadata without intra-batch
+                # splitting (see make_mla_meta_data).
+                _use_mla_ps_kernel = True
+                fast_mode = True
+                intra_batch_mode = False
+                logger.info(
+                    "aiter mla: decode/verify use the fp8-Q asm kernel "
+                    "(SGLANG_AITER_MLA_A8W8_ASM=1) instead of gluon"
+                )
             # Zero-pad topology (h12->qh16): prefer Gluon decode over PS kernel.
-            if self.head_pad_mode == "zero" and self.kv_cache_dtype == fp8_dtype:
+            elif self.head_pad_mode == "zero" and self.kv_cache_dtype == fp8_dtype:
                 # Disable ps only when gluon kernel is selected to avoid falling
                 # back to incorrect aiter kernel
                 if prefer_mla_gluon_decode(
@@ -755,6 +774,12 @@ class AiterAttnBackend(AttentionBackend):
         nhead_kv = 1
         page_size = self.page_size
         dtype = self.kv_cache_dtype
+        is_causal = False
+        if self.use_mla_a8w8_asm:
+            # Causal, and no per-batch split cap so long single requests can
+            # spread over all CUs.
+            is_causal = True
+            max_split_per_batch = -1
 
         meta = get_mla_metadata_v1(
             qo_indptr,
@@ -762,7 +787,7 @@ class AiterAttnBackend(AttentionBackend):
             kv_last_page_len,
             self.mla_kernel_num_head_padded // nhead_kv,
             nhead_kv,
-            False,
+            is_causal,
             work_metadata,
             work_info_set,
             work_indptr,
@@ -1256,6 +1281,8 @@ class AiterAttnBackend(AttentionBackend):
         q / o must already be shaped (..., num_head, head_dim).
         """
         num_head = layer.tp_q_head_num
+        if self.use_mla_a8w8_asm:
+            return self._mla_decode_fwd_a8w8(q, k_buffer_flat, layer, **kwargs)
         # Fused MLA Q may already occupy the 16-head pad buffer (dummy heads
         # zeroed by the producer). Skip Fill(fp8)+float8_copy in that case.
         if q.shape[1] == self.num_head_padded:
@@ -1292,6 +1319,56 @@ class AiterAttnBackend(AttentionBackend):
         mla_decode_fwd(q, k_buffer_flat, o, **kwargs)
         return o
 
+    def _mla_decode_fwd_a8w8(self, q, k_buffer_flat, layer, **kwargs):
+        """fp8-Q persistent asm MLA decode/verify for 12 heads.
+
+        Q is quantized per-tensor with q_scale, the same scale the kernel is
+        given to dequantize it, then zero-padded 12 -> 16 heads. aiter picks
+        mla_a8w8_qh16_qseqlen1_*_ps for qlen 1 and folds qlen > 4 into
+        mla_a8w8_qh32_qseqlen4_gqaratio32_ps.
+        """
+        num_head = layer.tp_q_head_num
+        q = q.reshape(-1, q.shape[-2], layer.qk_head_dim)
+        if q.shape[1] == self.num_head_padded:
+            q = q[:, :num_head, :]
+        elif q.shape[1] != num_head:
+            q = q.reshape(-1, num_head, layer.qk_head_dim)
+        num_tokens = q.shape[0]
+        if kwargs.get("q_scale") is None:
+            kwargs["q_scale"] = self.k_scale
+        if q.dtype == fp8_dtype:
+            q_fp8 = q
+        else:
+            q_fp8, _ = scaled_fp8_quant(
+                q.reshape(num_tokens, -1), kwargs["q_scale"]
+            )
+            q_fp8 = q_fp8.view(num_tokens, num_head, layer.qk_head_dim)
+        q_in = q_fp8.new_zeros((num_tokens, self.num_head_padded, layer.qk_head_dim))
+        q_in[:, :num_head, :] = q_fp8
+        o = q.new_empty(
+            (num_tokens, self.num_head_padded, layer.v_head_dim),
+            dtype=self.input_dtype,
+        )
+        # Leave the split count to aiter.
+        kwargs["num_kv_splits"] = None
+        # The asm kernel loads KV row 0 for masked positions and weights it by
+        # p = 0, so a NaN there turns every request NaN. Row 0 is the reserved
+        # write target of CUDA-graph padding tokens, whose K/V can be NaN.
+        k_buffer_flat[0].zero_()
+        mla_decode_fwd(q_in, k_buffer_flat, o, **kwargs)
+        return o[:, :num_head, :]
+
+    def _fp8_prefill_asm_enabled(self) -> bool:
+        """PS-ASM fp8 prefill. 12-head zero-pad stays off unless opted in.
+
+        That shape memory-faults on gfx950; SGLANG_AITER_MLA_ZERO_PAD_FP8_PREFILL
+        selects the 12->16 padded launch anyway.
+        """
+        if not self.use_fp8_prefill_attn:
+            return False
+        if getattr(self, "head_pad_mode", "none") != "zero":
+            return True
+        return envs.SGLANG_AITER_MLA_ZERO_PAD_FP8_PREFILL.get()
 
     def _mla_q_heads(self, q: torch.Tensor, layer) -> torch.Tensor:
         """Keep a pre-padded (tokens, num_head_padded, dim) Q; else pack to tp heads."""
@@ -1351,7 +1428,7 @@ class AiterAttnBackend(AttentionBackend):
         q = self._mla_q_heads(q, layer)
         max_q_len = self.forward_metadata.max_q_len or 1
 
-        if prefer_mla_gluon_decode(
+        if not self.use_mla_a8w8_asm and prefer_mla_gluon_decode(
             head_pad_mode=getattr(self, "head_pad_mode", "none"),
             num_head=getattr(self, "num_head", layer.tp_q_head_num),
             kv_cache_dtype=self.kv_cache_dtype,
@@ -2120,8 +2197,8 @@ class AiterAttnBackend(AttentionBackend):
                 fp8_prefill_kv_indices = None
 
                 # fp8 PS-ASM prefill memory-faults on gfx950 for 12-head
-                # (zero-pad) models; keep it off and use flash-attn fallback.
-                if self.use_fp8_prefill_attn and self.head_pad_mode != "zero":
+                # (zero-pad) models unless SGLANG_AITER_MLA_ZERO_PAD_FP8_PREFILL.
+                if self._fp8_prefill_asm_enabled():
                     tile_q = 256
                     qlen_granularity = tile_q // (
                         self.fp8_prefill_num_head // self.fp8_prefill_num_kv_head
@@ -3206,7 +3283,7 @@ class AiterAttnBackend(AttentionBackend):
                 if forward_batch.mha_return_lse:
                     return self._forward_extend_skip_prefix(q, k, v, layer)
                 if self.dcp_world_size > 1:
-                    if self.use_fp8_prefill_attn and self.head_pad_mode != "zero":
+                    if self._fp8_prefill_asm_enabled():
                         return self.mla_fp8_prefill_attn(q, k, v, layer)
                     return flash_attn_varlen_func(
                         q,
@@ -3220,7 +3297,7 @@ class AiterAttnBackend(AttentionBackend):
                         causal=True,
                     )
                 if kv_indices.shape[0] == 0 or extend_no_prefix:
-                    if self.use_fp8_prefill_attn and self.head_pad_mode != "zero":
+                    if self._fp8_prefill_asm_enabled():
                         output = self.mla_fp8_prefill_attn(
                             q,
                             k,
@@ -3253,8 +3330,7 @@ class AiterAttnBackend(AttentionBackend):
                         k_pe = k_pe.to(dtype)
 
                     if (
-                        self.use_fp8_prefill_attn
-                        and self.head_pad_mode != "zero"
+                        self._fp8_prefill_asm_enabled()
                         and layer.kv_b_proj.weight.dtype == torch.uint8
                     ):
                         # MXFP4 weights + FP8 prefill: fuse GEMM, nope/v split, and k_pe cat
@@ -3294,7 +3370,7 @@ class AiterAttnBackend(AttentionBackend):
                         == forward_batch.extend_seq_lens.shape
                     )
 
-                    if self.use_fp8_prefill_attn and self.head_pad_mode != "zero":
+                    if self._fp8_prefill_asm_enabled():
                         return self.mla_fp8_prefill_attn(q, k, v, layer)
                     else:
                         return flash_attn_varlen_func(
@@ -3351,7 +3427,7 @@ class AiterAttnBackend(AttentionBackend):
                         )
                     return o
             elif forward_batch.forward_mode.is_target_verify():
-                if prefer_mla_gluon_decode(
+                if not self.use_mla_a8w8_asm and prefer_mla_gluon_decode(
                     head_pad_mode=getattr(self, "head_pad_mode", "none"),
                     num_head=getattr(self, "num_head", layer.tp_q_head_num),
                     kv_cache_dtype=self.kv_cache_dtype,
