@@ -103,6 +103,10 @@ _use_fp8_prefill_attn = (
     get_bool_env_var("SGLANG_AITER_FP8_PREFILL_ATTN", "True") and is_gfx95_supported()
 )
 
+# FlyDSL FP8 FMHA packs a flattened dim as int32. Stay under this so a
+# long prefix falls back to the bf16 varlen kernel instead of raising.
+_MLA_FP8_FLAT_ELEMS = 2**31
+
 # (v_head_dim -> query head counts) that aiter's mla_reduce_v1 has an
 # instantiation. This map is copied from MLA_REDUCE_ROUTER in
 # aiter/csrc/kernels/mla/reduce.cu. See https://github.com/ROCm/aiter/blob/7915f53a4225b3f9cb632a97a23369dbebcf1be0/csrc/kernels/mla/reduce.cu#L923
@@ -382,6 +386,41 @@ class AiterAttnBackend(AttentionBackend):
                 f"{self.fp8_prefill_num_head}; mla_reduce_v1 has no "
                 f"{self.num_head}-head instantiation at head_dim {self.v_head_dim}."
             )
+
+        # Kimi-K3 TP8 is 12 heads, QK 192, V 128. That shape is outside
+        # mla_reduce_v1, and the 12->16 PS-ASM pad memory-faults. FlyDSL FP8
+        # FMHA serves it directly.
+        self.use_mla_flydsl_fp8_prefill = False
+        self._mla_flydsl_fp8_fallback_logged = False
+        if (
+            self.use_mla
+            and envs.SGLANG_AITER_MLA_FLYDSL_FP8_PREFILL.get()
+            and is_gfx95_supported()
+        ):
+            try:
+                from aiter.ops.flydsl.kernels.flash_attn_func_fp8_gfx950 import (
+                    flydsl_flash_attn_fp8_supported,
+                )
+
+                self.use_mla_flydsl_fp8_prefill = flydsl_flash_attn_fp8_supported(
+                    torch.device(self.device),
+                    self.num_head,
+                    self.num_kv_head,
+                    self.head_dim,
+                    self.v_head_dim,
+                )
+            except Exception:
+                logger.exception("MLA FlyDSL FP8 prefill support check failed")
+                self.use_mla_flydsl_fp8_prefill = False
+            if self.use_mla_flydsl_fp8_prefill:
+                logger.info(
+                    "MLA prefill uses gfx950 FlyDSL FP8 FMHA "
+                    "(heads=%s kv_heads=%s qk=%s v=%s)",
+                    self.num_head,
+                    self.num_kv_head,
+                    self.head_dim,
+                    self.v_head_dim,
+                )
 
         # Parse constants
         self.max_context_len = model_runner.model_config.context_len
@@ -1374,13 +1413,116 @@ class AiterAttnBackend(AttentionBackend):
         """PS-ASM fp8 prefill. 12-head zero-pad stays off unless opted in.
 
         That shape memory-faults on gfx950; SGLANG_AITER_MLA_ZERO_PAD_FP8_PREFILL
-        selects the 12->16 padded launch anyway.
+        selects the 12->16 padded launch anyway. FlyDSL FP8 prefill, when the
+        head shape can use it, replaces this path.
         """
+        if self.use_mla_flydsl_fp8_prefill:
+            return False
         if not self.use_fp8_prefill_attn:
             return False
         if getattr(self, "head_pad_mode", "none") != "zero":
             return True
         return envs.SGLANG_AITER_MLA_ZERO_PAD_FP8_PREFILL.get()
+
+    @staticmethod
+    def _quantize_mla_prefill_fp8(
+        x: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Per-tensor e4m3fn quant. The returned scale is amax/fp8_max, the descale."""
+        packed = x if x.is_contiguous() else x.contiguous()
+        flat = packed.view(-1, packed.shape[-1])
+        quantized, scale = scaled_fp8_quant(flat)
+        return quantized.view(packed.shape), scale
+
+    def _mla_flydsl_fp8_prefill_applicable(
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+    ) -> bool:
+        if not self.use_mla_flydsl_fp8_prefill:
+            return False
+        if (
+            q.dtype != torch.bfloat16
+            or k.dtype != q.dtype
+            or v.dtype != q.dtype
+            or q.dim() != 3
+            or k.dim() != 3
+            or v.dim() != 3
+        ):
+            return False
+        out_elems = q.shape[0] * q.shape[1] * v.shape[-1]
+        return (
+            max(q.numel(), k.numel(), v.numel(), out_elems) < _MLA_FP8_FLAT_ELEMS
+        )
+
+    def _mla_prefill_varlen_attn(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        cu_seqlens_q: torch.Tensor,
+        cu_seqlens_k: torch.Tensor,
+        max_seqlen_q: int,
+        max_seqlen_k: int,
+        softmax_scale: float,
+        causal: bool,
+        return_lse: bool = False,
+    ):
+        """MLA varlen prefill. gfx950 FlyDSL FP8 when the head shape can use it.
+
+        Q/K/V stay bf16 until this boundary. A shape the kernel declines, or a
+        launch it rejects, falls back to bf16 FMHA.
+        """
+        if self._mla_flydsl_fp8_prefill_applicable(q, k, v):
+            try:
+                from aiter.ops.flydsl.fmha_kernels import (
+                    flydsl_flash_attn_varlen_func,
+                )
+
+                q8, q_descale = self._quantize_mla_prefill_fp8(q)
+                k8, k_descale = self._quantize_mla_prefill_fp8(k)
+                v8, v_descale = self._quantize_mla_prefill_fp8(v)
+                result = flydsl_flash_attn_varlen_func(
+                    q8,
+                    k8,
+                    v8,
+                    cu_seqlens_q,
+                    cu_seqlens_k,
+                    max_seqlen_q,
+                    max_seqlen_k,
+                    softmax_scale=softmax_scale,
+                    causal=causal,
+                    return_lse=return_lse,
+                    q_descale=q_descale,
+                    k_descale=k_descale,
+                    v_descale=v_descale,
+                )
+            except (TypeError, NotImplementedError, ValueError):
+                result = None
+                if not self._mla_flydsl_fp8_fallback_logged:
+                    logger.exception(
+                        "MLA FlyDSL FP8 prefill failed; falling back to bf16 FMHA"
+                    )
+                    self._mla_flydsl_fp8_fallback_logged = True
+            if result is not None:
+                return result
+            if not self._mla_flydsl_fp8_fallback_logged:
+                logger.warning(
+                    "MLA FlyDSL FP8 prefill declined this shape; "
+                    "falling back to bf16 FMHA"
+                )
+                self._mla_flydsl_fp8_fallback_logged = True
+
+        return flash_attn_varlen_func(
+            q,
+            k,
+            v,
+            cu_seqlens_q,
+            cu_seqlens_k,
+            max_seqlen_q,
+            max_seqlen_k,
+            softmax_scale=softmax_scale,
+            causal=causal,
+            return_lse=return_lse,
+        )
 
     def _mla_q_heads(self, q: torch.Tensor, layer) -> torch.Tensor:
         """Keep a pre-padded (tokens, num_head_padded, dim) Q; else pack to tp heads."""
@@ -3055,7 +3197,7 @@ class AiterAttnBackend(AttentionBackend):
         forward_batch: ForwardBatch,
     ):
         idx = forward_batch.prefix_chunk_idx
-        output, lse = flash_attn_varlen_func(
+        output, lse = self._mla_prefill_varlen_attn(
             q,
             k,
             v,
@@ -3078,7 +3220,7 @@ class AiterAttnBackend(AttentionBackend):
     ):
         qo_indptr = self.forward_metadata.qo_indptr
         max_q_len = self.forward_metadata.max_q_len
-        output, lse = flash_attn_varlen_func(
+        output, lse = self._mla_prefill_varlen_attn(
             q,
             k,
             v,
@@ -3297,7 +3439,7 @@ class AiterAttnBackend(AttentionBackend):
                 if self.dcp_world_size > 1:
                     if self._fp8_prefill_asm_enabled():
                         return self.mla_fp8_prefill_attn(q, k, v, layer)
-                    return flash_attn_varlen_func(
+                    return self._mla_prefill_varlen_attn(
                         q,
                         k,
                         v,
@@ -3317,7 +3459,7 @@ class AiterAttnBackend(AttentionBackend):
                             layer,
                         )
                     else:
-                        output = flash_attn_varlen_func(
+                        output = self._mla_prefill_varlen_attn(
                             q,
                             k,
                             v,
@@ -3385,7 +3527,7 @@ class AiterAttnBackend(AttentionBackend):
                     if self._fp8_prefill_asm_enabled():
                         return self.mla_fp8_prefill_attn(q, k, v, layer)
                     else:
-                        return flash_attn_varlen_func(
+                        return self._mla_prefill_varlen_attn(
                             q,
                             k,
                             v,
