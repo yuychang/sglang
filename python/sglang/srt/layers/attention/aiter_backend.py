@@ -426,7 +426,7 @@ class AiterAttnBackend(AttentionBackend):
                     "(heads=%s kv_heads=%s qk=%s v=%s)",
                     self.num_head,
                     self.num_kv_head,
-                    self.head_dim,
+                    self.qk_head_dim,
                     self.v_head_dim,
                 )
         if self.require_mla_flydsl_fp8_prefill and not self.use_mla_flydsl_fp8_prefill:
