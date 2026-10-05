@@ -391,6 +391,10 @@ class AiterAttnBackend(AttentionBackend):
         # mla_reduce_v1, and the 12->16 PS-ASM pad memory-faults. FlyDSL FP8
         # FMHA serves it directly.
         self.use_mla_flydsl_fp8_prefill = False
+        self.require_mla_flydsl_fp8_prefill = (
+            self.use_mla
+            and envs.SGLANG_AITER_MLA_FLYDSL_FP8_PREFILL_REQUIRED.get()
+        )
         self._mla_flydsl_fp8_fallback_logged = False
         if (
             self.use_mla
@@ -421,6 +425,11 @@ class AiterAttnBackend(AttentionBackend):
                     self.head_dim,
                     self.v_head_dim,
                 )
+        if self.require_mla_flydsl_fp8_prefill and not self.use_mla_flydsl_fp8_prefill:
+            raise RuntimeError(
+                "SGLANG_AITER_MLA_FLYDSL_FP8_PREFILL_REQUIRED=1, but gfx950 "
+                "FlyDSL FP8 FMHA does not support this MLA configuration"
+            )
 
         # Parse constants
         self.max_context_len = model_runner.model_config.context_len
@@ -1496,6 +1505,8 @@ class AiterAttnBackend(AttentionBackend):
                     v_descale=v_descale,
                 )
             except (TypeError, NotImplementedError, ValueError):
+                if self.require_mla_flydsl_fp8_prefill:
+                    raise
                 result = None
                 if not self._mla_flydsl_fp8_fallback_logged:
                     logger.exception(
@@ -1504,6 +1515,10 @@ class AiterAttnBackend(AttentionBackend):
                     self._mla_flydsl_fp8_fallback_logged = True
             if result is not None:
                 return result
+            if self.require_mla_flydsl_fp8_prefill:
+                raise RuntimeError(
+                    "required MLA FlyDSL FP8 prefill kernel declined this shape"
+                )
             if not self._mla_flydsl_fp8_fallback_logged:
                 logger.warning(
                     "MLA FlyDSL FP8 prefill declined this shape; "

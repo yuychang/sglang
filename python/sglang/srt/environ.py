@@ -961,6 +961,9 @@ class Envs:
     # and run that kernel instead of the bf16 opus varlen kernel. The
     # 12-head PS-ASM pad stays off while this is on.
     SGLANG_AITER_MLA_FLYDSL_FP8_PREFILL = EnvBool(True)
+    # Fail initialization or a declined launch instead of silently using bf16
+    # FMHA. Intended for benchmark recipes that require FlyDSL provenance.
+    SGLANG_AITER_MLA_FLYDSL_FP8_PREFILL_REQUIRED = EnvBool(False)
     # Select the AITER MLA kernel for DCP decode. "gluon" preserves the native
     # low-head Triton path; "asm" quantizes the DCP-gathered query to FP8 and
     # runs mla_decode_fwd with persistent metadata and return_lse=True.
