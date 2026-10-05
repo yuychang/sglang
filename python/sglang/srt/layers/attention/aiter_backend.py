@@ -350,6 +350,10 @@ class AiterAttnBackend(AttentionBackend):
         if self.use_mla:
             # For MLA models, get v_head_dim from model config
             self.v_head_dim = model_runner.model_config.v_head_dim
+            self.qk_head_dim = (
+                model_runner.model_config.qk_nope_head_dim
+                + model_runner.model_config.qk_rope_head_dim
+            )
         elif hasattr(model_runner.token_to_kv_pool, "get_v_head_dim"):
             # For hybrid models (Mamba+attention, GDN, Kimi linear),
             # layer_id=0 may not be a full attention layer
@@ -410,7 +414,7 @@ class AiterAttnBackend(AttentionBackend):
                     torch.device(self.device),
                     self.num_head,
                     self.num_kv_head,
-                    self.head_dim,
+                    self.qk_head_dim,
                     self.v_head_dim,
                 )
             except Exception:
