@@ -399,6 +399,11 @@ class AiterAttnBackend(AttentionBackend):
             self.use_mla
             and envs.SGLANG_AITER_MLA_FLYDSL_FP8_PREFILL_REQUIRED.get()
         )
+        self.use_mla_flydsl_fused_kv_proj = (
+            self.use_mla
+            and envs.SGLANG_AITER_MLA_FLYDSL_FUSED_KV_PROJ.get()
+        )
+        self._mla_flydsl_unit_descale = None
         self._mla_flydsl_fp8_fallback_logged = False
         if (
             self.use_mla
@@ -1452,10 +1457,10 @@ class AiterAttnBackend(AttentionBackend):
     ) -> bool:
         if not self.use_mla_flydsl_fp8_prefill:
             return False
+        kv_dtypes_match = k.dtype == v.dtype and k.dtype in (q.dtype, fp8_dtype)
         if (
             q.dtype != torch.bfloat16
-            or k.dtype != q.dtype
-            or v.dtype != q.dtype
+            or not kv_dtypes_match
             or q.dim() != 3
             or k.dim() != 3
             or v.dim() != 3
@@ -1481,8 +1486,9 @@ class AiterAttnBackend(AttentionBackend):
     ):
         """MLA varlen prefill. gfx950 FlyDSL FP8 when the head shape can use it.
 
-        Q/K/V stay bf16 until this boundary. A shape the kernel declines, or a
-        launch it rejects, falls back to bf16 FMHA.
+        Q stays bf16 until this boundary. K/V can either stay bf16 or arrive
+        directly as unit-scale FP8 from the fused MXFP4 projection. A shape
+        the kernel declines, or a launch it rejects, falls back to bf16 FMHA.
         """
         if self._mla_flydsl_fp8_prefill_applicable(q, k, v):
             try:
@@ -1491,8 +1497,19 @@ class AiterAttnBackend(AttentionBackend):
                 )
 
                 q8, q_descale = self._quantize_mla_prefill_fp8(q)
-                k8, k_descale = self._quantize_mla_prefill_fp8(k)
-                v8, v_descale = self._quantize_mla_prefill_fp8(v)
+                if k.dtype == fp8_dtype:
+                    k8, v8 = k, v
+                    if (
+                        self._mla_flydsl_unit_descale is None
+                        or self._mla_flydsl_unit_descale.device != q.device
+                    ):
+                        self._mla_flydsl_unit_descale = torch.ones(
+                            1, dtype=torch.float32, device=q.device
+                        )
+                    k_descale = v_descale = self._mla_flydsl_unit_descale
+                else:
+                    k8, k_descale = self._quantize_mla_prefill_fp8(k)
+                    v8, v_descale = self._quantize_mla_prefill_fp8(v)
                 result = flydsl_flash_attn_varlen_func(
                     q8,
                     k8,
@@ -1530,6 +1547,9 @@ class AiterAttnBackend(AttentionBackend):
                 )
                 self._mla_flydsl_fp8_fallback_logged = True
 
+        if k.dtype == fp8_dtype:
+            k = k.to(q.dtype)
+            v = v.to(q.dtype)
         return flash_attn_varlen_func(
             q,
             k,
@@ -3503,7 +3523,13 @@ class AiterAttnBackend(AttentionBackend):
                         k_pe = k_pe.to(dtype)
 
                     if (
-                        self._fp8_prefill_asm_enabled()
+                        (
+                            self._fp8_prefill_asm_enabled()
+                            or (
+                                self.use_mla_flydsl_fp8_prefill
+                                and self.use_mla_flydsl_fused_kv_proj
+                            )
+                        )
                         and layer.kv_b_proj.weight.dtype == torch.uint8
                     ):
                         # MXFP4 weights + FP8 prefill: fuse GEMM, nope/v split, and k_pe cat

@@ -964,6 +964,11 @@ class Envs:
     # Fail initialization or a declined launch instead of silently using bf16
     # FMHA. Intended for benchmark recipes that require FlyDSL provenance.
     SGLANG_AITER_MLA_FLYDSL_FP8_PREFILL_REQUIRED = EnvBool(False)
+    # For an MXFP4 kv_b_proj on the prefix-prefill path, fuse projection,
+    # K/V split, RoPE concat, and the cast to FP8. FlyDSL then consumes those
+    # unit-scale FP8 K/V tensors directly instead of materializing BF16 K/V
+    # and scanning both tensors again for dynamic per-tensor quantization.
+    SGLANG_AITER_MLA_FLYDSL_FUSED_KV_PROJ = EnvBool(False)
     # Select the AITER MLA kernel for DCP decode. "gluon" preserves the native
     # low-head Triton path; "asm" quantizes the DCP-gathered query to FP8 and
     # runs mla_decode_fwd with persistent metadata and return_lse=True.
