@@ -1868,6 +1868,11 @@ class Envs:
     # move the top-k selection.
     SGLANG_ROCM_K3_PTPC_FP8 = EnvBool(False)
     SGLANG_ROCM_K3_PTPC_FP8_MAX_TOKENS = EnvInt(256)
+    # Also take the PTPC FP8 latent-up / shared-down GEMMs from this many tokens
+    # up (0 = never). Between the decode cap and ~4K tokens BF16 hipBLASLt is
+    # faster; at an 8192-token prefill chunk FP8 is 1.8x on latent up
+    # [3584 -> 7168] and 1.4x on shared down [768 -> 7168] on MI355X.
+    SGLANG_ROCM_K3_PTPC_FP8_PREFILL_MIN_TOKENS = EnvInt(0)
     SGLANG_ROCM_K3_PTPC_FP8_SHARED_DOWN = EnvBool(False)
     # Dequantize Quark MXFP4 shared experts before the MoE front merge so they
     # join the full fused front and the PTPC shared-down path (needs

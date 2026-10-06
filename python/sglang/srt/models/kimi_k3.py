@@ -124,6 +124,7 @@ from sglang.srt.models.kimi_k3_rocm_fusion import (
     _k3_maybe_fuse_inproj_quant,
     _k3_ptpc_fp8,
     _k3_ptpc_fp8_batch_ok,
+    _k3_ptpc_fp8_moe_gemm_ok,
     _k3_ptpc_fp8_shared_down,
     _k3_should_fuse_inproj_quant,
 )
@@ -951,7 +952,7 @@ class KimiK3MoE(nn.Module):
         )
 
     def _use_latent_up_ptpc_fp8(self, latent: torch.Tensor) -> bool:
-        if self._latent_up_fp8_w is None or not _k3_ptpc_fp8_batch_ok(latent.shape[0]):
+        if self._latent_up_fp8_w is None or not _k3_ptpc_fp8_moe_gemm_ok(latent.shape[0]):
             return False
         from sglang.kernels.ops.gemm import ptpc_fp8_aiter_hip
 
@@ -1637,7 +1638,7 @@ class KimiK3MoE(nn.Module):
     def _run_shared_down(self, x: torch.Tensor, out: torch.Tensor) -> None:
         shared = self.shared_experts
         assert shared is not None
-        if self._shared_down_fp8_w is not None and _k3_ptpc_fp8_batch_ok(x.shape[0]):
+        if self._shared_down_fp8_w is not None and _k3_ptpc_fp8_moe_gemm_ok(x.shape[0]):
             from sglang.kernels.ops.gemm import ptpc_fp8_aiter_hip
 
             if ptpc_fp8_aiter_hip.covered(x, self._shared_down_fp8_w):
