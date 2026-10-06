@@ -106,6 +106,9 @@ _use_fp8_prefill_attn = (
 # FlyDSL FP8 FMHA packs a flattened dim as int32. Stay under this so a
 # long prefix falls back to the bf16 varlen kernel instead of raising.
 _MLA_FP8_FLAT_ELEMS = 2**31
+_MLA_PREFILL_FP8_MAX = float(torch.finfo(fp8_dtype).max)
+# Keeps an all-zero tensor from producing a zero descale (and an inf scale).
+_MLA_PREFILL_FP8_MIN_SCALE = 1e-12
 
 # (v_head_dim -> query head counts) that aiter's mla_reduce_v1 has an
 # instantiation. This map is copied from MLA_REDUCE_ROUTER in
@@ -1447,10 +1450,20 @@ class AiterAttnBackend(AttentionBackend):
     def _quantize_mla_prefill_fp8(
         x: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Per-tensor e4m3fn quant. The returned scale is amax/fp8_max, the descale."""
+        """Per-tensor e4m3fn quant. The returned scale is amax/fp8_max, the descale.
+
+        AITER's dynamic per-tensor quant launches one block per row and has
+        every block atomicMax the same float. Q/K/V rows are a single head
+        (128 or 192 elements), so a 100K-token prefix is 1.2M blocks contending
+        on one address: about 13 ms per tensor per layer. One reduction for the
+        amax, then the static-scale kernel over token-wide rows, reads the same
+        data without the contention.
+        """
         packed = x if x.is_contiguous() else x.contiguous()
-        flat = packed.view(-1, packed.shape[-1])
-        quantized, scale = scaled_fp8_quant(flat)
+        flat = packed.view(packed.shape[0], -1) if packed.dim() > 1 else packed.view(1, -1)
+        amax = torch.linalg.vector_norm(flat, ord=float("inf"), dtype=torch.float32)
+        scale = (amax / _MLA_PREFILL_FP8_MAX).clamp_(min=_MLA_PREFILL_FP8_MIN_SCALE)
+        quantized, scale = scaled_fp8_quant(flat, scale.view(1))
         return quantized.view(packed.shape), scale
 
     def _mla_flydsl_fp8_prefill_applicable(
