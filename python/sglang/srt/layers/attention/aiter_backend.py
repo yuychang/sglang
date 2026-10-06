@@ -404,6 +404,7 @@ class AiterAttnBackend(AttentionBackend):
             and envs.SGLANG_AITER_MLA_FLYDSL_FUSED_KV_PROJ.get()
         )
         self._mla_flydsl_unit_descale = None
+        self._mla_flydsl_fused_kv_logged = False
         self._mla_flydsl_fp8_fallback_logged = False
         if (
             self.use_mla
@@ -3535,6 +3536,16 @@ class AiterAttnBackend(AttentionBackend):
                         # MXFP4 weights + FP8 prefill: fuse GEMM, nope/v split, and k_pe cat
                         # into a single kernel (fused_gemm_afp4wfp4_split_cat) that writes k and v
                         # directly in FP8, avoiding a separate elementwise cast
+                        if (
+                            self.use_mla_flydsl_fp8_prefill
+                            and self.use_mla_flydsl_fused_kv_proj
+                            and not self._mla_flydsl_fused_kv_logged
+                        ):
+                            logger.info(
+                                "MLA prefix prefill projects K/V directly to "
+                                "unit-scale FP8 for FlyDSL"
+                            )
+                            self._mla_flydsl_fused_kv_logged = True
                         k, v = layer.kv_b_proj(
                             (
                                 kvc.squeeze(1),
