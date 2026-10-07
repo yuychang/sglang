@@ -963,6 +963,10 @@ class Envs:
     # is bandwidth bound; larger batches keep the tuned N=6144 split path.
     SGLANG_ROCM_K3_FUSE_KDA_INPROJ = EnvBool(True)
     SGLANG_ROCM_K3_FUSE_KDA_INPROJ_MAX_TOKENS = EnvInt(256)
+    # gfx95 KDA extend via AITER FlashKDA, which takes beta as logits. Off by
+    # default: tracked interior snapshots and speculative draft-extend stay on
+    # Triton either way.
+    SGLANG_AITER_KDA_FLASH_PREFILL = EnvBool(False)
     # Activation precision for MXFP4-weight dense linears, independent of the
     # MoE: "fp4" is the checkpoint's own W4A4, "bf16" dequantizes the weights
     # at load. bf16 by default: K3 GSM8K scores 0.947 vs fp4's 0.908, for
