@@ -19,11 +19,13 @@ take the MoE module as ``self``.
 
 import torch
 
+
 def prepare_moe_latent_mxfp4(self) -> None:
     """Pack non-EP latent projections for the large-M MXFP4 path."""
     from sglang.srt.models.kimi_k3 import (
         _moe_latent_mxfp4,
     )
+
     if (
         not _moe_latent_mxfp4
         or not self.use_latent_moe
@@ -62,6 +64,7 @@ def use_moe_latent_mxfp4(self, num_tokens: int) -> bool:
     from sglang.srt.models.kimi_k3 import (
         _moe_latent_mxfp4_min_tokens,
     )
+
     return (
         self._front_down_w4 is not None
         and self._front_down_scale4 is not None
@@ -89,6 +92,7 @@ def prepare_preroute_fp8(self) -> None:
     from sglang.srt.models.kimi_k3 import (
         _aiter_moe_preroute_fp8,
     )
+
     if (
         not _aiter_moe_preroute_fp8
         or not self.use_latent_moe
@@ -149,9 +153,8 @@ def use_latent_up_ptpc_fp8(self, latent: torch.Tensor) -> bool:
     from sglang.srt.models.kimi_k3_rocm_fusion import (
         _k3_ptpc_fp8_moe_gemm_ok,
     )
-    if self._latent_up_fp8_w is None or not _k3_ptpc_fp8_moe_gemm_ok(
-        latent.shape[0]
-    ):
+
+    if self._latent_up_fp8_w is None or not _k3_ptpc_fp8_moe_gemm_ok(latent.shape[0]):
         return False
     from sglang.kernels.ops.gemm import ptpc_fp8_aiter_hip
 
@@ -163,6 +166,7 @@ def prepare_latent_up_ptpc_fp8(self) -> None:
     from sglang.srt.models.kimi_k3_rocm_fusion import (
         _k3_ptpc_fp8,
     )
+
     if not _k3_ptpc_fp8 or self.routed_expert_up_proj is None:
         return
     from sglang.kernels.ops.gemm import ptpc_fp8_aiter_hip
@@ -194,6 +198,7 @@ def prepare_shared_down_ptpc_fp8(self) -> None:
     from sglang.srt.models.kimi_k3_rocm_fusion import (
         _k3_ptpc_fp8_shared_down,
     )
+
     if not _k3_ptpc_fp8_shared_down or self.shared_experts is None:
         return
     # Requantizing Quark's dequantized MXFP4 weight to FP8 stacks two
@@ -229,6 +234,7 @@ def prepare_latent_tail_fp8(self) -> None:
     from sglang.srt.models.kimi_k3 import (
         _aiter_latent_tail_fp8,
     )
+
     if (
         not _aiter_latent_tail_fp8
         or not self.fuse_ar_norm
