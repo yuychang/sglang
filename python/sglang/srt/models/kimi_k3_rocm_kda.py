@@ -114,12 +114,10 @@ def may_fuse_kda_inproj(self) -> bool:
     if not (self._attn_tp_is_full_tp and self.use_full_rank_gate):
         return False
     weights = [
-        module.weight
-        for module in (self.fused_qkvg_proj, self.f_a_proj, self.b_proj)
+        module.weight for module in (self.fused_qkvg_proj, self.f_a_proj, self.b_proj)
     ]
     if not all(
-        type(weight.data) is torch.Tensor and weight.dim() == 2
-        for weight in weights
+        type(weight.data) is torch.Tensor and weight.dim() == 2 for weight in weights
     ):
         return False
     # Whitelist the dtype rather than only require the three to agree: the
@@ -174,9 +172,8 @@ def prepare_fused_decode_hip(self) -> None:
     if f_b_weight.dtype != torch.bfloat16 and f_b_dense is not None:
         f_b_weight = f_b_dense
     backend = envs.SGLANG_ROCM_K3_KDA_FUSED_BACKEND.get().lower()
-    backend_available = (
-        backend == "aiter"
-        and kda_fused_decode_aiter_hip.available(f_b_weight.device)
+    backend_available = backend == "aiter" and kda_fused_decode_aiter_hip.available(
+        f_b_weight.device
     )
     if (
         backend_available

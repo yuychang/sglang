@@ -68,9 +68,7 @@ def try_fused_mla_q_cache(
         kv_cache_dtype=kv_cache.dtype,
         q_dtype=torch.bfloat16,
     )
-    q_out_dtype = (
-        q_nope_out.dtype if triton_decode or gluon_decode else kv_cache.dtype
-    )
+    q_out_dtype = q_nope_out.dtype if triton_decode or gluon_decode else kv_cache.dtype
     if (
         q_nope_out.shape != (tokens, heads, self.kv_lora_rank)
         or q_pe.shape != (tokens, heads, self.qk_rope_head_dim)
@@ -87,9 +85,7 @@ def try_fused_mla_q_cache(
     # Do not use uninitialized pad heads: that is the fill-elim that
     # already failed GSM8K.
     aiter_pad_heads = (
-        heads
-        if gluon_decode
-        else (16 if (heads < 16 and 16 % heads != 0) else heads)
+        heads if gluon_decode else (16 if (heads < 16 and 16 % heads != 0) else heads)
     )
     q_out = mla_q_out_buffer(
         self,
@@ -149,8 +145,7 @@ def try_fused_mla_q_cache(
             identity_rope=True,
         )
     k_placeholder = mla_k_placeholder(
-        self,
-        k_nope.shape[0], k_nope.dtype, k_nope.device
+        self, k_nope.shape[0], k_nope.dtype, k_nope.device
     )
     return q, k_placeholder
 
@@ -197,4 +192,3 @@ def mla_k_placeholder(
         buf = torch.empty((tokens, 1, width), dtype=dtype, device=device)
         self._k3_mla_k_placeholder = buf
     return buf[:tokens]
-

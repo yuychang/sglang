@@ -154,9 +154,7 @@ def use_latent_up_ptpc_fp8(self, latent: torch.Tensor) -> bool:
         _k3_ptpc_fp8_moe_gemm_ok,
     )
 
-    if self._latent_up_fp8_w is None or not _k3_ptpc_fp8_moe_gemm_ok(
-        latent.shape[0]
-    ):
+    if self._latent_up_fp8_w is None or not _k3_ptpc_fp8_moe_gemm_ok(latent.shape[0]):
         return False
     from sglang.kernels.ops.gemm import ptpc_fp8_aiter_hip
 
