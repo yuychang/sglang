@@ -2769,7 +2769,9 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
             return None
         from sglang.srt.models.kimi_k3_rocm_mla import try_fused_mla_q_cache
 
-        return try_fused_mla_q_cache(self, q_nope_out, q_pe, k_nope, k_pe, positions, out_cache_loc)
+        return try_fused_mla_q_cache(
+            self, q_nope_out, q_pe, k_nope, k_pe, positions, out_cache_loc
+        )
 
     def _fork_output_gate(self, hidden_states: torch.Tensor) -> None:
         """Fork early, but record the gate after attention to limit replay streams."""

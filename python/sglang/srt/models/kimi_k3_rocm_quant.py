@@ -177,7 +177,6 @@ def _k3_qkvgbfa_inproj(self_attn: nn.Module, hidden_states) -> Optional[torch.Te
     )
 
 
-
 def k3_prepare_front_down_fp8(mlp: nn.Module) -> None:
     """Pack the fused front's latent down-projection for the PTPC FP8 path.
 
@@ -230,13 +229,11 @@ def k3_prepare_front_down_fp8(mlp: nn.Module) -> None:
     )
 
 
-
 def k3_use_front_down_fp8(mlp: nn.Module, num_tokens: int) -> bool:
     return (
         getattr(mlp, "_front_down_fp8_w", None) is not None
         and num_tokens >= mlp._front_down_fp8_min_tokens
     )
-
 
 
 def k3_run_front_down_fp8(

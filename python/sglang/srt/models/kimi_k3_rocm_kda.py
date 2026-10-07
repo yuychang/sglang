@@ -21,11 +21,13 @@ from types import SimpleNamespace
 
 import torch
 
+
 def merge_kda_inproj_weights_hip(self) -> bool:
     """Merge the ROCm KDA input projections while retaining split views."""
     from sglang.srt.models.kimi_k3 import (
         _merge_weights_as_views,
     )
+
     if not may_fuse_kda_inproj(self):
         return False
 
@@ -51,6 +53,7 @@ def use_qkvgbfa_ptpc_fp8(self, hidden_states) -> bool:
         _k3_hidden_tensor,
         _k3_ptpc_fp8_batch_ok,
     )
+
     x = _k3_hidden_tensor(hidden_states)
     if getattr(self, "_qkvgbfa_fp8_w", None) is None or not _k3_ptpc_fp8_batch_ok(
         x.shape[0]
@@ -70,6 +73,7 @@ def prepare_qkvgbfa_ptpc_fp8(self) -> None:
     from sglang.srt.models.kimi_k3_rocm_fusion import (
         _k3_ptpc_fp8,
     )
+
     layer = getattr(self, "_qkvgbfa_layer", None)
     if not _k3_ptpc_fp8 or layer is None:
         return
@@ -99,22 +103,21 @@ def prepare_qkvgbfa_ptpc_fp8(self) -> None:
 
 def may_fuse_kda_inproj(self) -> bool:
     """Return whether the KDA weights can safely share one ROCm GEMM."""
+    from sglang.srt.environ import envs
     from sglang.srt.models.kimi_k3 import (
         _is_hip,
         _is_unquantized_mergeable,
     )
-    from sglang.srt.environ import envs
+
     if not (_is_hip and envs.SGLANG_ROCM_K3_FUSE_KDA_INPROJ.get()):
         return False
     if not (self._attn_tp_is_full_tp and self.use_full_rank_gate):
         return False
     weights = [
-        module.weight
-        for module in (self.fused_qkvg_proj, self.f_a_proj, self.b_proj)
+        module.weight for module in (self.fused_qkvg_proj, self.f_a_proj, self.b_proj)
     ]
     if not all(
-        type(weight.data) is torch.Tensor and weight.dim() == 2
-        for weight in weights
+        type(weight.data) is torch.Tensor and weight.dim() == 2 for weight in weights
     ):
         return False
     # Whitelist the dtype rather than only require the three to agree: the
@@ -130,6 +133,7 @@ def prepare_group64_projection(self) -> None:
         _aiter_kda_group64,
         _is_unquantized_mergeable,
     )
+
     if (
         not _aiter_kda_group64
         or not self._attn_tp_is_full_tp
@@ -156,8 +160,8 @@ def prepare_group64_projection(self) -> None:
 
 
 def prepare_fused_decode_hip(self) -> None:
-    from sglang.srt.environ import envs
     from sglang.kernels.ops.attention import kda_fused_decode_aiter_hip
+    from sglang.srt.environ import envs
 
     layer = self.attn
     w = layer.conv_weights
@@ -168,9 +172,8 @@ def prepare_fused_decode_hip(self) -> None:
     if f_b_weight.dtype != torch.bfloat16 and f_b_dense is not None:
         f_b_weight = f_b_dense
     backend = envs.SGLANG_ROCM_K3_KDA_FUSED_BACKEND.get().lower()
-    backend_available = (
-        backend == "aiter"
-        and kda_fused_decode_aiter_hip.available(f_b_weight.device)
+    backend_available = backend == "aiter" and kda_fused_decode_aiter_hip.available(
+        f_b_weight.device
     )
     if (
         backend_available
