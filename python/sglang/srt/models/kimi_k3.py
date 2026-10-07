@@ -838,209 +838,53 @@ class KimiK3MoE(nn.Module):
             self.__dict__.pop(prop, None)
 
     def _prepare_moe_latent_mxfp4(self) -> None:
-        """Pack non-EP latent projections for the large-M MXFP4 path."""
-        if (
-            not _moe_latent_mxfp4
-            or not self.use_latent_moe
-            or not (
-                self._eligible_for_fused_front or self._eligible_for_partial_fused_front
-            )
-            or self._front_sizes is None
-            or len(self._front_sizes) not in (2, 3)
-        ):
+        if not _is_hip:
             return
-        from sglang.kernels.ops.gemm import latent_mxfp4_aiter_hip
+        from sglang.srt.models.kimi_k3_rocm_moe import prepare_moe_latent_mxfp4
 
-        if not latent_mxfp4_aiter_hip.supported():
-            return
-        head_rows = sum(self._front_sizes[:-1])
-        front_head = self._front_w[:head_rows]
-        down = self._front_w[head_rows:]
-        up = self.routed_expert_up_proj.weight
-        if (
-            tuple(down.shape) != (3584, 7168)
-            or tuple(up.shape) != (7168, 3584)
-            or down.dtype != torch.bfloat16
-            or up.dtype != torch.bfloat16
-        ):
-            return
-        self._front_head = front_head
-        self._front_down_w4, self._front_down_scale4 = latent_mxfp4_aiter_hip.pack(
-            down, "latent down_proj"
-        )
-        self._latent_up_w4, self._latent_up_scale4 = latent_mxfp4_aiter_hip.pack(
-            up, "latent up_proj"
-        )
+        prepare_moe_latent_mxfp4(self)
 
     def _use_moe_latent_mxfp4(self, num_tokens: int) -> bool:
-        return (
-            self._front_down_w4 is not None
-            and self._front_down_scale4 is not None
-            and self._latent_up_w4 is not None
-            and self._latent_up_scale4 is not None
-            and num_tokens >= _moe_latent_mxfp4_min_tokens
-        )
+        if not _is_hip:
+            return False
+        from sglang.srt.models.kimi_k3_rocm_moe import use_moe_latent_mxfp4
 
-    @staticmethod
-    def _preroute_dense_weight(linear: torch.nn.Module) -> torch.Tensor:
-        """Materialize a dense weight only while building decode-side caches."""
-        weight = linear.weight
-        if weight.dtype in (torch.bfloat16, torch.float16):
-            return weight
-        # Quark hangs the dequant on the scheme, other quant configs on the
-        # quant method; either way only this cache build wants it dense.
-        for owner in (getattr(linear, "scheme", None), linear.quant_method):
-            materialize = getattr(owner, "materialize_bf16_weight", None)
-            if materialize is not None:
-                return materialize(linear)
-        return weight
+        return use_moe_latent_mxfp4(self, num_tokens)
 
     def _prepare_preroute_fp8(self) -> None:
-        if (
-            not _aiter_moe_preroute_fp8
-            or not self.use_latent_moe
-            or self.shared_experts is None
-        ):
+        if not _is_hip:
             return
-        from sglang.kernels.ops.moe import moe_preroute_aiter_hip
-        from sglang.kernels.ops.quantization.aiter_fusion import (
-            quantize_fp8_rows,
-        )
+        from sglang.srt.models.kimi_k3_rocm_moe import prepare_preroute_fp8
 
-        routed = self._preroute_dense_weight(self.routed_expert_down_proj)
-        shared = self._preroute_dense_weight(self.shared_experts.gate_up_proj)
-        shared_down = self._preroute_dense_weight(self.shared_experts.down_proj)
-        if (
-            tuple(routed.shape) != (3584, 7168)
-            or tuple(shared.shape) != (1536, 7168)
-            or tuple(shared_down.shape) != (7168, 768)
-            or tuple(self.gate.weight.shape) != (896, 7168)
-        ):
-            return
-        self._preroute_routed_weight, self._preroute_routed_scale = quantize_fp8_rows(
-            routed.contiguous()
-        )
-        self._preroute_shared_weight, self._preroute_shared_scale = quantize_fp8_rows(
-            shared.contiguous()
-        )
-        if moe_preroute_aiter_hip.cooperative_preactivated_enabled():
-            self._preroute_shared_interleaved_weight = (
-                self._preroute_shared_weight.view(2, 768, 7168)
-                .permute(1, 0, 2)
-                .contiguous()
-                .view(1536, 7168)
-            )
-            self._preroute_shared_interleaved_scale = (
-                self._preroute_shared_scale.view(2, 768).t().contiguous().view(1536)
-            )
-        (
-            self._preroute_shared_down_weight,
-            self._preroute_shared_down_scale,
-        ) = quantize_fp8_rows(shared_down.contiguous())
-        moe_preroute_aiter_hip.warmup(
-            self._preroute_routed_weight,
-            self._preroute_routed_scale,
-            self._preroute_shared_weight,
-            self._preroute_shared_scale,
-            self.gate.weight,
-            self._preroute_shared_down_weight,
-            self._preroute_shared_down_scale,
-            self._preroute_shared_interleaved_weight,
-            self._preroute_shared_interleaved_scale,
-            situ_beta=self._situ_beta,
-            situ_linear_beta=self._situ_linear_beta,
-        )
+        prepare_preroute_fp8(self)
 
     def _use_latent_up_ptpc_fp8(self, latent: torch.Tensor) -> bool:
-        if self._latent_up_fp8_w is None or not _k3_ptpc_fp8_moe_gemm_ok(
-            latent.shape[0]
-        ):
+        if not _is_hip:
             return False
-        from sglang.kernels.ops.gemm import ptpc_fp8_aiter_hip
+        from sglang.srt.models.kimi_k3_rocm_moe import use_latent_up_ptpc_fp8
 
-        return ptpc_fp8_aiter_hip.covered(latent, self._latent_up_fp8_w)
+        return use_latent_up_ptpc_fp8(self, latent)
 
     def _prepare_latent_up_ptpc_fp8(self) -> None:
-        """Quantize the latent up-projection for the PTPC FP8 decode path."""
-        if not _k3_ptpc_fp8 or self.routed_expert_up_proj is None:
+        if not _is_hip:
             return
-        from sglang.kernels.ops.gemm import ptpc_fp8_aiter_hip
+        from sglang.srt.models.kimi_k3_rocm_moe import prepare_latent_up_ptpc_fp8
 
-        weight = self.routed_expert_up_proj.weight
-        if (
-            not ptpc_fp8_aiter_hip.available()
-            or not isinstance(weight, torch.Tensor)
-            or weight.dtype != torch.bfloat16
-            or weight.ndim != 2
-        ):
-            return
-        out_features, in_features = weight.shape
-        (
-            self._latent_up_fp8_w,
-            self._latent_up_fp8_s,
-            self._latent_up_fp8_n,
-        ) = ptpc_fp8_aiter_hip.pack(weight.contiguous())
-        ptpc_fp8_aiter_hip.warmup(
-            self._latent_up_fp8_w,
-            self._latent_up_fp8_s,
-            self._latent_up_fp8_n,
-            in_features,
-        )
+        prepare_latent_up_ptpc_fp8(self)
 
     def _prepare_shared_down_ptpc_fp8(self) -> None:
-        """Quantize the shared-expert down projection for decode."""
-        if not _k3_ptpc_fp8_shared_down or self.shared_experts is None:
+        if not _is_hip:
             return
-        # Requantizing Quark's dequantized MXFP4 weight to FP8 stacks two
-        # rounding steps; full GSM8K fell to 0.937 (vs 0.949 in BF16).
-        if getattr(self.shared_experts.down_proj, "dequantized_bf16", False):
-            return
-        from sglang.kernels.ops.gemm import ptpc_fp8_aiter_hip
+        from sglang.srt.models.kimi_k3_rocm_moe import prepare_shared_down_ptpc_fp8
 
-        weight = self._preroute_dense_weight(self.shared_experts.down_proj)
-        if (
-            not ptpc_fp8_aiter_hip.available()
-            or not isinstance(weight, torch.Tensor)
-            or weight.dtype != torch.bfloat16
-            or weight.ndim != 2
-        ):
-            return
-        _, in_features = weight.shape
-        (
-            self._shared_down_fp8_w,
-            self._shared_down_fp8_s,
-            self._shared_down_fp8_n,
-        ) = ptpc_fp8_aiter_hip.pack(weight.contiguous())
-        ptpc_fp8_aiter_hip.warmup(
-            self._shared_down_fp8_w,
-            self._shared_down_fp8_s,
-            self._shared_down_fp8_n,
-            in_features,
-            token_buckets=(2, 4, 8, 16, 32, 64, 128, 256),
-        )
+        prepare_shared_down_ptpc_fp8(self)
 
     def _prepare_latent_tail_fp8(self) -> None:
-        if (
-            not _aiter_latent_tail_fp8
-            or not self.fuse_ar_norm
-            or self.routed_expert_up_proj is None
-            or self.routed_expert_norm is None
-        ):
+        if not _is_hip:
             return
-        from sglang.kernels.ops.moe import latent_tail_aiter_hip
+        from sglang.srt.models.kimi_k3_rocm_moe import prepare_latent_tail_fp8
 
-        if tuple(self.routed_expert_up_proj.weight.shape) != (7168, 3584):
-            return
-        self._latent_tail_weight, self._latent_tail_scale = latent_tail_aiter_hip.pack(
-            self.routed_expert_up_proj.weight
-        )
-        norm_weight, epsilon = self._get_fused_norm_params()
-        latent_tail_aiter_hip.warmup(
-            norm_weight,
-            self._latent_tail_weight,
-            self._latent_tail_scale,
-            epsilon,
-        )
+        prepare_latent_tail_fp8(self)
 
     @cached_property
     def _routed_needs_reduce(self):
@@ -1642,17 +1486,10 @@ class KimiK3MoE(nn.Module):
     def _run_shared_down(self, x: torch.Tensor, out: torch.Tensor) -> None:
         shared = self.shared_experts
         assert shared is not None
-        if self._shared_down_fp8_w is not None and _k3_ptpc_fp8_moe_gemm_ok(x.shape[0]):
-            from sglang.kernels.ops.gemm import ptpc_fp8_aiter_hip
+        if _is_hip:
+            from sglang.srt.models.kimi_k3_rocm_moe import try_shared_down_ptpc
 
-            if ptpc_fp8_aiter_hip.covered(x, self._shared_down_fp8_w):
-                ptpc_fp8_aiter_hip.run(
-                    x,
-                    self._shared_down_fp8_w,
-                    self._shared_down_fp8_s,
-                    self._shared_down_fp8_n,
-                    out=out,
-                )
+            if try_shared_down_ptpc(self, x, out):
                 return
         _k3_bf16_gemm(x, shared.down_proj.weight, out=out)
 
@@ -1672,25 +1509,10 @@ class KimiK3MoE(nn.Module):
         if preactivated:
             self._run_shared_down(gate_up, shared_output)
             return
-        if (
-            self._preroute_shared_down_weight is not None
-            and self._preroute_shared_down_scale is not None
-        ):
-            from sglang.kernels.ops.moe import moe_preroute_aiter_hip
+        if _is_hip:
+            from sglang.srt.models.kimi_k3_rocm_moe import try_shared_down_preroute
 
-            if moe_preroute_aiter_hip.shared_down_covered(
-                gate_up,
-                self._preroute_shared_down_weight,
-                self._preroute_shared_down_scale,
-            ):
-                moe_preroute_aiter_hip.run_shared_down(
-                    gate_up,
-                    self._preroute_shared_down_weight,
-                    self._preroute_shared_down_scale,
-                    situ_beta=self._situ_beta,
-                    situ_linear_beta=self._situ_linear_beta,
-                    out=shared_output,
-                )
+            if try_shared_down_preroute(self, gate_up, shared_output):
                 return
         self._run_shared_down(shared.act_fn(gate_up), shared_output)
 
@@ -1773,60 +1595,19 @@ class KimiK3MoE(nn.Module):
         num_tokens, hidden_size = hidden_states.shape
         partial_front = self._eligible_for_partial_fused_front
         use_mxfp4 = self._use_moe_latent_mxfp4(num_tokens)
-        preroute = None
         shared_is_preactivated = False
-        if (
-            num_tokens <= 4
-            and self._preroute_routed_weight is not None
-            and self._preroute_routed_scale is not None
-            and self._preroute_shared_weight is not None
-            and self._preroute_shared_scale is not None
-        ):
-            from sglang.kernels.ops.moe import moe_preroute_aiter_hip
+        preroute = None
+        if _is_hip:
+            from sglang.srt.models.kimi_k3_rocm_moe import try_moe_preroute_front
 
-            if (
-                self._preroute_shared_interleaved_weight is not None
-                and self._preroute_shared_interleaved_scale is not None
-                and moe_preroute_aiter_hip.cooperative_preactivated_tri_covered(
-                    hidden_states,
-                    self._preroute_routed_weight,
-                    self._preroute_routed_scale,
-                    self._preroute_shared_interleaved_weight,
-                    self._preroute_shared_interleaved_scale,
-                    self.gate.weight,
-                )
-            ):
-                routed_input, gate_up, router_logits = (
-                    moe_preroute_aiter_hip.run_tri_cooperative_preactivated(
-                        hidden_states,
-                        self._preroute_routed_weight,
-                        self._preroute_routed_scale,
-                        self._preroute_shared_interleaved_weight,
-                        self._preroute_shared_interleaved_scale,
-                        self.gate.weight,
-                        situ_beta=self._situ_beta,
-                        situ_linear_beta=self._situ_linear_beta,
-                    )
-                )
-                shared_is_preactivated = True
-                preroute = True
-            elif moe_preroute_aiter_hip.tri_covered(
-                hidden_states,
-                self._preroute_routed_weight,
-                self._preroute_routed_scale,
-                self._preroute_shared_weight,
-                self._preroute_shared_scale,
-                self.gate.weight,
-            ):
-                routed_input, gate_up, router_logits = moe_preroute_aiter_hip.run_tri(
-                    hidden_states,
-                    self._preroute_routed_weight,
-                    self._preroute_routed_scale,
-                    self._preroute_shared_weight,
-                    self._preroute_shared_scale,
-                    self.gate.weight,
-                )
-                preroute = True
+            preroute = try_moe_preroute_front(self, hidden_states, num_tokens)
+            if preroute is not None:
+                (
+                    routed_input,
+                    gate_up,
+                    router_logits,
+                    shared_is_preactivated,
+                ) = preroute
         if preroute is None:
             # ROCm only, and only once the batch has outgrown the preroute
             # megakernel above: quantize the latent down-projection to FP8
@@ -1841,7 +1622,7 @@ class KimiK3MoE(nn.Module):
                 if k3_use_front_down_fp8(self, num_tokens):
                     front_down_fp8 = k3_run_front_down_fp8(self, hidden_states)
             if use_mxfp4:
-                from sglang.kernels.ops.gemm import latent_mxfp4_aiter_hip
+                from sglang.srt.models.kimi_k3_rocm_moe import run_latent_mxfp4
 
                 head = _k3_bf16_gemm(
                     hidden_states,
@@ -1855,7 +1636,7 @@ class KimiK3MoE(nn.Module):
                     gate_up, router_logits = torch.split(
                         head, self._front_sizes[:2], dim=-1
                     )
-                routed_input = latent_mxfp4_aiter_hip.run(
+                routed_input = run_latent_mxfp4(
                     hidden_states, self._front_down_w4, self._front_down_scale4
                 )
             elif front_down_fp8 is not None:
@@ -2041,47 +1822,22 @@ class KimiK3MoE(nn.Module):
             shared_output = buf[latent_numel:].view(num_tokens, hidden_size)
         if fused_normed_latent is not None:
             latent = fused_normed_latent
-        if use_latent_tail:
-            from sglang.kernels.ops.moe import latent_tail_aiter_hip
+        if _is_hip and use_latent_tail:
+            from sglang.srt.models.kimi_k3_rocm_moe import try_latent_tail
 
-            norm_weight, epsilon = self._get_fused_norm_params()
-            if latent_tail_aiter_hip.covered(
-                latent,
-                shared_output,
-                norm_weight,
-                self._latent_tail_weight,
-                self._latent_tail_scale,
-                epsilon,
-                prefix_sum,
-            ):
-                out = latent_tail_aiter_hip.run(
-                    latent,
-                    shared_output,
-                    norm_weight,
-                    self._latent_tail_weight,
-                    self._latent_tail_scale,
-                    epsilon,
-                    prefix_sum,
-                    skip_rms=fused_norm,
-                )
+            out = try_latent_tail(self, latent, shared_output, prefix_sum, fused_norm)
+            if out is not None:
                 return out
         if not fused_norm:
             latent = self._latent_norm(latent)
         if use_mxfp4:
-            from sglang.kernels.ops.gemm import latent_mxfp4_aiter_hip
+            from sglang.srt.models.kimi_k3_rocm_moe import run_latent_mxfp4
 
-            out = latent_mxfp4_aiter_hip.run(
-                latent, self._latent_up_w4, self._latent_up_scale4
-            )
+            out = run_latent_mxfp4(latent, self._latent_up_w4, self._latent_up_scale4)
         elif self._use_latent_up_ptpc_fp8(latent):
-            from sglang.kernels.ops.gemm import ptpc_fp8_aiter_hip
+            from sglang.srt.models.kimi_k3_rocm_moe import run_latent_up_ptpc
 
-            out = ptpc_fp8_aiter_hip.run(
-                latent,
-                self._latent_up_fp8_w,
-                self._latent_up_fp8_s,
-                self._latent_up_fp8_n,
-            )
+            out = run_latent_up_ptpc(self, latent)
         else:
             out, _ = self.routed_expert_up_proj(latent)
 
@@ -2518,114 +2274,32 @@ class KimiK3DeltaAttention(nn.Module):
         self._bfa_fa_size, self._bfa_b_size = sizes
 
     def _merge_kda_inproj_weights_hip(self) -> bool:
-        """Merge the ROCm KDA input projections while retaining split views."""
-        if not self._may_fuse_kda_inproj():
+        if not _is_hip:
             return False
+        from sglang.srt.models.kimi_k3_rocm_kda import merge_kda_inproj_weights_hip
 
-        merged, sizes = _merge_weights_as_views(
-            [self.fused_qkvg_proj, self.f_a_proj, self.b_proj], pad_rows_to=8
-        )
-        self._bfa_fa_size, self._bfa_b_size = sizes[-2:]
-        self._bfa_w = merged[sizes[0] :]
-        # Deliberately not an nn.Module: this is only a layer-shaped carrier for
-        # the linear method and must not duplicate `merged` in state_dict.
-        self._qkvgbfa_layer = SimpleNamespace(weight=merged)
-        self._qkvgbfa_sizes = [
-            *self.split_sizes,
-            self._bfa_fa_size,
-            self._bfa_b_size,
-            merged.shape[0] - sum(sizes),
-        ]
-        return True
+        return merge_kda_inproj_weights_hip(self)
 
     def _use_qkvgbfa_ptpc_fp8(self, hidden_states) -> bool:
-        x = _k3_hidden_tensor(hidden_states)
-        if getattr(self, "_qkvgbfa_fp8_w", None) is None or not _k3_ptpc_fp8_batch_ok(
-            x.shape[0]
-        ):
+        if not _is_hip:
             return False
-        from sglang.kernels.ops.gemm import ptpc_fp8_aiter_hip
+        from sglang.srt.models.kimi_k3_rocm_kda import use_qkvgbfa_ptpc_fp8
 
-        if isinstance(hidden_states, tuple):
-            return ptpc_fp8_aiter_hip.covered_prequant(
-                x, hidden_states[1], self._qkvgbfa_fp8_w
-            )
-        return ptpc_fp8_aiter_hip.covered(x, self._qkvgbfa_fp8_w)
+        return use_qkvgbfa_ptpc_fp8(self, hidden_states)
 
     def _prepare_qkvgbfa_ptpc_fp8(self) -> None:
-        """Quantize the merged KDA input projection for PTPC FP8 decode."""
-        layer = getattr(self, "_qkvgbfa_layer", None)
-        if not _k3_ptpc_fp8 or layer is None:
+        if not _is_hip:
             return
-        from sglang.kernels.ops.gemm import ptpc_fp8_aiter_hip
+        from sglang.srt.models.kimi_k3_rocm_kda import prepare_qkvgbfa_ptpc_fp8
 
-        weight = layer.weight
-        if (
-            not ptpc_fp8_aiter_hip.available()
-            or not isinstance(weight, torch.Tensor)
-            or weight.dtype != torch.bfloat16
-            or weight.ndim != 2
-        ):
-            return
-        out_features, in_features = weight.shape
-        (
-            self._qkvgbfa_fp8_w,
-            self._qkvgbfa_fp8_s,
-            self._qkvgbfa_fp8_n,
-        ) = ptpc_fp8_aiter_hip.pack(weight.contiguous())
-        ptpc_fp8_aiter_hip.warmup(
-            self._qkvgbfa_fp8_w,
-            self._qkvgbfa_fp8_s,
-            self._qkvgbfa_fp8_n,
-            in_features,
-        )
-
-    def _may_fuse_kda_inproj(self) -> bool:
-        """Return whether the KDA weights can safely share one ROCm GEMM."""
-        if not (_is_hip and envs.SGLANG_ROCM_K3_FUSE_KDA_INPROJ.get()):
-            return False
-        if not (self._attn_tp_is_full_tp and self.use_full_rank_gate):
-            return False
-        weights = [
-            module.weight
-            for module in (self.fused_qkvg_proj, self.f_a_proj, self.b_proj)
-        ]
-        if not all(
-            type(weight.data) is torch.Tensor and weight.dim() == 2
-            for weight in weights
-        ):
-            return False
-        # Whitelist the dtype rather than only require the three to agree: the
-        # merged buffer carries only .weight, so quantized weights that happen to
-        # match each other still lose their per-channel scales.
-        if not _is_unquantized_mergeable(weights):
-            return False
-        return len({(weight.dtype, weight.shape[1]) for weight in weights}) == 1
+        prepare_qkvgbfa_ptpc_fp8(self)
 
     def _prepare_group64_projection(self) -> None:
-        if (
-            not _aiter_kda_group64
-            or not self._attn_tp_is_full_tp
-            or not self.use_full_rank_gate
-        ):
+        if not _is_hip:
             return
-        srcs = [self.fused_qkvg_proj.weight, self.b_proj.weight, self.f_a_proj.weight]
-        # The shape check below passes for FP8 too, so pack() would reinterpret
-        # quantized bytes as bf16 and drop the per-channel scales.
-        if not _is_unquantized_mergeable(srcs):
-            return
-        from sglang.kernels.ops.gemm import kda_group64_aiter_hip
+        from sglang.srt.models.kimi_k3_rocm_kda import prepare_group64_projection
 
-        merged = torch.cat(
-            [*srcs, self.f_a_proj.weight.new_zeros((4, self.hidden_size))],
-            dim=0,
-        ).contiguous()
-        if tuple(merged.shape) != (6288, 7168):
-            return
-        weight, scale = kda_group64_aiter_hip.pack(merged)
-        self._kda_group64_weight = weight
-        self._kda_group64_scale = scale
-        kda_group64_aiter_hip.warmup(weight, scale)
+        prepare_group64_projection(self)
 
     def _prepare_fused_decode(self) -> None:
         """Static inputs for the fused KDA decode kernel
@@ -2636,56 +2310,11 @@ class KimiK3DeltaAttention(nn.Module):
         unfused chain. Called once from load_weights (after all weights are
         loaded, before cuda graph capture)."""
         if _is_hip:
-            from sglang.kernels.ops.attention import kda_fused_decode_aiter_hip
-
-            layer = self.attn
-            w = layer.conv_weights
-            f_b_weight = self.f_b_proj.weight
-            # Quark ships f_b as PTPC FP8; _merge_bfa_weights already
-            # dequantized it into the BF16 tiny-GEMM buffer.
-            f_b_dense = getattr(self, "_bfa_f_b_w", None)
-            if f_b_weight.dtype != torch.bfloat16 and f_b_dense is not None:
-                f_b_weight = f_b_dense
-            backend = envs.SGLANG_ROCM_K3_KDA_FUSED_BACKEND.get().lower()
-            backend_available = (
-                backend == "aiter"
-                and kda_fused_decode_aiter_hip.available(f_b_weight.device)
+            from sglang.srt.models.kimi_k3_rocm_kda import (
+                prepare_fused_decode_hip,
             )
-            if (
-                backend_available
-                and w is not None
-                and tuple(w.shape) == (3 * 12 * 128, 4)
-                and w.dtype == torch.float32
-                and f_b_weight.shape == (12 * 128, 128)
-                and f_b_weight.dtype == torch.bfloat16
-                and layer.A_log is not None
-                and layer.A_log.numel() == 12
-                and layer.A_log.dtype == torch.float32
-                and layer.dt_bias is not None
-                and tuple(layer.dt_bias.shape) == (12 * 128,)
-                and layer.dt_bias.dtype == torch.float32
-                and layer.lower_bound is not None
-            ):
-                norm_weight = self.o_norm.weight.data.to(torch.bfloat16).contiguous()
-                f_b_weight = f_b_weight.view(12, 128, 128).contiguous()
-                a_log = layer.A_log.detach().reshape(-1).contiguous()
-                layer._k3_hip_fused_decode_args = (
-                    f_b_weight,
-                    norm_weight,
-                    float(self.o_norm.eps),
-                    a_log,
-                )
-                kda_fused_decode_aiter_hip.warmup(
-                    f_b_weight=f_b_weight,
-                    conv_weight=w,
-                    A_log=a_log,
-                    dt_bias=layer.dt_bias,
-                    lower_bound=float(layer.lower_bound),
-                    norm_weight=norm_weight,
-                    norm_eps=float(self.o_norm.eps),
-                )
-                layer._k3_hip_fused_decode_backend = backend
-                self._kda_hip_fused_decode_ready = True
+
+            prepare_fused_decode_hip(self)
             return
         layer = self.attn
         w = layer.conv_weights
@@ -2736,30 +2365,12 @@ class KimiK3DeltaAttention(nn.Module):
     ):
         if self.use_full_rank_gate:
             token_count = _k3_hidden_num_tokens(hidden_states)
-            if (
-                not isinstance(hidden_states, tuple)
-                and defer_f_b
-                and self._kda_group64_weight is not None
-                and self._kda_group64_scale is not None
-            ):
-                from sglang.kernels.ops.gemm import kda_group64_aiter_hip
+            if _is_hip and not isinstance(hidden_states, tuple) and defer_f_b:
+                from sglang.srt.models.kimi_k3_rocm_kda import try_group64_qkv
 
-                if kda_group64_aiter_hip.covered(
-                    hidden_states,
-                    self._kda_group64_weight,
-                    self._kda_group64_scale,
-                ):
-                    packed = kda_group64_aiter_hip.run(
-                        hidden_states,
-                        self._kda_group64_weight,
-                        self._kda_group64_scale,
-                    )
-                    mixed_qkv, g_proj_states, beta, f_a, _padding = torch.split(
-                        packed,
-                        [self.split_sizes[0], self.split_sizes[1], 12, 128, 4],
-                        dim=-1,
-                    )
-                    return mixed_qkv, beta, f_a, g_proj_states
+                grouped = try_group64_qkv(self, hidden_states)
+                if grouped is not None:
+                    return grouped
             if (
                 _is_hip
                 and self._qkvgbfa_sizes is not None
@@ -3152,168 +2763,11 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
         positions: torch.Tensor,
         out_cache_loc: torch.Tensor,
     ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
-        if not self._k3_mla_q_cache_fusion:
+        if not _is_hip:
             return None
+        from sglang.srt.models.kimi_k3_rocm_mla import try_fused_mla_q_cache
 
-        from sglang.srt.layers.rocm_linear_utils import (
-            fused_qk_rope_cat_and_cache_mla,
-        )
-        from sglang.srt.model_executor.forward_context import get_token_to_kv_pool
-
-        kv_cache = get_token_to_kv_pool().get_key_buffer(self.attn_mqa.layer_id)
-        scale = self.attn_mqa.k_scale
-        if scale is None:
-            scale = self._k3_mla_q_cache_scale
-        cos_cache = self._k3_identity_rope_cos
-        sin_cache = self._k3_identity_rope_sin
-        if (
-            not isinstance(scale, torch.Tensor)
-            or not isinstance(self._k3_mla_q_cache_scale, torch.Tensor)
-            or cos_cache is None
-            or sin_cache is None
-        ):
-            return None
-
-        # AITER's asm decode uses FP8 Q when the cache is FP8. Gluon keeps Q in
-        # BF16 while retaining the fused FP8 cache write; its h12/bh16 kernel is
-        # both faster and more accurate for K3's long-context decode regime.
-        triton_decode = self.current_attention_backend in ("triton", "triton_mla")
-        tokens, heads = q_nope_out.shape[0], q_nope_out.shape[1]
-        from sglang.srt.layers.attention.aiter_mla_gluon import (
-            prefer_mla_gluon_decode,
-        )
-
-        gluon_decode = not triton_decode and prefer_mla_gluon_decode(
-            head_pad_mode="zero",
-            num_head=heads,
-            kv_cache_dtype=kv_cache.dtype,
-            q_dtype=torch.bfloat16,
-        )
-        q_out_dtype = (
-            q_nope_out.dtype if triton_decode or gluon_decode else kv_cache.dtype
-        )
-        if (
-            q_nope_out.shape != (tokens, heads, self.kv_lora_rank)
-            or q_pe.shape != (tokens, heads, self.qk_rope_head_dim)
-            or k_nope.shape != (tokens, 1, self.kv_lora_rank)
-            or k_pe.shape != (tokens, 1, self.qk_rope_head_dim)
-            or out_cache_loc.shape != (tokens,)
-            or positions.shape != (tokens,)
-        ):
-            return None
-        # AITER's qh16 decode kernel needs 16 Q heads. K3 TP8 has 12; the
-        # previous producer emitted 12 and the backend `F.pad`ed, which is a
-        # FillFunctor per MLA layer. Write the 12 real heads into a persistent
-        # zeroed 16-head buffer instead so decode can skip that launch.
-        # Do not use uninitialized pad heads: that is the fill-elim that
-        # already failed GSM8K.
-        aiter_pad_heads = (
-            heads
-            if gluon_decode
-            else (16 if (heads < 16 and 16 % heads != 0) else heads)
-        )
-        q_out = self._mla_q_out_buffer(
-            tokens,
-            aiter_pad_heads,
-            self.kv_lora_rank + self.qk_rope_head_dim,
-            q_out_dtype,
-            q_nope_out.device,
-            zero_init=aiter_pad_heads > heads,
-        )
-        from sglang.kernels.ops.attention import mla_q_cache_aiter_hip
-
-        if mla_q_cache_aiter_hip.covered(
-            q_nope_out,
-            q_pe,
-            k_nope,
-            k_pe,
-            kv_cache,
-            out_cache_loc,
-            positions,
-            scale,
-            cos_cache,
-            sin_cache,
-            q_out,
-            q_scale=self._k3_mla_q_cache_scale,
-        ):
-            q = mla_q_cache_aiter_hip.run(
-                q_nope=q_nope_out,
-                q_pe=q_pe,
-                k_nope=k_nope,
-                k_pe=k_pe,
-                kv_cache=kv_cache,
-                slot_mapping=out_cache_loc,
-                positions=positions,
-                k_scale=scale,
-                cos_cache=cos_cache,
-                sin_cache=sin_cache,
-                out=q_out,
-                q_scale=self._k3_mla_q_cache_scale,
-            )
-        else:
-            q, _, _, _ = fused_qk_rope_cat_and_cache_mla(
-                q_nope_out,
-                q_pe,
-                k_nope,
-                k_pe,
-                kv_cache,
-                out_cache_loc,
-                positions,
-                cos_cache,
-                sin_cache,
-                scale,
-                True,
-                q_scale=self._k3_mla_q_cache_scale,
-                q_out_dtype=q_out_dtype,
-                compute_all_q_rope=False,
-                identity_rope=True,
-            )
-        k_placeholder = self._mla_k_placeholder(
-            k_nope.shape[0], k_nope.dtype, k_nope.device
-        )
-        return q, k_placeholder
-
-    def _mla_q_out_buffer(
-        self,
-        tokens: int,
-        heads: int,
-        head_dim: int,
-        dtype: torch.dtype,
-        device: torch.device,
-        zero_init: bool = False,
-    ) -> torch.Tensor:
-        """Persistent fused-Q workspace, including optional MLA pad heads."""
-        buf = getattr(self, "_k3_mla_q_out", None)
-        if (
-            not isinstance(buf, torch.Tensor)
-            or buf.dtype != dtype
-            or buf.device != device
-            or buf.shape[1] != heads
-            or buf.shape[2] != head_dim
-            or buf.shape[0] < tokens
-        ):
-            buf = torch.empty((tokens, heads, head_dim), dtype=dtype, device=device)
-            if zero_init:
-                buf.view(torch.uint8).zero_()
-            self._k3_mla_q_out = buf
-        return buf[:tokens]
-
-    def _mla_k_placeholder(
-        self, tokens: int, dtype: torch.dtype, device: torch.device
-    ) -> torch.Tensor:
-        width = self.kv_lora_rank + self.qk_rope_head_dim
-        buf = getattr(self, "_k3_mla_k_placeholder", None)
-        if (
-            not isinstance(buf, torch.Tensor)
-            or buf.dtype != dtype
-            or buf.device != device
-            or buf.shape[1] != 1
-            or buf.shape[2] != width
-            or buf.shape[0] < tokens
-        ):
-            buf = torch.empty((tokens, 1, width), dtype=dtype, device=device)
-            self._k3_mla_k_placeholder = buf
-        return buf[:tokens]
+        return try_fused_mla_q_cache(self, q_nope_out, q_pe, k_nope, k_pe, positions, out_cache_loc)
 
     def _fork_output_gate(self, hidden_states: torch.Tensor) -> None:
         """Fork early, but record the gate after attention to limit replay streams."""
@@ -4557,17 +4011,17 @@ class KimiK3LinearForCausalLM(nn.Module):
                 continue
             if isinstance(layer.mlp, KimiK3MoE):
                 layer.mlp._merge_front_weights()
-                layer.mlp._prepare_moe_latent_mxfp4()
                 if _is_hip:
                     from sglang.srt.models.kimi_k3_rocm_quant import (
                         k3_prepare_front_down_fp8,
                     )
 
+                    layer.mlp._prepare_moe_latent_mxfp4()
                     k3_prepare_front_down_fp8(layer.mlp)
-                layer.mlp._prepare_preroute_fp8()
-                layer.mlp._prepare_latent_tail_fp8()
-                layer.mlp._prepare_latent_up_ptpc_fp8()
-                layer.mlp._prepare_shared_down_ptpc_fp8()
+                    layer.mlp._prepare_preroute_fp8()
+                    layer.mlp._prepare_latent_tail_fp8()
+                    layer.mlp._prepare_latent_up_ptpc_fp8()
+                    layer.mlp._prepare_shared_down_ptpc_fp8()
                 # Convert the correction bias to whatever dtype the router
                 # wants (fp32, or the gate-logit dtype under aiter) once here,
                 # so topk's per-call cast becomes a no-op. Both are exact.
@@ -4579,9 +4033,10 @@ class KimiK3LinearForCausalLM(nn.Module):
                     bias.data = bias.data.to(_bias_dtype)
             if isinstance(layer.self_attn, KimiK3DeltaAttention):
                 layer.self_attn._merge_bfa_weights()
-                layer.self_attn._prepare_group64_projection()
                 layer.self_attn._prepare_fused_decode()
-                layer.self_attn._prepare_qkvgbfa_ptpc_fp8()
+                if _is_hip:
+                    layer.self_attn._prepare_group64_projection()
+                    layer.self_attn._prepare_qkvgbfa_ptpc_fp8()
 
         for layer in self.model.layers:
             if isinstance(layer, PPMissingLayer) or not isinstance(
