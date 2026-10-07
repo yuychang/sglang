@@ -1839,6 +1839,10 @@ class KimiK3DeltaAttention(nn.Module):
         )
         # KDA safe gate: checkpoint trained with gate_lower_bound=-5.0
         self.attn.lower_bound = config.linear_attn_config.get("gate_lower_bound", None)
+        # AITER FlashKDA prefill only accepts beta logits.
+        self.attn.extend_beta_is_raw = (
+            _is_hip and envs.SGLANG_AITER_KDA_FLASH_PREFILL.get()
+        )
         # Set by _prepare_fused_decode() once weights are loaded.
         self._kda_fused_decode_ready = False
         self._kda_hip_fused_decode_ready = False

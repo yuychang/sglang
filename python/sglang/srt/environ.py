@@ -968,8 +968,14 @@ class Envs:
     # Requantize Quark per-channel FP8 kv_b to per-tensor FP8 for the MLA absorb.
     # On by default. Measured: TPOT drops 0.05-0.11 ms; set 0 for the bf16 path.
     SGLANG_ROCM_K3_MLA_ABSORB_FP8 = EnvBool(True)
-    # "fp4" keeps W4A4; "bf16" dequantizes MXFP4 dense weights at load.
-    # Measured on K3: bf16 GSM8K 0.947 vs fp4 0.908. Ignored off ROCm.
+    # gfx95 KDA extend via AITER FlashKDA. The model keeps beta as logits and
+    # the kernel sigmoids them. Off by default: tracked interior snapshots and
+    # speculative draft-extend stay on Triton either way.
+    SGLANG_AITER_KDA_FLASH_PREFILL = EnvBool(False)
+    # Activation precision for MXFP4-weight dense linears, independent of the
+    # MoE: "fp4" is the checkpoint's own W4A4, "bf16" dequantizes the weights
+    # at load. bf16 by default: K3 GSM8K scores 0.947 vs fp4's 0.908, for
+    # ~3% decode throughput. Ignored off ROCm (both paths are aiter kernels).
     SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT = EnvStr("bf16")
     # Dequantize Quark MXFP4 shared experts before the MoE front merge.
     # Needs SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT=bf16.
