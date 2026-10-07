@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 import math
 from dataclasses import dataclass, field
@@ -1774,6 +1775,46 @@ def _biased_grouped_topk_postprocess(
     return topk_ids
 
 
+@functools.cache
+def _aiter_takes_presorted_moe() -> bool:
+    try:
+        from aiter.fused_moe import register_presorted_moe  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _route_radix4_presorted(
+    scores: torch.Tensor,
+    bias: torch.Tensor,
+    topk: int,
+    renormalize: bool,
+    routed_scaling_factor: float,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Radix-4 routing with AITER's BM=16 sort fused into the launch, which
+    also zeroes the published MoE output; fused_moe then skips both."""
+    from aiter.fused_moe import register_presorted_moe
+
+    from sglang.kernels.ops.moe import moe_route_radix4
+    from sglang.srt.layers import zero_copy_context
+
+    published = zero_copy_context.ctx.moe_output
+    moe_buf = (
+        None
+        if published is None
+        else zero_copy_context.get_moe_output_spec(
+            torch.Size((scores.shape[0], published.shape[-1])),
+            torch.bfloat16,
+            scores.device,
+        )
+    )
+    weights, ids, aux = moe_route_radix4.route_radix4_with_sort(
+        scores, bias, topk, renormalize, routed_scaling_factor, moe_buf
+    )
+    register_presorted_moe(aux)
+    return weights, ids
+
+
 def biased_grouped_topk_gpu(
     hidden_states: torch.Tensor,
     gating_output: torch.Tensor,
@@ -1935,6 +1976,14 @@ def biased_grouped_topk_gpu(
             if moe_route_radix4.available() and moe_route_radix4.covered(
                 gating_output, bias, topk, num_expert_group, topk_group
             ):
+                if (
+                    envs.SGLANG_ROCM_K3_RADIX4_FUSE_SORT.get()
+                    and moe_route_radix4.fused_sort_covered(token)
+                    and _aiter_takes_presorted_moe()
+                ):
+                    return _route_radix4_presorted(
+                        gating_output, bias, topk, renormalize, scaling
+                    )
                 return moe_route_radix4.route_radix4(
                     gating_output, bias, topk, renormalize, scaling
                 )
