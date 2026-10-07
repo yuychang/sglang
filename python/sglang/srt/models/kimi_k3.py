@@ -120,12 +120,7 @@ from sglang.srt.models.kimi_k3_rocm_fusion import (
     _k3_fuse_mla_gate_ptpc,
     _k3_hidden_num_tokens,
     _k3_hidden_rows,
-    _k3_hidden_tensor,
     _k3_maybe_fuse_inproj_quant,
-    _k3_ptpc_fp8,
-    _k3_ptpc_fp8_batch_ok,
-    _k3_ptpc_fp8_moe_gemm_ok,
-    _k3_ptpc_fp8_shared_down,
     _k3_should_fuse_inproj_quant,
 )
 from sglang.srt.models.kimi_k3_vl import (
