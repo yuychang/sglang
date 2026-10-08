@@ -15,7 +15,6 @@ from aiter.ops.flydsl.kernels.tensor_shim import (
     AITER_FLYDSL_KERNARG_PRELOAD_COUNT,
     ptr_rsrc,
 )
-from aiter.ops.flydsl.kernels.vector import ReductionOp
 from flydsl._mlir import ir
 from flydsl._mlir.dialects import arith as arith_dialect
 from flydsl._mlir.dialects import scf
@@ -24,7 +23,7 @@ from flydsl.compiler.kernel_function import CompilationContext
 from flydsl.expr import arith, const_expr, gpu, range_constexpr
 from flydsl.expr.arith import ArithValue, CmpIPredicate
 from flydsl.expr.rocdl import cvt_pk_f32_fp8
-from flydsl.expr.typing import T
+from flydsl.expr.typing import ReductionOp, T
 
 _SHARED_INTERMEDIATE_SIZE = 768
 _SHARED_GATE_UP_SIZE = 2 * _SHARED_INTERMEDIATE_SIZE
