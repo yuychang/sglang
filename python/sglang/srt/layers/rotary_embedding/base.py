@@ -446,18 +446,18 @@ class RotaryEmbedding(BaseFusedOp):
                 assert fused_set_kv_buffer_arg is None, (
                     "save kv cache is not supported for fallback_rotary_embedding."
                 )
-                if _is_hip:
-                    self.cos_sin_cache = self.cos_sin_cache.to(query.device)
-                else:
-                    self.cos_sin_cache = self.cos_sin_cache.to(
-                        query.device, dtype=query.dtype
-                    )
+                # The fallback sgl-kernel op requires Q/K and its cache to use
+                # the same dtype. Keep the registered HIP cache in fp32 for
+                # QSA, but pass a matching temporary view to this generic op.
+                fallback_cos_sin_cache = self.cos_sin_cache.to(
+                    query.device, dtype=query.dtype
+                )
                 self.fallback_rotary_embedding(
                     positions,
                     query,
                     key,
                     self.head_size,
-                    self.cos_sin_cache,
+                    fallback_cos_sin_cache,
                     self.is_neox_style,
                 )
         return query, key
