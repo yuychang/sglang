@@ -1884,6 +1884,10 @@ class Envs:
     # Where the K3 FlyDSL kernels come from: "auto" prefers the SGLang copy and
     # falls back to AITER, "sglang" and "aiter" pin one source.
     SGLANG_K3_FLYDSL_SOURCE = EnvStr("auto")
+    # Kimi-K3 gfx950: keep MXFP4 copies of the latent down/up projections and use
+    # them from this many tokens per batch; BF16 weights stay as the fallback.
+    SGLANG_OPT_HIP_K3_MOE_LATENT_MXFP4 = EnvBool(False)
+    SGLANG_OPT_HIP_K3_MOE_LATENT_MXFP4_MIN_TOKENS = EnvInt(2048)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_CACHE_CAPACITY = EnvInt(2)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_MIN_HITS = EnvInt(2)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_MAX_SEQLEN = EnvInt(6144)
