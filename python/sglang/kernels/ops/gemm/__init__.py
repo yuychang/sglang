@@ -643,3 +643,24 @@ register_kernel(
         target="sglang.kernels.ops.gemm.int8_kernel:w8a8_block_int8_matmul",
     )
 )
+
+# Kimi-K3 ROCm decode projections.
+_HIP = frozenset({CapabilityRequirement.HIP})
+for _op, _backend, _target in [
+    (
+        "kimi_k3_kda_input_group64",
+        KernelBackend.FLYDSL,
+        "kimi_k3_flydsl.kimi_k3_kda_input_group64:kimi_k3_kda_input_group64",
+    ),
+    ("ptpc_fp8", KernelBackend.AITER, "ptpc_fp8_aiter_hip:run"),
+    ("latent_mxfp4", KernelBackend.AITER, "latent_mxfp4_aiter_hip:run"),
+]:
+    register_kernel(
+        KernelSpec(
+            op=f"gemm.{_op}",
+            backend=_backend,
+            target=f"sglang.kernels.ops.gemm.{_target}",
+            capabilities=_HIP,
+        )
+    )
+del _op, _backend, _target
