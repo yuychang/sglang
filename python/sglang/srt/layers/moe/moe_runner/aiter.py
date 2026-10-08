@@ -13,6 +13,7 @@ import torch
 _SMALLM_MOE_ON = os.environ.get("SGLANG_ROCM_SMALLM_MOE", "1") != "0"
 
 from sglang.srt.environ import envs
+from sglang.srt.layers import zero_copy_context
 from sglang.srt.layers.moe.moe_runner.base import (
     MoeQuantInfo,
     MoeRunnerConfig,
@@ -295,6 +296,29 @@ class AiterRunnerCore(MoeRunnerCore):
         activation = extra.pop("activation", None) if is_gfx95 else None
         if activation is None:
             activation = _aiter_activation(self.config)
+
+        # Let aiter write the top-k sum into the published buffer. It returns a
+        # fresh tensor when it declines, so the publisher still compares before
+        # copying. no_combine output has an extra top-k dim and cannot fit, and
+        # a MORI EPv2 staging view set above takes precedence.
+        if (
+            not self.config.no_combine
+            and "output" not in extra
+            and _aiter_fused_moe_supports_output()
+        ):
+            zero_copy_out = zero_copy_context.get_moe_output_spec(
+                torch.Size(
+                    (runner_input.hidden_states.shape[0], quant_info.w2_weight.shape[1])
+                ),
+                (
+                    runner_input.output_dtype
+                    if runner_input.output_dtype is not None
+                    else runner_input.hidden_states.dtype
+                ),
+                runner_input.hidden_states.device,
+            )
+            if zero_copy_out is not None:
+                extra["output"] = zero_copy_out
 
         output = fused_moe(
             hidden_states=runner_input.hidden_states,

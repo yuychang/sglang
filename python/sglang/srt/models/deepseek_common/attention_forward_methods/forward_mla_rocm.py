@@ -61,6 +61,7 @@ from sglang.srt.models.deepseek_common.utils import (
     _use_aiter_bpreshuffle_gfx95,
     _use_aiter_gfx95,
 )
+from sglang.srt.models.deepseek_common.utils_rocm import accepts_ptpc_fp8_tuple
 from sglang.srt.runtime_context import get_exec, get_parallel
 from sglang.srt.state_capturer.indexer_topk import (
     maybe_capture_indexer_topk,
@@ -74,6 +75,7 @@ from sglang.srt.utils import (
 
 logger = logging.getLogger(__name__)
 _SGLANG_EXPERIMENTAL_LORA_OPTI = envs.SGLANG_EXPERIMENTAL_LORA_OPTI.get()
+_use_k3_ptpc_fp8 = envs.SGLANG_ROCM_K3_PTPC_FP8.get()
 
 if TYPE_CHECKING:
     from sglang.srt.models.deepseek_v2 import DeepseekV2AttentionMLA
@@ -180,6 +182,38 @@ def _absorb_bmm_config(heads: int, m: int, n: int) -> Optional[dict]:
         "matrix_instr_nonkdim": 16,
         "cache_modifier": ".cg",
     }
+
+
+def _fused_qk_rmsnorm_ptpc_quant(
+    attn: DeepseekV2AttentionMLA, *, q: torch.Tensor, k_nope: torch.Tensor
+) -> Tuple[Tuple[torch.Tensor, torch.Tensor], torch.Tensor, Optional[torch.Tensor]]:
+    """q_a/kv_a RMSNorm with q quantized per token for a PTPC q_b_proj.
+
+    Returns ((q_fp8, q_scale), normed k_nope, the bf16 normed q under DSA).
+    """
+    from aiter import dtypes as aiter_dtypes
+    from aiter.ops.fused_qk_rmsnorm_group_quant import (
+        fused_qk_rmsnorm_per_token_quant,
+    )
+
+    q_fp8 = torch.empty(q.shape, dtype=aiter_dtypes.fp8, device=q.device)
+    q_scale = torch.empty((q.shape[0], 1), dtype=torch.float32, device=q.device)
+    k_out = torch.empty_like(k_nope)
+    q_unq = torch.empty_like(q) if attn.use_dsa else None
+    fused_qk_rmsnorm_per_token_quant(
+        q_fp8,
+        q_scale,
+        q,
+        attn.q_a_layernorm.weight,
+        attn.q_a_layernorm.variance_epsilon,
+        q_unq,
+        k_out,
+        None,
+        k_nope,
+        attn.kv_a_layernorm.weight,
+        attn.kv_a_layernorm.variance_epsilon,
+    )
+    return (q_fp8, q_scale), k_out, q_unq
 
 
 def _absorb_weight_bf16(w: torch.Tensor, w_scale) -> torch.Tensor:
@@ -391,12 +425,14 @@ def _fused_rope_cat_and_cache(
     kv_cache_dtype = (
         fp8_dtype if attn.kv_cache_dtype == "fp8_e4m3" else q_nope_out.dtype
     )
-    # Gluon MLA decode (bh16bn128) requires bf16 Q; vLLM #50563.
+    # Gluon MLA decode (bh16bn128) requires BF16 Q. When Gluon is explicitly
+    # disabled, keep Q in FP8 and use the supported A8W8 ASM decode path.
     q_out_dtype = (
         q_nope_out.dtype
         if attn.kv_cache_dtype == "fp8_e4m3"
         and attn.current_attention_backend == "aiter"
         and q_nope_out.shape[-2] == 12
+        and envs.SGLANG_AITER_MLA_GLUON.get()
         else kv_cache_dtype
     )
     kv_pool = get_token_to_kv_pool()
@@ -581,6 +617,16 @@ class DeepseekMLARocmForwardMixin:
                         q = view_aiter_fused_rms_transposed_fp8_scale_tuple(q)
                     elif _use_aiter_bpreshuffle_gfx95:
                         q = materialize_bpreshuffle_fp8_scale_tuple(q)
+            elif (
+                _use_aiter
+                and _use_k3_ptpc_fp8
+                and accepts_ptpc_fp8_tuple(self.q_b_proj)
+            ):
+                q, k_nope, q_unq = _fused_qk_rmsnorm_ptpc_quant(
+                    self, q=q, k_nope=k_nope
+                )
+                if self.use_dsa:
+                    q_lora = q_unq
             elif _use_aiter:
                 q, k_nope = fused_qk_rmsnorm_bf16(
                     q,
@@ -972,7 +1018,28 @@ class DeepseekMLARocmForwardMixin:
                 **(dict(topk_indices=topk_indices) if topk_indices is not None else {}),
             )
         else:
-            if self._skip_rope_for_aiter_fused_mla():
+            q = None
+            k = None
+            k3_fused_q_cache = getattr(self, "_try_fused_mla_q_cache", None)
+            if (
+                k3_fused_q_cache is not None
+                and self.current_attention_backend in ("aiter", "triton", "triton_mla")
+                and not get_parallel().dcp_enabled
+                and forward_batch.forward_mode.is_decode_or_idle()
+            ):
+                result = k3_fused_q_cache(
+                    q_nope_out,
+                    q_pe,
+                    k_nope,
+                    k_pe,
+                    positions,
+                    forward_batch.out_cache_loc,
+                )
+                if result is not None:
+                    q, k = result
+                    save_kv_cache = False
+
+            if q is None and self._skip_rope_for_aiter_fused_mla():
                 q, _, _, k = _fused_rope_cat_and_cache(
                     self,
                     q_nope_out,
@@ -983,7 +1050,7 @@ class DeepseekMLARocmForwardMixin:
                     forward_batch.out_cache_loc,
                 )
                 save_kv_cache = False
-            else:
+            elif q is None:
                 q = torch.cat([q_nope_out, q_pe], dim=-1)
                 k = torch.cat([k_nope, k_pe], dim=-1)
 
