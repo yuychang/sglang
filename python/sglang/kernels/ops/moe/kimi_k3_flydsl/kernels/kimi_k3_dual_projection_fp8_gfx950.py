@@ -16,7 +16,6 @@ from aiter.ops.flydsl.kernels.tensor_shim import (
     AITER_FLYDSL_KERNARG_PRELOAD_COUNT,
     ptr_rsrc,
 )
-from sglang.kernels.ops import flydsl_vector as vector
 from flydsl._mlir import ir
 from flydsl._mlir.dialects import arith as arith_dialect
 from flydsl._mlir.dialects import scf
@@ -25,6 +24,8 @@ from flydsl.expr import arith, const_expr, gpu, range_constexpr
 from flydsl.expr.arith import ArithValue, CmpIPredicate
 from flydsl.expr.rocdl import cvt_pk_f32_fp8
 from flydsl.expr.typing import ReductionOp, T
+
+from sglang.kernels.jit.utils import flydsl_vector as vector
 
 _HIDDEN_SIZE = 7168
 _ROUTED_SIZE = 3584

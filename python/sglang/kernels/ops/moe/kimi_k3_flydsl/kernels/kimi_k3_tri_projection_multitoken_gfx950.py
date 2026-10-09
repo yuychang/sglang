@@ -10,7 +10,6 @@ from pathlib import Path
 import flydsl.compiler as flyc
 import flydsl.expr as fx
 from aiter.ops.flydsl.kernels import buffer_ops
-from sglang.kernels.ops import flydsl_vector as vector
 from aiter.ops.flydsl.kernels.tensor_shim import (
     AITER_FLYDSL_KERNARG_PRELOAD,
     AITER_FLYDSL_KERNARG_PRELOAD_COUNT,
@@ -25,6 +24,8 @@ from flydsl.expr import arith, const_expr, gpu, range_constexpr, rocdl
 from flydsl.expr.arith import ArithValue, CmpIPredicate
 from flydsl.expr.rocdl import cvt_pk_f32_fp8
 from flydsl.expr.typing import T
+
+from sglang.kernels.jit.utils import flydsl_vector as vector
 
 _HIDDEN = 7168
 _ROUTED = 3584
