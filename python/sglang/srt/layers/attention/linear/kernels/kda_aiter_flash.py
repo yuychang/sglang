@@ -2,9 +2,9 @@
 
 FlashKDA keeps the recurrent state in registers and writes the V-first pool
 in place. It matches SGLang's chunk_kda to bf16 on a nonzero state, including
-the paged pool. It does not materialize the per-chunk states the mamba radix
-track path reads, and it commits the slot before the forward returns, so those
-two cases stay on Triton.
+a bf16 or fp32 paged pool. Interior radix snapshots are the state entering a
+64-token Triton chunk, which is flash chunk ``index * 2``. Speculative
+draft-extend stays on Triton: this kernel commits the slot before returning.
 """
 
 from typing import Optional
@@ -18,6 +18,8 @@ from sglang.srt.layers.attention.linear.kernels.kernel_backend import (
 from sglang.srt.utils.common import is_gfx95_supported, rank0_log
 
 _K = 128
+_FLASH_CHUNK = 32
+_TRACK_CHUNK = 64
 _LOWER_MIN = -5.0
 _LOWER_MAX = 0.0
 
@@ -61,8 +63,8 @@ def _triton_extend(
 
 
 def _state_plane_ok(state: torch.Tensor) -> bool:
-    """Each slot is a dense fp32 ``[H, V, K]``; ``stride(0)`` may be padded."""
-    if state.dtype != torch.float32 or state.dim() != 4:
+    """Each slot is a dense fp32 or bf16 ``[H, V, K]``; ``stride(0)`` may be padded."""
+    if state.dtype not in (torch.float32, torch.bfloat16) or state.dim() != 4:
         return False
     _slots, h, v, k = state.shape
     if k != _K or v != _K:
@@ -79,10 +81,10 @@ class AiterFlashKDAKernel(LinearAttnKernelBase):
     """gfx95 KDA extend through ``aiter`` FlashKDA.
 
     The fast path passes raw beta and lets the kernel sigmoid it, and it
-    addresses the live V-first pool (``ssm_states``) by slot. Tracked batches
-    whose snapshot is an interior chunk boundary, and speculative draft-extend,
-    fall back to Triton ``chunk_kda``. Aligned snapshots only need the final
-    state, which this path already wrote into the slot.
+    addresses the live V-first pool (``ssm_states``) by slot. An interior radix
+    snapshot is written as the state entering that 64-token chunk. Speculative
+    draft-extend falls back to Triton ``chunk_kda``. Aligned snapshots only
+    need the final state, which this path already wrote into the slot.
     """
 
     # Tracked batches are either served (aligned: final state is the slot) or
@@ -94,8 +96,8 @@ class AiterFlashKDAKernel(LinearAttnKernelBase):
         from aiter.ops.triton.kimi_delta_attn import chunk_kimi_delta_attn
 
         self._fwd = chunk_kimi_delta_attn
-        self._logged_fallback: set[str] = set()
-        self._logged_hit = False
+        self._falls: dict[str, int] = {}
+        self._hits = 0
 
     def decode(self, *args, **kwargs) -> torch.Tensor:
         raise NotImplementedError("AiterFlashKDAKernel only supports extend")
@@ -119,7 +121,14 @@ class AiterFlashKDAKernel(LinearAttnKernelBase):
         is_spec_decode: bool = False,
         **kwargs,
     ):
-        reason = self._fallback_reason(
+        snap_chunk, snap_state, track_reason = self._snapshot_args(
+            query_start_loc,
+            return_intermediate_states=return_intermediate_states,
+            track_h_src=kwargs.get("track_ssm_h_src"),
+            track_chunk_idx=kwargs.get("track_chunk_idx"),
+            track_state=kwargs.get("track_state"),
+        )
+        reason = track_reason or self._fallback_reason(
             q,
             k,
             v,
@@ -131,13 +140,11 @@ class AiterFlashKDAKernel(LinearAttnKernelBase):
             A_log=A_log,
             lower_bound=lower_bound,
             beta_is_raw=beta_is_raw,
-            return_intermediate_states=return_intermediate_states,
             is_spec_decode=is_spec_decode,
             prefix=kwargs.get("extend_prefix_lens"),
-            track_h_src=kwargs.get("track_ssm_h_src"),
         )
         if reason is not None:
-            self._log_fallback(reason)
+            self._log_fallback(reason, q, query_start_loc.shape[0] - 1)
             return _triton_extend(
                 q,
                 k,
@@ -191,10 +198,12 @@ class AiterFlashKDAKernel(LinearAttnKernelBase):
                 state_cache=ssm_states,
                 state_indices=idx,
                 has_initial_state=has_initial,
+                snapshot_chunk=snap_chunk,
+                snapshot_state=snap_state,
             )
         except Exception:
             ssm_states.index_copy_(0, idx, saved)
-            self._log_fallback("launch")
+            self._log_fallback("launch", q, n)
             return _triton_extend(
                 q,
                 k,
@@ -212,22 +221,66 @@ class AiterFlashKDAKernel(LinearAttnKernelBase):
                 kwargs,
             )
 
-        if not self._logged_hit:
-            self._logged_hit = True
-            rank0_log(
-                "KDA prefill extend running AITER FlashKDA "
-                f"(H={q.shape[2]} K={q.shape[-1]} sequences={n})"
-            )
+        self._note("hit", q, n)
         if return_intermediate_states:
-            # Aligned track rows copy this slot below; there is no per-chunk h.
+            # Aligned rows copy the slot below. Interior rows were written to
+            # track_state inside the kernel, so there is no per-chunk h.
             return out, None
         return out
 
-    def _log_fallback(self, reason: str) -> None:
-        if reason in self._logged_fallback:
+    def _note(self, reason: str, q: torch.Tensor, n: int) -> None:
+        if reason == "hit":
+            self._hits += 1
+            count = self._hits
+        else:
+            self._falls[reason] = self._falls.get(reason, 0) + 1
+            count = self._falls[reason]
+        if count != 1 and count % 256 != 0:
             return
-        self._logged_fallback.add(reason)
-        rank0_log(f"KDA AITER FlashKDA skipped ({reason}); this batch uses Triton.")
+        rank0_log(
+            "KDA prefill extend "
+            f"{'running' if reason == 'hit' else 'skipped'} AITER FlashKDA "
+            f"({reason}) H={q.shape[2]} K={q.shape[-1]} sequences={n} "
+            f"hits={self._hits} falls={self._falls}"
+        )
+
+    def _log_fallback(self, reason: str, q: torch.Tensor, n: int) -> None:
+        self._note(reason, q, n)
+
+    @staticmethod
+    def _snapshot_args(
+        query_start_loc: torch.Tensor,
+        *,
+        return_intermediate_states: bool,
+        track_h_src,
+        track_chunk_idx,
+        track_state,
+    ):
+        """Flash-chunk index of each interior radix snapshot, or a fallback reason.
+
+        The radix grid is the Triton 64-token chunk. FlashKDA steps by 32, and
+        the tracked value is the state entering that 64-token chunk.
+        """
+        if not return_intermediate_states:
+            return None, None, None
+        if track_h_src is None:
+            return None, None, "track"
+        if track_h_src.numel() == 0:
+            return None, None, None
+        n = query_start_loc.shape[0] - 1
+        if (
+            track_chunk_idx is None
+            or track_state is None
+            or track_chunk_idx.shape[0] != n
+            or track_state.shape[0] != n
+            or _TRACK_CHUNK % _FLASH_CHUNK != 0
+        ):
+            return None, None, "track"
+        scale = _TRACK_CHUNK // _FLASH_CHUNK
+        snap_chunk = torch.where(
+            track_chunk_idx < 0, track_chunk_idx, track_chunk_idx * scale
+        ).to(torch.int32)
+        return snap_chunk, track_state, None
 
     @staticmethod
     def _fallback_reason(
@@ -243,19 +296,11 @@ class AiterFlashKDAKernel(LinearAttnKernelBase):
         A_log,
         lower_bound,
         beta_is_raw,
-        return_intermediate_states,
         is_spec_decode,
         prefix,
-        track_h_src,
     ) -> Optional[str]:
         if is_spec_decode:
             return "spec"
-        # Interior chunk-boundary snapshots are not in the fused kernel.
-        # An empty src means every tracked row wants the final state only.
-        if return_intermediate_states and (
-            track_h_src is None or track_h_src.numel() > 0
-        ):
-            return "track"
         if not beta_is_raw:
             return "beta"
         if A_log is None or lower_bound is None:
