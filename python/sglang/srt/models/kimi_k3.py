@@ -221,12 +221,6 @@ def _k3_bf16_gemm(
                 if out is None:
                     return cutedsl_bf16_gemm(x, weight)
                 return cutedsl_bf16_gemm_out(x, weight, out)
-        if _is_hip and out is None:
-            from sglang.srt.models.kimi_k3_rocm_moe import try_aiter_tuned_front_gemm
-
-            tuned = try_aiter_tuned_front_gemm(x, weight)
-            if tuned is not None:
-                return tuned
     if out is None:
         return torch.nn.functional.linear(x, weight)
     if out.dtype != x.dtype:
@@ -3460,14 +3454,6 @@ class KimiK3LinearForCausalLM(nn.Module):
         # Also invoked by loader post-load hooks (DummyModelLoader,
         # ShardedStateLoader, remote-instance flows -- none of which call
         # load_weights), so e.g. dummy-weight benchmarks get the fused buffers.
-        if _is_hip:
-            # Quantize what the checkpoint left dense first, so the kv_b absorb
-            # and the KDA merges below see the per-channel FP8 Quark layout.
-            from sglang.srt.models.kimi_k3_rocm_online_fp8 import (
-                maybe_quantize_bf16_linears_fp8,
-            )
-
-            maybe_quantize_bf16_linears_fp8(self)
         # Post-load: absorb kv_b_proj into w_kc and w_vc for MLA layers
         for layer_id in self.config.full_attention_layer_ids:
             if layer_id >= len(self.model.layers):
