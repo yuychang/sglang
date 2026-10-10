@@ -226,13 +226,13 @@ class TestMergeKdaInprojFp8(CustomTestCase):
         self.assertEqual(merged[expected.shape[0] :].abs().max().item(), 0.0)
         self.assertEqual(attn._qkvgbfa_sizes, [24, 8, 8, 3, merged.shape[0] - 43])
 
-    def test_f_b_is_served_in_bf16(self, _):
+    def test_f_b_stays_on_its_fp8_linear(self, _):
+        # As in vLLM, f_b keeps its own FP8 linear rather than a BF16 copy.
         attn = _kda_attn()
-        expected = _dequant(attn.f_b_proj).to(torch.bfloat16)
 
         self.assertTrue(_k3_merge_kda_inproj_fp8(attn))
 
-        torch.testing.assert_close(attn._bfa_f_b_w, expected)
+        self.assertIsNone(getattr(attn, "_bfa_f_b_w", None))
 
     def test_skips_non_fp8_projection(self, _):
         self.assertFalse(_k3_merge_kda_inproj_fp8(_kda_attn(bf16_b_proj=True)))

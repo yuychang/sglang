@@ -25,7 +25,7 @@ import torch
 from torch import nn
 
 from sglang.srt.environ import envs
-from sglang.srt.models.kimi_k3_rocm_fusion import _k3_log_once, _k3_ptpc_fp8
+from sglang.srt.models.kimi_k3_rocm_fusion import _k3_ptpc_fp8
 
 
 def _k3_channel_fp8_to_bf16(module: nn.Module, weight: torch.Tensor) -> torch.Tensor:
@@ -180,11 +180,6 @@ def _k3_merge_kda_inproj_fp8(self_attn: nn.Module) -> bool:
     self_attn._qkvgbfa_layer = layer
     self_attn._bfa_fa_size, self_attn._bfa_b_size = sizes[1], sizes[2]
     self_attn._qkvgbfa_sizes = [*self_attn.split_sizes, sizes[1], sizes[2], pad]
-    # f_b is [heads * head_dim, head_dim]; BF16 lets it use the tiny GEMM and
-    # the fused KDA decode.
-    self_attn._bfa_f_b_w = _k3_channel_fp8_to_bf16(
-        self_attn.f_b_proj, self_attn.f_b_proj.weight.data
-    ).contiguous()
     return True
 
 
@@ -223,46 +218,7 @@ def _k3_merge_kda_inproj_ptpc_fp8(self_attn: nn.Module) -> bool:
         self_attn._qkvgbfa_fp8_n,
         weights[0].shape[1],
     )
-    _k3_prepare_f_b_tiny_gemm(self_attn)
     return True
-
-
-def _k3_prepare_f_b_tiny_gemm(self_attn: nn.Module) -> None:
-    """Dequant Quark PTPC ``f_b`` into the BF16 tiny-GEMM buffer.
-
-    Decode ``f_b`` is ``[M, 128] @ [1536, 128].T``; tiny-GEMM covers it
-    without the contiguous copy and group-quant the FP8 path needs.
-    """
-    if self_attn._bfa_f_b_w is not None:
-        return
-    weight = self_attn.f_b_proj.weight
-    scale = getattr(self_attn.f_b_proj, "weight_scale", None)
-    if not isinstance(weight, torch.Tensor) or weight.dim() != 2:
-        return
-    # Online quantization leaves f_b dense (the fused KDA decode kernel wants a
-    # bf16 weight), so the merged FP8 in-projection can reach here with nothing
-    # to dequantize; the tiny GEMM takes that weight as is.
-    is_prequantized = weight.dtype == torch.float8_e4m3fn
-    if is_prequantized:
-        if not isinstance(scale, torch.Tensor) or scale.numel() != weight.shape[0]:
-            return
-    elif weight.dtype != torch.bfloat16:
-        return
-    n, k = int(weight.shape[0]), int(weight.shape[1])
-    from sglang.kernels.ops.gemm.kimi_k3 import _K3_TINY_GEMM_MAX_TOKENS
-
-    if (n, k) not in _K3_TINY_GEMM_MAX_TOKENS:
-        return
-    self_attn._bfa_f_b_w = (
-        (weight.data.float() * scale.data.reshape(-1, 1).float())
-        .to(torch.bfloat16)
-        .contiguous()
-        if is_prequantized
-        else weight.data.contiguous()
-    )
-    _k3_log_once(
-        "kda_f_b_tiny_gemm", "K3 KDA f_b BF16 tiny-GEMM enabled (N=%d K=%d)", n, k
-    )
 
 
 def _k3_qkvgbfa_inproj(self_attn: nn.Module, hidden_states) -> Optional[torch.Tensor]:
@@ -296,9 +252,9 @@ def _k3_qkvgbfa_inproj(self_attn: nn.Module, hidden_states) -> Optional[torch.Te
 
 def _k3_apply_f_b(self_attn: nn.Module, f_a: torch.Tensor) -> torch.Tensor:
     if self_attn._bfa_f_b_w is None:
-        # f_a is a column slice of the merged projection and the FP8
-        # activation quantizer asserts on contiguity; the tiny GEMM below
-        # takes the view as is.
+        # Quark FP8 f_b stays on its own linear, as in vLLM. f_a is a column
+        # slice of the merged projection and the FP8 activation quantizer
+        # asserts on contiguity; the tiny GEMM below takes the view as is.
         return self_attn.f_b_proj(f_a.contiguous())[0]
     from sglang.kernels.ops.gemm import kimi_k3_tiny_gemm
 
