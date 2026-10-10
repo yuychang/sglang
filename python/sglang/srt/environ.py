@@ -973,6 +973,22 @@ class Envs:
     # join it. Needs SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT=bf16. Shared down stays
     # BF16: PTPC on that dequantized weight scored GSM8K 0.937.
     SGLANG_ROCM_K3_QUARK_SHARED_FULL_FRONT = EnvBool(True)
+
+    # ---- ROCm-only: ports of the VLLM_ROCM_* knobs the Kimi-K3 ROCm path reads.
+    # Same suffix, semantics and default as vLLM; read only by ROCm code.
+    # Routed-expert SiTU-v2 activation precision for the AITER MoE:
+    # auto/1 -> a4w4, 0 -> a16w4, or an explicit a4w4 | a8w4 | a16w4.
+    SGLANG_ROCM_USE_AITER_MOE_SITUV2 = EnvStr("auto")
+    # MXFP4 dense linears: AITER ASM gemm_a4w4 (+ preshuffled Triton for M<=64)
+    # instead of the Triton dynamic_mxfp4_quant + gemm_afp4wfp4 pair.
+    SGLANG_ROCM_USE_AITER_FP4_ASM_GEMM = EnvBool(False)
+    # MLA absorb: per-tensor FP8 W_K/W_V with the AITER Triton FP8 BMM;
+    # False keeps the absorbed weights in bf16.
+    SGLANG_ROCM_USE_AITER_FP8BMM = EnvBool(True)
+    # Small-head (<16) MLA decode: auto | asm | gluon.
+    SGLANG_ROCM_AITER_MLA_ASM_PADDING = EnvStr("auto")
+    # ---- end ROCm-only VLLM_ROCM_* ports.
+
     # ROCm decode attention kernel: auto (aiter_sparse on gfx950, tilelang elsewhere) |
     # aiter_sparse | tilelang | triton | torch | comparison | unified_kv_triton
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("auto")
