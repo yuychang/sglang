@@ -264,18 +264,6 @@ for _mod, _fn, _backend, _device in [
         KernelBackend.CUTE_DSL,
         CapabilityRequirement.CUDA,
     ),
-    (
-        "kda_flydsl.kda_decode",
-        "flydsl_kda_decode",
-        KernelBackend.FLYDSL,
-        CapabilityRequirement.HIP,
-    ),
-    (
-        "kda_flydsl.kda_decode",
-        "flydsl_kda_decode_with_f_b",
-        KernelBackend.FLYDSL,
-        CapabilityRequirement.HIP,
-    ),
 ]:
     register_kernel(
         KernelSpec(

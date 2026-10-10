@@ -954,13 +954,6 @@ class Envs:
     # is bandwidth bound; larger batches keep the tuned N=6144 split path.
     SGLANG_ROCM_K3_FUSE_KDA_INPROJ = EnvBool(True)
     SGLANG_ROCM_K3_FUSE_KDA_INPROJ_MAX_TOKENS = EnvInt(256)
-    # Fused AITER KDA decode. Empty keeps the unfused chain; "aiter" selects
-    # the gfx950 FlyDSL kernel.
-    SGLANG_ROCM_K3_KDA_FUSED_BACKEND = EnvStr("")
-    # gfx95 KDA extend via AITER FlashKDA. The model keeps beta as logits and
-    # the kernel sigmoids them. Off by default: tracked interior snapshots and
-    # speculative draft-extend stay on Triton either way.
-    SGLANG_AITER_KDA_FLASH_PREFILL = EnvBool(False)
     # ROCm-only kernel for Quark MXFP4 (W4A4) dense linears, matching vLLM:
     # "fp4" runs the AITER fp4 GEMM (AiterMxfp4LinearKernel); "emulate" QDQs
     # the activation and runs a bf16 GEMM on the dequantized weight
@@ -1916,15 +1909,9 @@ class Envs:
     # fail-closes to the split GEMM chain when the chip, shape or AITER build
     # cannot service it, so enabling one on unsupported hardware is a no-op.
     SGLANG_ROCM_K3_AITER_MLA_GATE = EnvBool(False)
-    SGLANG_ROCM_K3_AITER_KDA_GROUP64 = EnvBool(False)
-    # Extend the KDA fusions from the single-token bucket to two tokens.
-    SGLANG_ROCM_K3_AITER_B2_FUSIONS = EnvBool(False)
     # Where the K3 FlyDSL kernels come from: "auto" prefers the SGLang copy and
     # falls back to AITER, "sglang" and "aiter" pin one source.
     SGLANG_ROCM_K3_FLYDSL_SOURCE = EnvStr("auto")
-    # Restore the pre-tuning (rows_per_wave, weight_cache_modifier) pair for
-    # the KDA group64 projection so the per-bucket tuning can be A/B'd.
-    SGLANG_ROCM_K3_KDA_GROUP64_LEGACY_LAUNCH = EnvBool(False)
     # Use the per-bank-depth num_warps / waves_per_eu for the ROCm
     # attention-residual kernels; set 0 for the untuned launch.
     SGLANG_ROCM_K3_ATTN_RES_TUNED_LAUNCH = EnvBool(True)
