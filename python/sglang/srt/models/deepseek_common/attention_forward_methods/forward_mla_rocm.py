@@ -403,16 +403,9 @@ def _fused_rope_cat_and_cache(
     kv_cache_dtype = (
         fp8_dtype if attn.kv_cache_dtype == "fp8_e4m3" else q_nope_out.dtype
     )
-    # Gluon MLA decode (bh16bn128) requires BF16 Q. When Gluon is explicitly
-    # disabled, keep Q in FP8 and use the supported A8W8 ASM decode path.
-    q_out_dtype = (
-        q_nope_out.dtype
-        if attn.kv_cache_dtype == "fp8_e4m3"
-        and attn.current_attention_backend == "aiter"
-        and q_nope_out.shape[-2] == 12
-        and envs.SGLANG_AITER_MLA_GLUON.get()
-        else kv_cache_dtype
-    )
+    # Q follows the cache: an FP8 cache always takes the A8W8 ASM decode
+    # (prefer_mla_gluon_decode never picks Gluon for it, as in vLLM).
+    q_out_dtype = kv_cache_dtype
     kv_pool = get_token_to_kv_pool()
     if isinstance(kv_pool, HiSparseDSATokenToKVPool):
         # The fused write bypasses set_mla_kv_buffer()'s logical-to-device mapping.

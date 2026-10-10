@@ -419,10 +419,14 @@ class AiterAttnBackend(AttentionBackend):
 
         # Kimi-K3 TP8 is 12 heads, QK 192, V 128. That shape is outside
         # mla_reduce_v1, and the 12->16 PS-ASM pad memory-faults. FlyDSL FP8
-        # FMHA serves it directly.
+        # FMHA serves it directly. Only with an FP8 KV cache: a bf16 cache
+        # keeps the bf16 varlen FA prefill, as vLLM ROCm does.
+        mla_fp8_kv = self.kv_cache_dtype == fp8_dtype
         self.use_mla_flydsl_fp8_prefill = False
         self.require_mla_flydsl_fp8_prefill = (
-            self.use_mla and envs.SGLANG_AITER_MLA_FLYDSL_FP8_PREFILL_REQUIRED.get()
+            self.use_mla
+            and mla_fp8_kv
+            and envs.SGLANG_AITER_MLA_FLYDSL_FP8_PREFILL_REQUIRED.get()
         )
         self.use_mla_flydsl_fused_kv_proj = (
             self.use_mla and envs.SGLANG_AITER_MLA_FLYDSL_FUSED_KV_PROJ.get()
@@ -432,6 +436,7 @@ class AiterAttnBackend(AttentionBackend):
         self._mla_flydsl_fp8_fallback_logged = False
         if (
             self.use_mla
+            and mla_fp8_kv
             and envs.SGLANG_AITER_MLA_FLYDSL_FP8_PREFILL.get()
             and is_gfx95_supported()
         ):
@@ -680,8 +685,9 @@ class AiterAttnBackend(AttentionBackend):
                     "aiter mla: decode/verify use the fp8-Q asm kernel "
                     "(SGLANG_AITER_MLA_A8W8_ASM=1) instead of gluon"
                 )
-            # Zero-pad topology (h12->qh16): prefer Gluon decode over PS kernel.
-            elif self.head_pad_mode == "zero" and self.kv_cache_dtype == fp8_dtype:
+            # Zero-pad topology (h12->qh16): Gluon decode, when
+            # prefer_mla_gluon_decode picks it, replaces the PS kernel.
+            elif self.head_pad_mode == "zero":
                 # Disable ps only when gluon kernel is selected to avoid falling
                 # back to incorrect aiter kernel
                 if prefer_mla_gluon_decode(
@@ -1483,7 +1489,10 @@ class AiterAttnBackend(AttentionBackend):
             return False
         if getattr(self, "head_pad_mode", "none") != "zero":
             return True
-        return envs.SGLANG_AITER_MLA_ZERO_PAD_FP8_PREFILL.get()
+        return (
+            envs.SGLANG_AITER_MLA_ZERO_PAD_FP8_PREFILL.get()
+            and self.kv_cache_dtype == fp8_dtype
+        )
 
     @staticmethod
     def _quantize_mla_prefill_fp8(

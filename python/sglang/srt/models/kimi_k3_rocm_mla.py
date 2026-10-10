@@ -44,6 +44,9 @@ def try_fused_mla_q_cache(
     from sglang.srt.model_executor.forward_context import get_token_to_kv_pool
 
     kv_cache = get_token_to_kv_pool().get_key_buffer(self.attn_mqa.layer_id)
+    if kv_cache.dtype.itemsize != 1:
+        # A bf16 cache keeps the split rope/concat/cache-write chain.
+        return None
     scale = self.attn_mqa.k_scale
     if scale is None:
         scale = self._k3_mla_q_cache_scale
@@ -57,22 +60,11 @@ def try_fused_mla_q_cache(
     ):
         return None
 
-    # AITER's asm decode uses FP8 Q when the cache is FP8. Gluon keeps Q in
-    # BF16 while retaining the fused FP8 cache write; its h12/bh16 kernel is
-    # both faster and more accurate for K3's long-context decode regime.
+    # AITER's asm decode, the only decode an FP8 cache takes (vLLM's rule in
+    # prefer_mla_gluon_decode), reads an FP8 Q.
     triton_decode = self.current_attention_backend in ("triton", "triton_mla")
     tokens, heads = q_nope_out.shape[0], q_nope_out.shape[1]
-    from sglang.srt.layers.attention.aiter_mla_gluon import (
-        prefer_mla_gluon_decode,
-    )
-
-    gluon_decode = not triton_decode and prefer_mla_gluon_decode(
-        head_pad_mode="zero",
-        num_head=heads,
-        kv_cache_dtype=kv_cache.dtype,
-        q_dtype=torch.bfloat16,
-    )
-    q_out_dtype = q_nope_out.dtype if triton_decode or gluon_decode else kv_cache.dtype
+    q_out_dtype = q_nope_out.dtype if triton_decode else kv_cache.dtype
     if (
         q_nope_out.shape != (tokens, heads, self.kv_lora_rank)
         or q_pe.shape != (tokens, heads, self.qk_rope_head_dim)
@@ -88,9 +80,7 @@ def try_fused_mla_q_cache(
     # zeroed 16-head buffer instead so decode can skip that launch.
     # Do not use uninitialized pad heads: that is the fill-elim that
     # already failed GSM8K.
-    aiter_pad_heads = (
-        heads if gluon_decode else (16 if (heads < 16 and 16 % heads != 0) else heads)
-    )
+    aiter_pad_heads = 16 if (heads < 16 and 16 % heads != 0) else heads
     q_out = mla_q_out_buffer(
         self,
         tokens,
