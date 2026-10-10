@@ -957,9 +957,6 @@ class Envs:
     # Fused AITER KDA decode. Empty keeps the unfused chain; "aiter" selects
     # the gfx950 FlyDSL kernel.
     SGLANG_ROCM_K3_KDA_FUSED_BACKEND = EnvStr("")
-    # Requantize Quark per-channel FP8 kv_b to per-tensor FP8 so the MLA absorb
-    # BMMs run the AITER a8w8 kernel (~2.3% weight error vs dequant to bf16).
-    SGLANG_ROCM_K3_MLA_ABSORB_FP8 = EnvBool(True)
     # gfx95 KDA extend via AITER FlashKDA. The model keeps beta as logits and
     # the kernel sigmoids them. Off by default: tracked interior snapshots and
     # speculative draft-extend stay on Triton either way.

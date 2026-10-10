@@ -51,25 +51,47 @@ def _k3_channel_fp8_to_bf16(module: nn.Module, weight: torch.Tensor) -> torch.Te
     )
 
 
-def _k3_channel_fp8_to_tensor_fp8(
-    module: nn.Module, weight: torch.Tensor
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Requantize a per-output-channel FP8 weight to (per-tensor FP8, scalar
-    scale) for the aiter absorb GEMM. Must run before the kv_b head split."""
-    from sglang.kernels.ops.quantization.fp8_kernel import is_fp8_fnuz
-    from sglang.srt.layers.quantization.fp8_utils import (
-        channel_quant_to_tensor_quant,
-        normalize_e4m3fn_to_e4m3fnuz,
-    )
+def k3_per_batched_tensor_fp8(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """vLLM's ``dynamic_per_batched_tensor_quant``: one scale for the whole
+    tensor, computed in ``x``'s dtype. Returns (fp8, fp32 dequant scale)."""
+    from sglang.kernels.ops.quantization.fp8_kernel import fp8_dtype
 
-    weight_scale = module.weight_scale
-    if is_fp8_fnuz():
-        weight, weight_scale, _ = normalize_e4m3fn_to_e4m3fnuz(
-            weight=weight, weight_scale=weight_scale, input_scale=None
-        )
-    if weight_scale.dim() == 1:
-        weight_scale = weight_scale.view(-1, 1)
-    return channel_quant_to_tensor_quant(weight, weight_scale)
+    dtype_max = torch.finfo(fp8_dtype).max
+    min_val, max_val = x.aminmax()
+    amax = torch.maximum(min_val.abs(), max_val.abs()).clamp(min=1e-10)
+    scale = dtype_max / amax
+    x_scl_sat = (x * scale).clamp(min=-dtype_max, max=dtype_max)
+    return x_scl_sat.to(fp8_dtype).contiguous(), scale.float().reciprocal()
+
+
+def k3_absorb_kv_b_rocm(self_attn: nn.Module, kv_b_weight: torch.Tensor) -> bool:
+    """Split kv_b_proj into the MLA absorb weights the way vLLM ROCm does.
+
+    The weight is dequantized to bf16 (vLLM's split_kv_b_proj); with
+    SGLANG_ROCM_USE_AITER_FP8BMM, W_K [N, L, P] and W_V [N, V, L] are then each
+    quantized to per-tensor FP8 for AITER's batched FP8 GEMM. Returns False for
+    weight formats this does not cover, leaving the caller's path in charge.
+    """
+    scale = getattr(self_attn.kv_b_proj, "weight_scale", None)
+    if kv_b_weight.dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz):
+        if not isinstance(scale, torch.Tensor):
+            return False
+        kv_b_weight = _k3_channel_fp8_to_bf16(self_attn.kv_b_proj, kv_b_weight)
+    elif kv_b_weight.dtype != torch.bfloat16:
+        return False
+
+    w_kc, w_vc = kv_b_weight.unflatten(
+        0, (-1, self_attn.qk_nope_head_dim + self_attn.v_head_dim)
+    ).split([self_attn.qk_nope_head_dim, self_attn.v_head_dim], dim=1)
+    w_k = w_kc.transpose(1, 2).contiguous()
+    w_v = w_vc.contiguous()
+    if envs.SGLANG_USE_AITER.get() and envs.SGLANG_ROCM_USE_AITER_FP8BMM.get():
+        w_k, self_attn.w_kc_tensor_scale = k3_per_batched_tensor_fp8(w_k)
+        w_v, self_attn.w_vc_tensor_scale = k3_per_batched_tensor_fp8(w_v)
+    # The absorb kernels read w_kc as [N, P, L] and w_vc as [N, L, V] views.
+    self_attn.w_kc = w_k.transpose(1, 2)
+    self_attn.w_vc = w_v.transpose(1, 2)
+    return True
 
 
 def _k3_is_raw_quark_channel_fp8(module: nn.Module) -> bool:

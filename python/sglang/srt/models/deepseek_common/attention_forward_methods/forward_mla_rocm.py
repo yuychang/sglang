@@ -184,6 +184,16 @@ def _absorb_bmm_config(heads: int, m: int, n: int) -> Optional[dict]:
     }
 
 
+def _w_kc_scale(attn):
+    # Kimi-K3 quantizes W_K and W_V to per-tensor FP8 separately (vLLM's FP8BMM
+    # absorb), so each carries its own scale.
+    return getattr(attn, "w_kc_tensor_scale", attn.w_scale)
+
+
+def _w_vc_scale(attn):
+    return getattr(attn, "w_vc_tensor_scale", attn.w_scale)
+
+
 def _absorb_weight_bf16(w: torch.Tensor, w_scale) -> torch.Tensor:
     """Dequantize an absorbed MLA weight, skipping the pass when it is a no-op."""
     if (
@@ -229,7 +239,7 @@ def rocm_absorb_q_bmm(
                 batched_gemm_a8w8_a_per_token_group_prequant_w_per_batched_tensor_quant(
                     X=q_nope,
                     WQ=attn.w_kc.transpose(-1, -2),
-                    w_scale=attn.w_scale,
+                    w_scale=_w_kc_scale(attn),
                     group_size=128,
                     YQ=None,  # allocate (B, M, N)
                     transpose_bm=False,  # (B, M, N)
@@ -243,7 +253,7 @@ def rocm_absorb_q_bmm(
         else:
             q_nope_out = torch.bmm(
                 q_nope.to(torch.bfloat16).transpose(0, 1),
-                _absorb_weight_bf16(attn.w_kc, attn.w_scale),
+                _absorb_weight_bf16(attn.w_kc, _w_kc_scale(attn)),
             )
     return q_nope_out
 
@@ -290,7 +300,7 @@ def rocm_absorb_v_bmm(
             batched_gemm_a8w8_a_per_token_group_prequant_w_per_batched_tensor_quant(
                 X=attn_output,
                 WQ=attn.w_vc.transpose(-1, -2),
-                w_scale=attn.w_scale,
+                w_scale=_w_vc_scale(attn),
                 group_size=128,
                 YQ=_bmm_buf,
                 transpose_bm=True,
@@ -313,13 +323,13 @@ def rocm_absorb_v_bmm(
             )
             torch.bmm(
                 attn_output.to(torch.bfloat16).transpose(0, 1),
-                _absorb_weight_bf16(attn.w_vc, attn.w_scale),
+                _absorb_weight_bf16(attn.w_vc, _w_vc_scale(attn)),
                 out=_bmm_buf.transpose(0, 1),
             )
         else:
             attn_bmm_output = torch.bmm(
                 attn_output.to(torch.bfloat16).transpose(0, 1),
-                _absorb_weight_bf16(attn.w_vc, attn.w_scale),
+                _absorb_weight_bf16(attn.w_vc, _w_vc_scale(attn)),
             )
 
     if _bmm_buf is not None:
@@ -477,7 +487,7 @@ def _fused_bmm_rope_cat_and_cache(
     return fused_fp8_bmm_rope_cat_and_cache_mla(
         q_nope.transpose(0, 1),
         attn.w_kc.transpose(-1, -2),
-        attn.w_scale,
+        _w_kc_scale(attn),
         q_pe,
         k_nope,
         k_pe,
