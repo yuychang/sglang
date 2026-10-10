@@ -964,11 +964,11 @@ class Envs:
     # the kernel sigmoids them. Off by default: tracked interior snapshots and
     # speculative draft-extend stay on Triton either way.
     SGLANG_AITER_KDA_FLASH_PREFILL = EnvBool(False)
-    # Activation precision for MXFP4-weight dense linears, independent of the
-    # MoE: "fp4" is the checkpoint's own W4A4, "bf16" dequantizes the weights
-    # at load. bf16 by default: K3 GSM8K scores 0.947 vs fp4's 0.908, for
-    # ~3% decode throughput. Ignored off ROCm (both paths are aiter kernels).
-    SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT = EnvStr("bf16")
+    # ROCm-only kernel for Quark MXFP4 (W4A4) dense linears, matching vLLM:
+    # "fp4" runs the AITER fp4 GEMM (AiterMxfp4LinearKernel); "emulate" QDQs
+    # the activation and runs a bf16 GEMM on the dequantized weight
+    # (EmulationMxfp4LinearKernel / QuarkOCP_MX.emulate).
+    SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT = EnvStr("fp4")
     # Dequantize Quark MXFP4 shared experts before the MoE front merge so they
     # join it. Needs SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT=bf16. Shared down stays
     # BF16: PTPC on that dequantized weight scored GSM8K 0.937.
