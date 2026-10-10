@@ -66,32 +66,31 @@ class TestKimiK3BfaOverlap(CustomTestCase):
     def test_capture_replay_matches_serial(self):
         torch.manual_seed(0)
         for T in (1, 4, 12):
-            for defer_f_b in (False, True):
-                with self.subTest(T=T, defer_f_b=defer_f_b):
-                    x = torch.empty(T, _H, device="cuda", dtype=torch.bfloat16)
-                    x.normal_(std=0.05)
-                    serial_owner = _make_owner(with_stream=False)
-                    owner = _make_owner(with_stream=True)
-                    forward = KimiK3DeltaAttention.forward_qkvbfg_fused
-                    with patch(
-                        "sglang.srt.models.kimi_k3.get_is_capture_mode",
-                        return_value=True,
-                    ):
-                        # Warm up allocations/JIT outside capture.
-                        forward(owner, x, defer_f_b=defer_f_b)
-                        graph = torch.cuda.CUDAGraph()
-                        with torch.cuda.graph(graph):
-                            captured = forward(owner, x, defer_f_b=defer_f_b)
-                        for _ in range(3):
-                            # Changed inputs expose stale reads or missing dependencies.
-                            x.normal_(std=0.05)
-                            serial = forward(serial_owner, x, defer_f_b=defer_f_b)
-                            graph.replay()
-                            torch.cuda.synchronize()
-                            for got, ref, name in zip(
-                                captured, serial, ("qkv", "beta", "forget_gate", "g")
-                            ):
-                                self.assertTrue(torch.equal(got, ref), name)
+            with self.subTest(T=T):
+                x = torch.empty(T, _H, device="cuda", dtype=torch.bfloat16)
+                x.normal_(std=0.05)
+                serial_owner = _make_owner(with_stream=False)
+                owner = _make_owner(with_stream=True)
+                forward = KimiK3DeltaAttention.forward_qkvbfg_fused
+                with patch(
+                    "sglang.srt.models.kimi_k3.get_is_capture_mode",
+                    return_value=True,
+                ):
+                    # Warm up allocations/JIT outside capture.
+                    forward(owner, x)
+                    graph = torch.cuda.CUDAGraph()
+                    with torch.cuda.graph(graph):
+                        captured = forward(owner, x)
+                    for _ in range(3):
+                        # Changed inputs expose stale reads or missing dependencies.
+                        x.normal_(std=0.05)
+                        serial = forward(serial_owner, x)
+                        graph.replay()
+                        torch.cuda.synchronize()
+                        for got, ref, name in zip(
+                            captured, serial, ("qkv", "beta", "forget_gate", "g")
+                        ):
+                            self.assertTrue(torch.equal(got, ref), name)
 
     def test_eager_stream_branch_not_taken(self):
         x = torch.randn(3, _H, device="cuda", dtype=torch.bfloat16)

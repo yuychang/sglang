@@ -1,15 +1,10 @@
 """Correctness checks for the ROCm Kimi-K3 fused KDA input projection."""
 
 import unittest
-from types import SimpleNamespace
-from unittest.mock import patch
 
 import torch
 
-from sglang.srt.models.kimi_k3 import (
-    KimiK3DeltaAttention,
-    _merge_weights_as_views,
-)
+from sglang.srt.models.kimi_k3 import _merge_weights_as_views
 from sglang.test.ci.ci_register import register_amd_ci
 from sglang.test.test_utils import CustomTestCase
 
@@ -31,21 +26,6 @@ class _FakeLinear(torch.nn.Module):
             torch.randn(rows, HIDDEN, dtype=torch.bfloat16, device=device) * 0.02,
             requires_grad=False,
         )
-
-
-class _FakeQuantMethod:
-    def __init__(self, output: torch.Tensor):
-        self.output = output
-
-    def apply(self, layer, hidden_states, bias):
-        del hidden_states, bias
-        assert layer.weight.shape[0] == MERGED
-        return self.output
-
-
-class _FakeWideProjection:
-    def __init__(self, output: torch.Tensor):
-        self.quant_method = _FakeQuantMethod(output)
 
 
 @unittest.skipUnless(torch.cuda.is_available(), "no GPU")
@@ -116,48 +96,6 @@ class TestKimiK3KDAInProjFusion(CustomTestCase):
                         (actual.float() - expected.float()).abs().max() / scale
                     ).item()
                     self.assertLess(rel, TOL, f"{name} relative error {rel:.2e}")
-
-    def test_deferred_fb_returns_fa_without_tiny_gemm(self):
-        tokens = 8
-        fused = torch.randn(
-            tokens, MERGED, dtype=torch.bfloat16, device=self.merged.device
-        )
-        attention = KimiK3DeltaAttention.__new__(KimiK3DeltaAttention)
-        torch.nn.Module.__init__(attention)
-        attention.use_full_rank_gate = True
-        attention._kda_group64_weight = None
-        attention._kda_group64_scale = None
-        attention._bfa_w = self.merged[WIDE:]
-        attention._bfa_fa_size = HEAD_DIM
-        attention._bfa_b_size = HEADS_TP
-        attention._bfa_alt_stream = None
-        attention._qkvgbfa_sizes = self.all_sizes
-        attention._qkvgbfa_bs_limit = 256
-        attention._qkvgbfa_layer = SimpleNamespace(weight=self.merged)
-        attention.fused_qkvg_proj = _FakeWideProjection(fused)
-        attention.f_b_proj = SimpleNamespace(weight=self.f_b_weight)
-
-        def unexpected_gemm(*args, **kwargs):
-            raise AssertionError("deferred f_b path must not launch tiny GEMM")
-
-        with patch("sglang.kernels.ops.gemm.kimi_k3_tiny_gemm", unexpected_gemm):
-            qkv, beta, f_a, g = attention.forward_qkvbfg_fused(
-                torch.empty(
-                    tokens,
-                    HIDDEN,
-                    dtype=torch.bfloat16,
-                    device=self.merged.device,
-                ),
-                defer_f_b=True,
-            )
-
-        expected_qkv, expected_g, expected_fa, expected_beta, _padding = torch.split(
-            fused, self.all_sizes, dim=-1
-        )
-        self.assertTrue(torch.equal(qkv, expected_qkv))
-        self.assertTrue(torch.equal(g, expected_g))
-        self.assertTrue(torch.equal(f_a, expected_fa))
-        self.assertTrue(torch.equal(beta, expected_beta))
 
 
 if __name__ == "__main__":

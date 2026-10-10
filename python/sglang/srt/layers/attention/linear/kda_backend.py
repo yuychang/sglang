@@ -3,7 +3,7 @@ from typing import Optional, Tuple, Union
 
 import torch
 
-from sglang.kernels.ops.attention import kda_fused_decode, kda_fused_decode_aiter_hip
+from sglang.kernels.ops.attention import kda_fused_decode
 from sglang.kernels.ops.mamba.causal_conv1d_triton import (
     causal_conv1d_fn,
     causal_conv1d_update,
@@ -200,14 +200,6 @@ class KDAKernelDispatcher:
                 "SM100, ptx_kda SM100 or SM103)."
             )
 
-        if is_hip() and prefill_backend.is_triton():
-            from sglang.srt.layers.attention.linear.kernels.kda_aiter_flash import (
-                maybe_create_aiter_flash_kda_kernel,
-            )
-
-            self.extend_kernel = (
-                maybe_create_aiter_flash_kda_kernel() or self.extend_kernel
-            )
 
         self.supports_packed_decode = getattr(
             self.decode_kernel, "supports_packed_decode", False
@@ -580,91 +572,21 @@ class KDAAttnBackend(MambaAttnBackendBase):
         replayssm_k = layer_cache.replayssm_k
         replayssm_g = layer_cache.replayssm_g
 
-        deferred_f_b = bool(getattr(layer, "_k3_deferred_f_b", False))
-        if replayssm_d is None and deferred_f_b and is_gfx95_supported():
-            fused_static = getattr(layer, "_k3_hip_fused_decode_args", None)
-            fused_backend = getattr(layer, "_k3_hip_fused_decode_backend", "")
-            onorm_gate = getattr(layer, "_k3_onorm_gate", None)
-            if fused_static is not None and onorm_gate is not None:
-                f_b_weight, norm_weight, norm_eps, a_log = fused_static
-                conv_state_view = conv_states.transpose(-1, -2)
-                output_gate = onorm_gate.view(
-                    onorm_gate.shape[0], layer.num_v_heads, layer.head_v_dim
-                )
-                out = mixed_qkv.new_empty(
-                    (1, mixed_qkv.shape[0], layer.num_v_heads, layer.head_v_dim)
-                )
-                if fused_backend == "aiter" and kda_fused_decode_aiter_hip.covered(
-                    a,
-                    f_b_weight,
-                    mixed_qkv,
-                    b,
-                    conv_state_view,
+        if is_hip() and replayssm_d is None:
+            from sglang.srt.layers.attention.linear import kda_rocm
+
+            core_attn_out = kda_rocm.forward_decode(
+                layer, mixed_qkv, a, b, conv_states, ssm_states, cache_indices
+            )
+            if core_attn_out is not None:
+                self._track_mamba_state_decode(
+                    forward_batch,
+                    conv_states,
                     ssm_states,
                     cache_indices,
-                    output_gate,
-                    norm_weight,
-                ):
-                    core_attn_out = kda_fused_decode_aiter_hip.run(
-                        f_a=a,
-                        f_b_weight=f_b_weight,
-                        mixed_qkv=mixed_qkv,
-                        conv_weight=layer.conv_weights,
-                        conv_state=conv_state_view,
-                        raw_beta=b,
-                        A_log=a_log,
-                        dt_bias=layer.dt_bias,
-                        lower_bound=float(layer.lower_bound),
-                        state=ssm_states,
-                        state_indices=cache_indices,
-                        output_gate=output_gate,
-                        norm_weight=norm_weight,
-                        norm_eps=norm_eps,
-                        out=out,
-                    )
-                else:
-                    core_attn_out = None
-                    if not getattr(KDAAttnBackend, "_hip_fused_reject_logged", False):
-                        KDAAttnBackend._hip_fused_reject_logged = True
-                        rank0_log(
-                            "K3 HIP fused KDA rejected: "
-                            f"backend={fused_backend}, "
-                            f"f_a={tuple(a.shape)}/{a.dtype}/{a.stride()}, "
-                            f"mixed={tuple(mixed_qkv.shape)}/{mixed_qkv.dtype}/"
-                            f"{mixed_qkv.stride()}, beta={tuple(b.shape)}/{b.dtype}/"
-                            f"{b.stride()}, conv={tuple(conv_state_view.shape)}/"
-                            f"{conv_state_view.dtype}/{conv_state_view.stride()}, "
-                            f"state={tuple(ssm_states.shape)}/{ssm_states.dtype}/"
-                            f"{ssm_states.stride()}, indices={cache_indices.dtype}/"
-                            f"{cache_indices.stride()}, gate={tuple(output_gate.shape)}/"
-                            f"{output_gate.dtype}/{output_gate.stride()}, "
-                            f"norm={norm_weight.dtype}/{norm_weight.stride()}"
-                        )
-
-                if core_attn_out is not None:
-                    layer._k3_onorm_consumed = True
-                    self._track_mamba_state_decode(
-                        forward_batch,
-                        conv_states,
-                        ssm_states,
-                        cache_indices,
-                        layer.layer_id,
-                    )
-                    return core_attn_out
-
-            # The model deferred f_b only after publishing static fallback
-            # weights. Materialize the original gate before entering the
-            # unchanged conv + packed-KDA fallback chain.
-            from sglang.kernels.ops.gemm import kimi_k3_tiny_gemm
-
-            if fused_static is None:
-                raise RuntimeError("K3 deferred f_b is missing fallback weights")
-            a = kimi_k3_tiny_gemm(
-                a,
-                fused_static[0].view(
-                    layer.num_v_heads * layer.head_v_dim, layer.head_v_dim
-                ),
-            )
+                    layer.layer_id,
+                )
+                return core_attn_out
 
         # Fully fused decode step: conv1d update + delta-rule recurrence +
         # gated RMSNorm in one kernel. Engages only when the model handed off
@@ -914,35 +836,56 @@ class KDAAttnBackend(MambaAttnBackendBase):
                 dtype=torch.float32,
                 device=ssm_states.device,
             )
-        core_attn_out = self.kernel_dispatcher.extend(
-            q=q,
-            k=k,
-            v=v,
-            g=a,
-            beta=b,
-            ssm_states=ssm_states,
-            cache_indices=cache_indices,
-            query_start_loc=query_start_loc,
-            A_log=layer.A_log,
-            dt_bias=layer.dt_bias,
-            lower_bound=layer.lower_bound,
-            beta_is_raw=gate_was_flat or layer.extend_beta_is_raw,
-            extend_seq_lens_cpu=forward_batch.extend_seq_lens_cpu,
-            extend_prefix_lens=forward_batch.extend_prefix_lens,
-            layer_id=layer.layer_id,
-            # draft_extend_v2 must stay rollback-able, so kernels that commit state
-            # in place (e.g. FlashKDA) must not run for it.
-            is_spec_decode=forward_batch.forward_mode.is_draft_extend_v2(),
-            return_intermediate_states=track_ssm,
-            # Which global chunk rows of h the track snapshot will read; lets
-            # kernels that cannot materialize per-chunk states (NVIDIA KDA) take the
-            # fast path when the snapshot only needs the final state.
-            track_ssm_h_src=(
-                self.forward_metadata.track_ssm_h_src if track_ssm else None
-            ),
-            track_state=h_track_buf,
-            track_chunk_idx=(track_chunk_idx if h_track_buf is not None else None),
-        )
+        core_attn_out = None
+        if (
+            is_hip()
+            and not track_ssm
+            and not forward_batch.forward_mode.is_draft_extend_v2()
+        ):
+            from sglang.srt.layers.attention.linear import kda_rocm
+
+            core_attn_out = kda_rocm.forward_extend(
+                layer,
+                q,
+                k,
+                v,
+                a,
+                b,
+                ssm_states,
+                cache_indices,
+                query_start_loc,
+                forward_batch.extend_prefix_lens > 0,
+            )
+        if core_attn_out is None:
+            core_attn_out = self.kernel_dispatcher.extend(
+                q=q,
+                k=k,
+                v=v,
+                g=a,
+                beta=b,
+                ssm_states=ssm_states,
+                cache_indices=cache_indices,
+                query_start_loc=query_start_loc,
+                A_log=layer.A_log,
+                dt_bias=layer.dt_bias,
+                lower_bound=layer.lower_bound,
+                beta_is_raw=gate_was_flat or layer.extend_beta_is_raw,
+                extend_seq_lens_cpu=forward_batch.extend_seq_lens_cpu,
+                extend_prefix_lens=forward_batch.extend_prefix_lens,
+                layer_id=layer.layer_id,
+                # draft_extend_v2 must stay rollback-able, so kernels that commit state
+                # in place (e.g. FlashKDA) must not run for it.
+                is_spec_decode=forward_batch.forward_mode.is_draft_extend_v2(),
+                return_intermediate_states=track_ssm,
+                # Which global chunk rows of h the track snapshot will read; lets
+                # kernels that cannot materialize per-chunk states (NVIDIA KDA) take the
+                # fast path when the snapshot only needs the final state.
+                track_ssm_h_src=(
+                    self.forward_metadata.track_ssm_h_src if track_ssm else None
+                ),
+                track_state=h_track_buf,
+                track_chunk_idx=(track_chunk_idx if h_track_buf is not None else None),
+            )
         if track_ssm:
             # Snapshot the SSM state at the last track-aligned chunk boundary
             # from the kernel's per-chunk states (h) / final states into the

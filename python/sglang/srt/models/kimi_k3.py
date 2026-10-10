@@ -1844,13 +1844,10 @@ class KimiK3DeltaAttention(nn.Module):
         )
         # KDA safe gate: checkpoint trained with gate_lower_bound=-5.0
         self.attn.lower_bound = config.linear_attn_config.get("gate_lower_bound", None)
-        # AITER FlashKDA prefill only accepts beta logits.
-        self.attn.extend_beta_is_raw = (
-            _is_hip and envs.SGLANG_AITER_KDA_FLASH_PREFILL.get()
-        )
+        # The ROCm KDA prefill (vLLM's chunk_kda_prefill) takes beta logits.
+        self.attn.extend_beta_is_raw = _is_hip
         # Set by _prepare_fused_decode() once weights are loaded.
         self._kda_fused_decode_ready = False
-        self._kda_hip_fused_decode_ready = False
         if _is_hip:
             from sglang.srt.models.kimi_k3_rocm_kda import init_kda_rocm_state
 
@@ -1964,14 +1961,12 @@ class KimiK3DeltaAttention(nn.Module):
         )
         self._kda_fused_decode_ready = True
 
-    def forward_qkvbfg_fused(
-        self, hidden_states: torch.Tensor, defer_f_b: bool = False
-    ):
+    def forward_qkvbfg_fused(self, hidden_states: torch.Tensor):
         if self.use_full_rank_gate:
             if _is_hip:
                 from sglang.srt.models.kimi_k3_rocm_kda import try_inproj_hip
 
-                fused = try_inproj_hip(self, hidden_states, defer_f_b=defer_f_b)
+                fused = try_inproj_hip(self, hidden_states)
                 if fused is not None:
                     return fused
             if self._bfa_w is not None:
@@ -1992,11 +1987,7 @@ class KimiK3DeltaAttention(nn.Module):
                     fused_states, _ = self.fused_qkvg_proj(hidden_states)
                     with torch.cuda.stream(alt):
                         bfa = gemm(hidden_states, w)
-                        forget_gate = (
-                            bfa[..., :n_fa]
-                            if defer_f_b
-                            else gemm(bfa[..., :n_fa], self._bfa_f_b_w)
-                        )
+                        forget_gate = gemm(bfa[..., :n_fa], self._bfa_f_b_w)
                         beta = bfa[..., n_fa : n_fa + n_b]
                     qkv, g_proj_states = torch.split(
                         fused_states, self.split_sizes, dim=-1
@@ -2007,18 +1998,14 @@ class KimiK3DeltaAttention(nn.Module):
                 fused_states, _ = self.fused_qkvg_proj(hidden_states)
                 qkv, g_proj_states = torch.split(fused_states, self.split_sizes, dim=-1)
                 bfa = gemm(hidden_states, w)
-                forget_gate = (
-                    bfa[..., :n_fa]
-                    if defer_f_b
-                    else gemm(bfa[..., :n_fa], self._bfa_f_b_w)
-                )
+                forget_gate = gemm(bfa[..., :n_fa], self._bfa_f_b_w)
                 beta = bfa[..., n_fa : n_fa + n_b]
             else:
                 fused_states, _ = self.fused_qkvg_proj(hidden_states)
                 qkv, g_proj_states = torch.split(fused_states, self.split_sizes, dim=-1)
                 beta = self.b_proj(hidden_states)[0]
                 f_a = self.f_a_proj(hidden_states)[0]
-                forget_gate = f_a if defer_f_b else self.f_b_proj(f_a)[0]
+                forget_gate = self.f_b_proj(f_a)[0]
         else:
             fused_states = self.fused_qkvbfg_a_proj(hidden_states)
             qkv, beta, fg_a_states = torch.split(fused_states, self.split_sizes, dim=-1)
@@ -2034,12 +2021,9 @@ class KimiK3DeltaAttention(nn.Module):
         forward_batch: ForwardBatch,
         zero_allocator: BumpAllocator,
     ) -> torch.Tensor:
-        defer_f_b = (
-            self._kda_hip_fused_decode_ready and forward_batch.forward_mode.is_decode()
-        )
         if self.do_fuse_qkvbfg or self.use_full_rank_gate:
             mixed_qkv, beta, forget_gate, g_proj_states = self.forward_qkvbfg_fused(
-                hidden_states, defer_f_b=defer_f_b
+                hidden_states
             )
         else:
             mixed_qkv, beta, forget_gate, g_proj_states = self.forward_qkvbfg(
@@ -2051,9 +2035,8 @@ class KimiK3DeltaAttention(nn.Module):
             if not forward_batch.forward_mode.is_target_verify():
                 # Only chunk_kda (extend) wants pre-activated beta; the verify
                 # kernel sigmoids it in-kernel like decode.
-                beta = beta.float()
                 if not self.attn.extend_beta_is_raw:
-                    beta = beta.sigmoid()
+                    beta = beta.float().sigmoid()
             forget_gate = forget_gate.unsqueeze(0)
         beta = beta.unsqueeze(0)
 
@@ -2062,15 +2045,13 @@ class KimiK3DeltaAttention(nn.Module):
         # into the recurrence kernel. If the backend leaves the stash
         # unconsumed (env off or shape not covered), apply o_norm here as
         # before.
-        fused_onorm = (self._kda_fused_decode_ready or defer_f_b) and (
+        fused_onorm = self._kda_fused_decode_ready and (
             forward_batch.forward_mode.is_decode()
             or forward_batch.forward_mode.is_target_verify()
         )
         if fused_onorm:
             self.attn._k3_onorm_gate = g_proj_states
             self.attn._k3_onorm_consumed = False
-        if defer_f_b:
-            self.attn._k3_deferred_f_b = True
 
         core_attn_out = self.attn(
             forward_batch,
@@ -2082,8 +2063,6 @@ class KimiK3DeltaAttention(nn.Module):
         if fused_onorm:
             self.attn._k3_onorm_gate = None
             fused_onorm = self.attn._k3_onorm_consumed
-        if defer_f_b:
-            self.attn._k3_deferred_f_b = False
         quantized = None
         if _is_hip and not fused_onorm:
             from sglang.srt.models.kimi_k3_rocm_kda import try_o_norm_quant
