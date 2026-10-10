@@ -226,7 +226,7 @@ def fused_kda_chunk(
         final_state,
         out,
         cu_seqlens,
-        chunk_offsets.to(torch.int32),
+        chunk_offsets.to(torch.int64).contiguous(),
         scale,
         group_state,
         groups,
