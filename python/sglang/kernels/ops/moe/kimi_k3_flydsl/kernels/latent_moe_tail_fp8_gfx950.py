@@ -126,9 +126,7 @@ def build_latent_moe_tail_fp8_persistent_module(
         zero_vec8_bf16 = vector.from_elements(
             vec8_bf16, [zero_bf16] * _ELEMENTS_PER_LOAD
         )
-        tile_token_base = ArithValue(gpu.block_idx.y) * arith.constant(
-            tile_m, type=i32
-        )
+        tile_token_base = ArithValue(gpu.block_idx.y) * arith.constant(tile_m, type=i32)
 
         def lds_load(ptr, index):
             return fx.ptr_load(ptr + fx.Int64(index))
@@ -238,21 +236,15 @@ def build_latent_moe_tail_fp8_persistent_module(
         if const_expr(skip_rms):
             for token_index in range_constexpr(tile_m):
                 token = tile_token_base + arith.constant(token_index, type=i32)
-                token_valid = arith.cmpi(
-                    CmpIPredicate.ult, token, _raw(num_tokens)
-                )
-                lds_token_base = arith.constant(
-                    token_index * _LATENT_DIM, type=i32
-                )
+                token_valid = arith.cmpi(CmpIPredicate.ult, token, _raw(num_tokens))
+                lds_token_base = arith.constant(token_index * _LATENT_DIM, type=i32)
                 copy_if = scf.IfOp(normalize_thread)
                 with ir.InsertionPoint(copy_if.then_block):
                     row_element = tid * arith.constant(_ELEMENTS_PER_LOAD, type=i32)
                     global_element = (
                         token * arith.constant(_LATENT_DIM, type=i32) + row_element
                     )
-                    load_if = scf.IfOp(
-                        token_valid, results_=[vec8_bf16], has_else=True
-                    )
+                    load_if = scf.IfOp(token_valid, results_=[vec8_bf16], has_else=True)
                     with ir.InsertionPoint(load_if.then_block):
                         routed_bf16 = load_bf16x8(routed_rsrc, global_element)
                         scf.YieldOp([_raw(routed_bf16)])
@@ -267,19 +259,13 @@ def build_latent_moe_tail_fp8_persistent_module(
         else:
             for token_index in range_constexpr(tile_m):
                 token = tile_token_base + arith.constant(token_index, type=i32)
-                token_valid = arith.cmpi(
-                    CmpIPredicate.ult, token, _raw(num_tokens)
-                )
-                lds_token_base = arith.constant(
-                    token_index * _LATENT_DIM, type=i32
-                )
+                token_valid = arith.cmpi(CmpIPredicate.ult, token, _raw(num_tokens))
+                lds_token_base = arith.constant(token_index * _LATENT_DIM, type=i32)
                 rms_base = arith.constant(token_index * _NORMALIZE_WAVES, type=i32)
                 lds_token = arith.constant(token_index, type=i32)
                 active_normalize = arith.andi(normalize_thread, token_valid)
 
-                normalize_if = scf.IfOp(
-                    active_normalize, results_=[f32], has_else=True
-                )
+                normalize_if = scf.IfOp(active_normalize, results_=[f32], has_else=True)
                 with ir.InsertionPoint(normalize_if.then_block):
                     row_element = tid * arith.constant(_ELEMENTS_PER_LOAD, type=i32)
                     global_element = (
@@ -349,9 +335,9 @@ def build_latent_moe_tail_fp8_persistent_module(
                         routed_f32 = ArithValue(routed_bf16).extf(vec8_f32)
                         gamma_f32 = ArithValue(gamma_bf16).extf(vec8_f32)
                         inverse = ArithValue(lds_load(inverse_rms, lds_token))
-                        normalized = (
-                            routed_f32 * gamma_f32 * inverse
-                        ).truncf(vec8_bf16)
+                        normalized = (routed_f32 * gamma_f32 * inverse).truncf(
+                            vec8_bf16
+                        )
                         scf.YieldOp([_raw(normalized)])
                     with ir.InsertionPoint(normalize_valid_if.else_block):
                         scf.YieldOp([_raw(zero_vec8_bf16)])
@@ -449,9 +435,7 @@ def build_latent_moe_tail_fp8_persistent_module(
                                     vec_width=1,
                                     dtype=T.bf16,
                                 )
-                                shared_f32 = ArithValue(
-                                    arith.extf(f32, shared_bf16)
-                                )
+                                shared_f32 = ArithValue(arith.extf(f32, shared_bf16))
                                 result = arith.trunc_f(
                                     T.bf16,
                                     _raw(projected_f32 + shared_f32),
