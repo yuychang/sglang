@@ -1510,15 +1510,20 @@ class KDAAttnBackend(MambaAttnBackendBase):
 
         seq_len, dim = mixed_qkv.shape
         batch_size = seq_len // draft_token_num
-        if replayssm_on and (
-            batch_size != 1 or not (get_platform().is_sm90 or get_platform().is_sm100)
-        ):
-            # The runtime still uses BV=4, not the benchmark's best-BV sweep:
-            # fused+ring wins at B=1 but regresses from B=4 (B=2 at T=8) on
-            # both enabled architectures. Keep the ring path conservative until
-            # other batch/architecture combinations are measured. The snapshot
-            # path and the separate CuTe path are unchanged.
-            return False
+        if replayssm_on:
+            # CACHE_RING stores the same pre-L2 K, raw V, gate and beta values
+            # as the fallback recurrence (covered by the ring-fold parity test).
+            # Keep eligibility to the latency shape measured on each platform.
+            if is_hip():
+                if batch_size != 1:
+                    return False
+            elif batch_size != 1 or not (
+                get_platform().is_sm90 or get_platform().is_sm100
+            ):
+                # The runtime still uses BV=4, not the benchmark's best-BV
+                # sweep: fused+ring regresses from B=4 (B=2 at T=8) on both
+                # enabled CUDA architectures.
+                return False
         if is_hip() and not (
             is_gfx95_supported()
             and 1 <= batch_size <= 16
