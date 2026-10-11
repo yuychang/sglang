@@ -763,7 +763,7 @@ class KDAAttnBackend(MambaAttnBackendBase):
                     self.device,
                     self.mamba_chunk_size,
                 )
-        if envs.SGLANG_K3_PREFILL_HOST_METADATA.get():
+        if envs.SGLANG_ROCM_K3_PREFILL_HOST_METADATA.get():
             self._init_prefill_host_metadata(forward_batch)
 
     def _init_prefill_host_metadata(self, forward_batch: ForwardBatch):
