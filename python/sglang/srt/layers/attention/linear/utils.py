@@ -111,10 +111,15 @@ def resolve_linear_attn_backends(
 def select_verify_intermediate_state_indices(
     default_indices, req_pool_indices, valid, pool_size: int
 ):
+    """``valid`` may be a zero-arg callable so callers pay for the mask kernel
+    only when the stable-rows path actually consumes it."""
     if not pp_spec_stable_rows_enabled():
         return default_indices
 
     import torch
+
+    if callable(valid):
+        valid = valid()
 
     req_rows = req_pool_indices[: valid.shape[0]]
     return torch.where(valid, req_rows, torch.full_like(req_rows, pool_size)).to(
