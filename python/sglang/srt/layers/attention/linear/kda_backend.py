@@ -20,7 +20,7 @@ from sglang.srt.layers.attention.linear.utils import (
     select_verify_intermediate_state_indices,
 )
 from sglang.srt.layers.radix_linear_attention import RadixLinearAttention
-from sglang.srt.utils import is_cpu, is_cuda, is_hip, is_npu
+from sglang.srt.utils import is_cpu, is_cuda, is_hip, is_npu, is_pin_memory_available
 from sglang.srt.utils.common import is_gfx95_supported, rank0_log
 
 # KDA always uses the triton causal_conv1d_fn (no CUDA override).
@@ -33,6 +33,13 @@ elif is_cpu():
     from sgl_kernel.mamba import causal_conv1d_update_cpu
 
     causal_conv1d_update = causal_conv1d_update_cpu
+
+_IS_CPU = is_cpu()
+if not _IS_CPU:
+    from sglang.kernels.ops.attention.fla.chunk_delta_h import (
+        CHUNK_SIZE as FLA_CHUNK_SIZE,
+    )
+    from sglang.kernels.ops.attention.fla.index import seed_chunk_metadata_from_host
 
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.model_executor.model_runner import ModelRunner
@@ -552,6 +559,35 @@ class KDAAttnBackend(MambaAttnBackendBase):
                     self.forward_metadata.mamba_track_mask_indices
                 ]
             )
+        if envs.SGLANG_K3_PREFILL_HOST_METADATA.get():
+            self._init_prefill_host_metadata(forward_batch)
+
+    def _init_prefill_host_metadata(self, forward_batch: ForwardBatch):
+        mode = forward_batch.forward_mode
+        if not mode.is_extend() or mode.is_target_verify():
+            return
+        if forward_batch.extend_prefix_lens is not None:
+            self.forward_metadata.extend_has_initial_state = (
+                forward_batch.extend_prefix_lens > 0
+            )
+        if _IS_CPU:
+            return
+        query_start_loc = self.forward_metadata.query_start_loc
+        seq_lens_cpu = forward_batch.extend_seq_lens_cpu
+        if (
+            query_start_loc is None
+            or seq_lens_cpu is None
+            or len(seq_lens_cpu) != forward_batch.batch_size
+            or forward_batch.tbo_parent_token_range is not None
+            or torch.cuda.is_current_stream_capturing()
+        ):
+            return
+        seed_chunk_metadata_from_host(
+            query_start_loc,
+            seq_lens_cpu,
+            FLA_CHUNK_SIZE,
+            pin_memory=is_pin_memory_available(self.device),
+        )
 
     def forward_decode(
         self,
@@ -811,6 +847,9 @@ class KDAAttnBackend(MambaAttnBackendBase):
         conv_states: torch.Tensor,
         cache_indices: torch.Tensor,
     ) -> torch.Tensor:
+        has_initial_state = self.forward_metadata.extend_has_initial_state
+        if has_initial_state is None:
+            has_initial_state = forward_batch.extend_prefix_lens > 0
         # Depthwise conv is channel-independent, so one packed call over the
         # full qkv width matches the decode path and saves two kernel launches.
         return causal_conv1d_fn(
@@ -819,7 +858,7 @@ class KDAAttnBackend(MambaAttnBackendBase):
             layer.bias,
             activation="silu",
             conv_states=conv_states,
-            has_initial_state=forward_batch.extend_prefix_lens > 0,
+            has_initial_state=has_initial_state,
             cache_indices=cache_indices,
             query_start_loc=self.forward_metadata.query_start_loc,
             seq_lens_cpu=forward_batch.extend_seq_lens_cpu,
