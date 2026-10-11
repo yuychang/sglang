@@ -560,11 +560,17 @@ class KDAAttnBackend(MambaAttnBackendBase):
                 ]
             )
         if envs.SGLANG_K3_PREFILL_HOST_METADATA.get():
-            self._seed_prefill_chunk_metadata(forward_batch)
+            self._init_prefill_host_metadata(forward_batch)
 
-    def _seed_prefill_chunk_metadata(self, forward_batch: ForwardBatch):
+    def _init_prefill_host_metadata(self, forward_batch: ForwardBatch):
         mode = forward_batch.forward_mode
-        if _IS_CPU or not mode.is_extend() or mode.is_target_verify():
+        if not mode.is_extend() or mode.is_target_verify():
+            return
+        if forward_batch.extend_prefix_lens is not None:
+            self.forward_metadata.extend_has_initial_state = (
+                forward_batch.extend_prefix_lens > 0
+            )
+        if _IS_CPU:
             return
         query_start_loc = self.forward_metadata.query_start_loc
         seq_lens_cpu = forward_batch.extend_seq_lens_cpu
@@ -841,6 +847,9 @@ class KDAAttnBackend(MambaAttnBackendBase):
         conv_states: torch.Tensor,
         cache_indices: torch.Tensor,
     ) -> torch.Tensor:
+        has_initial_state = self.forward_metadata.extend_has_initial_state
+        if has_initial_state is None:
+            has_initial_state = forward_batch.extend_prefix_lens > 0
         # Depthwise conv is channel-independent, so one packed call over the
         # full qkv width matches the decode path and saves two kernel launches.
         return causal_conv1d_fn(
@@ -849,7 +858,7 @@ class KDAAttnBackend(MambaAttnBackendBase):
             layer.bias,
             activation="silu",
             conv_states=conv_states,
-            has_initial_state=forward_batch.extend_prefix_lens > 0,
+            has_initial_state=has_initial_state,
             cache_indices=cache_indices,
             query_start_loc=self.forward_metadata.query_start_loc,
             seq_lens_cpu=forward_batch.extend_seq_lens_cpu,
