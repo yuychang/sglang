@@ -264,3 +264,18 @@ class QuickAllReduce:
 
     def __del__(self):
         self.close()
+
+
+def prefers_quick_allreduce(
+    qr_comm: "QuickAllReduce", inp: torch.Tensor, min_bytes: int
+) -> bool:
+    """Whether a plain all-reduce should skip AITER custom AR for quick-reduce.
+
+    ``min_bytes <= 0`` is the default and disables the preference. Quick-reduce
+    still applies its own dtype, alignment and minimum-size gates.
+    """
+    if min_bytes <= 0 or qr_comm is None or qr_comm.disabled:
+        return False
+    if inp.numel() * inp.element_size() < min_bytes:
+        return False
+    return qr_comm.should_quick_allreduce(inp)

@@ -949,6 +949,15 @@ class Envs:
     # into all-gather. Set MAX_TOKENS=4 to keep it on 1-stage sizes only.
     SGLANG_ROCM_AR_RESIDUAL = EnvBool(True)
     SGLANG_ROCM_AR_RESIDUAL_MAX_TOKENS = EnvInt(8)
+    # Route plain all-reduces of at least this many bytes to quick-reduce
+    # (ROCM_QUICK_REDUCE_QUANTIZATION, INT4 in the K3 recipe) ahead of AITER
+    # custom AR. Default 0 keeps the historical order: AITER CA takes anything
+    # up to AITER_CUSTOM_AR_MAX_SIZE (64 MiB), so a 2k-4k token K3 prefill chunk
+    # runs entirely on the lossless CA 2-stage kernel (80 blocks) while a full
+    # 8k chunk runs entirely on quick-reduce. Quick-reduce itself still requires
+    # its own minimum size (2 MiB for INT4 TP8). Quantizes more all-reduces, so
+    # gate with an accuracy run.
+    SGLANG_ROCM_PREFILL_AR_QR_MIN_BYTES = EnvInt(0)
     # Fold the Kimi-K3 KDA [f_a|b] tail into the wide [q,k,v,g] projection.
     # The merged N=6288 shape is used only up to MAX_TOKENS below, where decode
     # is bandwidth bound; larger batches keep the tuned N=6144 split path.

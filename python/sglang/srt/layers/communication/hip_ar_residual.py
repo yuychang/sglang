@@ -58,6 +58,8 @@ def try_all_reduce_add(
         if ca_comm is None or getattr(ca_comm, "disabled", True):
             return None
         if residual is None:
+            if group.prefers_quick_allreduce(x) is True:
+                return None
             if hasattr(ca_comm, "custom_all_reduce"):
                 out = ca_comm.custom_all_reduce(x)
                 return out

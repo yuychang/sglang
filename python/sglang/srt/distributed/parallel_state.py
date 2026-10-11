@@ -949,6 +949,17 @@ class GroupCoordinator:
         except Exception:
             return None
 
+    def prefers_quick_allreduce(self, input_: torch.Tensor) -> bool:
+        """SGLANG_ROCM_PREFILL_AR_QR_MIN_BYTES: send big plain ARs to quick-reduce."""
+        min_bytes = envs.SGLANG_ROCM_PREFILL_AR_QR_MIN_BYTES.get()
+        if min_bytes <= 0 or self.qr_comm is None:
+            return False
+        from sglang.srt.distributed.device_communicators.quick_all_reduce import (
+            prefers_quick_allreduce,
+        )
+
+        return prefers_quick_allreduce(self.qr_comm, input_, min_bytes)
+
     def _resolve_outplace_all_reduce_method(
         self,
         input_: torch.Tensor,
@@ -959,6 +970,8 @@ class GroupCoordinator:
                 self.pymscclpp_comm is not None
                 and self.pymscclpp_comm.should_mscclpp_allreduce(input_)
             )
+        if not should_use_pymscclpp_allreduce and self.prefers_quick_allreduce(input_):
+            return "qr"
         if (
             self.ca_comm is not None
             and not self.ca_comm.disabled
