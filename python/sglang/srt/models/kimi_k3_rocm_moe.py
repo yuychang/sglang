@@ -713,10 +713,14 @@ def forward_fused_rocm(
         )
     self._forward_routed(hidden_states, router_logits, routed_input, latent)
 
+    # The persistent kernel has compile-time M specializations for 1/2/4.
+    # TARGET_VERIFY is equally valid when its flattened token count lands in
+    # one of those buckets (in practice, one request with qlen=4).
+    mode = forward_batch.forward_mode if forward_batch is not None else None
     use_latent_tail = (
         num_tokens in (1, 2, 4)
-        and forward_batch is not None
-        and forward_batch.forward_mode.is_decode_or_idle()
+        and mode is not None
+        and (mode.is_decode_or_idle() or mode.is_target_verify())
         and self._latent_tail_weight is not None
         and self._latent_tail_scale is not None
     )
