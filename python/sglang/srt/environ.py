@@ -954,6 +954,11 @@ class Envs:
     # into all-gather. Set MAX_TOKENS=4 to keep it on 1-stage sizes only.
     SGLANG_ROCM_AR_RESIDUAL = EnvBool(True)
     SGLANG_ROCM_AR_RESIDUAL_MAX_TOKENS = EnvInt(8)
+    # Let Kimi-K3 GEMM/MoE producers write directly into AITER custom-AR's
+    # registered input pool. This removes custom-AR's D2D staging copy while
+    # retaining the unregistered-output path. Keep opt-in until the TP8
+    # bit-exact/graph validation script has passed on the deployment stack.
+    SGLANG_K3_AR_INPLACE_INPUT = EnvBool(False)
     # Fold the Kimi-K3 KDA [f_a|b] tail into the wide [q,k,v,g] projection.
     # The merged N=6288 shape is used only up to MAX_TOKENS below, where decode
     # is bandwidth bound; larger batches keep the tuned N=6144 split path.

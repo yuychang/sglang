@@ -434,6 +434,26 @@ def _k3_symm_o_proj_out(o_proj: RowParallelLinear, x: torch.Tensor) -> torch.Ten
     )
 
 
+def _k3_deferred_o_proj_out(
+    o_proj: RowParallelLinear, x: torch.Tensor
+) -> Optional[torch.Tensor]:
+    takes_output = _o_proj_takes_output(o_proj) or (
+        _is_hip
+        and getattr(getattr(o_proj, "scheme", None), "apply_into", None) is not None
+    )
+    if not isinstance(x, torch.Tensor) or not takes_output:
+        return None
+    if _is_hip:
+        from sglang.srt.layers.communication.k3_ar_input import get_k3_ar_input
+
+        return get_k3_ar_input(
+            (x.shape[0], o_proj.output_size),
+            x.dtype,
+            x.device,
+        )
+    return _k3_symm_o_proj_out(o_proj, x)
+
+
 class KimiK3MoE(nn.Module):
     """K3 MoE with Latent MoE (experts run in moe_hidden_size space)."""
 
@@ -2106,10 +2126,11 @@ class KimiK3DeltaAttention(nn.Module):
                 norm_gate = g_proj_states.unflatten(-1, (-1, self.head_dim))
                 core_attn_out = self.o_norm(core_attn_out, norm_gate)
             core_attn_out = core_attn_out.squeeze(0).flatten(-2)
-        if self.all_reduce_fusion and not _is_hip:
-            out = _k3_symm_o_proj_out(self.o_proj, core_attn_out)
-            partial, _ = self.o_proj(core_attn_out, output_tensor=out)
-            return partial
+        if self.all_reduce_fusion:
+            out = _k3_deferred_o_proj_out(self.o_proj, core_attn_out)
+            if out is not None:
+                partial, _ = self.o_proj(core_attn_out, output_tensor=out)
+                return partial
         return self.o_proj(core_attn_out)[0]
 
 
@@ -2211,24 +2232,24 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
             self.all_reduce_fusion = False
             self.o_proj.reduce_results = True
             self.o_proj.use_dp_attention_reduce = True
-        if self.all_reduce_fusion and not _is_hip:
-            # Hand the GEMM a slice of the persistent symmetric buffer
-            # (k3_ar_fusion.symm_buffer); the fused AR reduces it in place.
+        if self.all_reduce_fusion:
+            # Hand the GEMM either the CUDA symmetric buffer or AITER's
+            # registered input pool. The following deferred AR consumes it.
             # The captured name must differ from the gate block's
             # `_orig_o_proj_forward` — closures capture the __init__ local by
             # reference, and reusing it would rebind to this wrapper (recursion).
-            _symm_inner_o_proj_forward = self.o_proj.forward
-            _symm_o_proj = self.o_proj
+            _direct_inner_o_proj_forward = self.o_proj.forward
+            _direct_o_proj = self.o_proj
 
-            def _symm_o_proj_forward(x, *args, **kwargs):
-                return _symm_inner_o_proj_forward(
-                    x,
-                    *args,
-                    output_tensor=_k3_symm_o_proj_out(_symm_o_proj, x),
-                    **kwargs,
+            def _direct_o_proj_forward(x, *args, **kwargs):
+                out = _k3_deferred_o_proj_out(_direct_o_proj, x)
+                if out is None:
+                    return _direct_inner_o_proj_forward(x, *args, **kwargs)
+                return _direct_inner_o_proj_forward(
+                    x, *args, output_tensor=out, **kwargs
                 )
 
-            self.o_proj.forward = _symm_o_proj_forward
+            self.o_proj.forward = _direct_o_proj_forward
         else:
             # K3 owns its output reduction, so o_proj must reduce within the
             # attn-TP group itself: the default full-TP collective is the wrong

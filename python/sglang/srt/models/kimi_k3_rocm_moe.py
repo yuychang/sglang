@@ -726,10 +726,19 @@ def forward_fused_rocm(
     if _front_needs_dense_bf16(self):
         routed_input = routed_input.to(hidden_states.dtype).contiguous()
     latent_numel = num_tokens * self.moe_hidden_size
-    with use_symmetric_memory(
-        get_parallel().tp_group, disabled=not is_allocation_symmetric()
-    ):
-        buf = hidden_states.new_empty(latent_numel + num_tokens * hidden_size)
+    total_numel = latent_numel + num_tokens * hidden_size
+    from sglang.srt.layers.communication.k3_ar_input import get_k3_ar_input
+
+    direct_ar_input = get_k3_ar_input(
+        (total_numel,), hidden_states.dtype, hidden_states.device
+    )
+    if direct_ar_input is not None:
+        buf = direct_ar_input
+    else:
+        with use_symmetric_memory(
+            get_parallel().tp_group, disabled=not is_allocation_symmetric()
+        ):
+            buf = hidden_states.new_empty(total_numel)
     latent = buf[:latent_numel].view(num_tokens, self.moe_hidden_size)
     shared_output = buf[latent_numel:].view(num_tokens, hidden_size)
 
