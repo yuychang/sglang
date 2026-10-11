@@ -101,9 +101,15 @@ def _support_mha_one_shot(attn, forward_batch, backend_name):
     attn_supported = backend_name in MHA_ONE_SHOT_SUPPORTED_BACKENDS
     if not attn_supported:
         return False
-    return (
-        forward_batch.get_seq_lens_cpu_sum() <= forward_batch.get_max_chunk_capacity()
-    )
+    if _is_hip:
+        seq_sum = forward_batch.get_seq_lens_cpu_sum()
+    else:
+        seq_sum = (
+            sum(forward_batch.seq_lens_cpu)
+            if forward_batch.seq_lens_cpu is not None
+            else 0
+        )
+    return seq_sum <= forward_batch.get_max_chunk_capacity()
 
 
 def _handle_attention_backend(attn, forward_batch, backend_name):
