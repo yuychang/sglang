@@ -35,7 +35,9 @@ from sglang.srt.runtime_context import get_parallel
 _use_aiter = envs.SGLANG_USE_AITER.get()
 _aiter_moe_preroute_fp8 = envs.SGLANG_ROCM_K3_AITER_MOE_PREROUTE_FP8.get()
 _aiter_latent_tail_fp8 = envs.SGLANG_ROCM_K3_AITER_LATENT_TAIL_FP8.get()
-_latent_tail_max_tokens = envs.SGLANG_ROCM_K3_LATENT_TAIL_MAX_TOKENS.get()
+_latent_tail_max_tokens = max(
+    0, min(256, envs.SGLANG_ROCM_K3_LATENT_TAIL_MAX_TOKENS.get())
+)
 _aiter_tuned_moe_front = envs.SGLANG_ROCM_K3_AITER_TUNED_MOE_FRONT.get()
 _aiter_tuned_moe_front_min_tokens = (
     envs.SGLANG_ROCM_K3_AITER_TUNED_MOE_FRONT_MIN_TOKENS.get()
