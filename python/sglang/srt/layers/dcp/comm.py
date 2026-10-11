@@ -20,8 +20,9 @@ PR #25090 vs #14194):
   - cp_lse_ag_out_rs_mla: Triton (log2/exp2) correction / reduce-scatter
 """
 
+import functools
 import itertools
-from typing import Optional
+from typing import NamedTuple, Optional, Sequence
 
 import torch
 
@@ -36,6 +37,7 @@ from sglang.srt.distributed.device_communicators.pynccl_allocator import (
     use_symmetric_memory,
 )
 from sglang.srt.distributed.parallel_state import GroupCoordinator
+from sglang.srt.environ import envs
 from sglang.srt.runtime_context import get_parallel
 from sglang.srt.utils import is_hip
 from sglang.srt.utils.common import is_fi_a2a_supported
@@ -190,6 +192,11 @@ def all_gather_kv_cache_for_mha_chunk_extend(
 ):
     if get_parallel().dcp_enabled:
         kv_a = kv_a.unsqueeze(1)
+        if envs.SGLANG_DCP_FAST_KV_GATHER.get():
+            kv_a, k_pe = _all_gather_kv_cache_for_dcp_split(
+                kv_a, k_pe, prefix_kv_lens_cpu, prefix_starts_cpu
+            )
+            return kv_a.squeeze(1).contiguous(), k_pe.contiguous()
         gathered_kv = all_gather_kv_cache_for_dcp(
             kv_a,
             k_pe,
@@ -336,6 +343,13 @@ def all_gather_kv_cache_for_dcp(
     parallel = get_parallel()
     if not parallel.dcp_enabled:
         return torch.cat([prefix_kv_a, prefix_k_pe], dim=-1)
+    if envs.SGLANG_DCP_FAST_KV_GATHER.get():
+        plan = _dcp_gather_plan_for(prefix_kv_lens_cpu, prefix_starts_cpu)
+        gathered = _dcp_all_gather_padded(
+            _dcp_pad_local_kv(prefix_kv_a, prefix_k_pe, plan)
+        )
+        interleaved = gathered.transpose(0, 1).reshape(-1, *gathered.shape[2:])
+        return _dcp_select_requests(interleaved, plan)
     # 1. compute max kv_lens for each seq
     dcp_world_size = parallel.dcp_size
     dcp_rank = parallel.dcp_rank
@@ -392,6 +406,150 @@ def all_gather_kv_cache_for_dcp(
     gatherd_kv_cache = torch.cat(kv_cache_tuple, dim=0)
 
     return gatherd_kv_cache
+
+
+class _DcpGatherPlan(NamedTuple):
+    world_size: int
+    lens: tuple
+    offsets: tuple
+    left_pads: tuple
+    local_lens: tuple
+    local_starts: tuple
+    padded_starts: tuple
+    total_padded: int
+
+
+@functools.lru_cache(maxsize=64)
+def _dcp_gather_plan(
+    lens: tuple, starts: tuple, world_size: int, rank: int
+) -> _DcpGatherPlan:
+    """Host-int form of the padding math in all_gather_kv_cache_for_dcp.
+
+    Rank r holds tokens whose position p satisfies p % world_size == r. Each
+    request is padded to ``padded_len`` rows per rank so that the all-gathered
+    rows interleave back into token order.
+    """
+    offsets, left_pads, local_lens, local_starts, padded_starts = [], [], [], [], []
+    local_pos = padded_pos = 0
+    for n, s in zip(lens, starts):
+        off = s % world_size
+        left = int(off > rank)
+        right = int((s + n - 1) % world_size < rank)
+        padded_len = (n + off + world_size - 1) // world_size
+        local_len = padded_len - left - right
+        offsets.append(off)
+        left_pads.append(left)
+        local_lens.append(local_len)
+        local_starts.append(local_pos)
+        padded_starts.append(padded_pos)
+        local_pos += local_len
+        padded_pos += padded_len
+    return _DcpGatherPlan(
+        world_size,
+        lens,
+        tuple(offsets),
+        tuple(left_pads),
+        tuple(local_lens),
+        tuple(local_starts),
+        tuple(padded_starts),
+        padded_pos,
+    )
+
+
+def _as_int_tuple(values) -> tuple:
+    if isinstance(values, torch.Tensor):
+        values = values.tolist()
+    return tuple(int(v) for v in values)
+
+
+def _dcp_gather_plan_for(
+    prefix_kv_lens_cpu, prefix_starts_cpu: Optional[Sequence[int]]
+) -> _DcpGatherPlan:
+    parallel = get_parallel()
+    lens = _as_int_tuple(prefix_kv_lens_cpu)
+    starts = (
+        (0,) * len(lens)
+        if prefix_starts_cpu is None
+        else _as_int_tuple(prefix_starts_cpu)
+    )
+    return _dcp_gather_plan(lens, starts, parallel.dcp_size, parallel.dcp_rank)
+
+
+def _dcp_pad_local_kv(
+    prefix_kv_a: torch.Tensor, prefix_k_pe: torch.Tensor, plan: _DcpGatherPlan
+) -> torch.Tensor:
+    # Rows outside each request's local span are padding and stay unwritten.
+    padded = prefix_kv_a.new_empty(
+        (
+            plan.total_padded,
+            *prefix_kv_a.shape[1:-1],
+            prefix_kv_a.shape[-1] + prefix_k_pe.shape[-1],
+        ),
+        dtype=torch.promote_types(prefix_kv_a.dtype, prefix_k_pe.dtype),
+    )
+    for local_len, src, dst, left in zip(
+        plan.local_lens, plan.local_starts, plan.padded_starts, plan.left_pads
+    ):
+        if local_len <= 0:
+            continue
+        dst += left
+        torch.cat(
+            [prefix_kv_a[src : src + local_len], prefix_k_pe[src : src + local_len]],
+            dim=-1,
+            out=padded[dst : dst + local_len],
+        )
+    return padded
+
+
+def _dcp_all_gather_padded(padded: torch.Tensor) -> torch.Tensor:
+    """All-gather ``padded`` across DCP ranks as a ``[world, *padded.shape]`` view."""
+    parallel = get_parallel()
+    world_size = parallel.dcp_size
+    gathered = padded.new_empty((world_size * padded.shape[0], *padded.shape[1:]))
+    if padded.dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+        parallel.dcp_group.all_gather_into_tensor(
+            gathered.view(torch.uint8), padded.view(torch.uint8)
+        )
+    else:
+        parallel.dcp_group.all_gather_into_tensor(gathered, padded)
+    return gathered.view(world_size, *padded.shape)
+
+
+def _dcp_select_requests(
+    interleaved: torch.Tensor, plan: _DcpGatherPlan
+) -> torch.Tensor:
+    """Cut each request's tokens out of the token-ordered padded rows."""
+    spans = [
+        (padded_start * plan.world_size + off, n)
+        for padded_start, off, n in zip(plan.padded_starts, plan.offsets, plan.lens)
+    ]
+    if len(spans) == 1:
+        start, n = spans[0]
+        return interleaved[start : start + n]
+    return torch.cat([interleaved[start : start + n] for start, n in spans], dim=0)
+
+
+def _all_gather_kv_cache_for_dcp_split(
+    prefix_kv_a: torch.Tensor,
+    prefix_k_pe: torch.Tensor,
+    prefix_kv_lens_cpu,
+    prefix_starts_cpu=None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """all_gather_kv_cache_for_dcp followed by the kv_a / k_pe split.
+
+    The rank-major gather is reordered straight into separate contiguous kv_a
+    and k_pe buffers, so a single request comes back as views with no further
+    copies.
+    """
+    plan = _dcp_gather_plan_for(prefix_kv_lens_cpu, prefix_starts_cpu)
+    gathered = _dcp_all_gather_padded(_dcp_pad_local_kv(prefix_kv_a, prefix_k_pe, plan))
+    kv_a_dim = prefix_kv_a.shape[-1]
+    outs = []
+    for part in (gathered[..., :kv_a_dim], gathered[..., kv_a_dim:]):
+        ordered = part.new_empty((plan.total_padded, plan.world_size, *part.shape[2:]))
+        ordered.copy_(part.transpose(0, 1))
+        outs.append(_dcp_select_requests(ordered.view(-1, *part.shape[2:]), plan))
+    return outs[0], outs[1]
 
 
 # ---------------------------------------------------------------------------
