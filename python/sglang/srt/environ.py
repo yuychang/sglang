@@ -1972,8 +1972,9 @@ class Envs:
     SGLANG_ROCM_K3_AITER_MOE_PREROUTE_FP8 = EnvBool(False)
     SGLANG_ROCM_K3_AITER_LATENT_TAIL_FP8 = EnvBool(False)
     # Runtime token ceiling for the fused RMSNorm + latent-up + add tail.
-    # Zero disables the path while retaining the packed-weight master switch.
-    SGLANG_ROCM_K3_LATENT_TAIL_MAX_TOKENS = EnvInt(256)
+    # M=32 is the last profitable gfx950 measurement; above it, keep the
+    # RMSNorm + PTPC GEMM + add chain. Zero disables the path.
+    SGLANG_ROCM_K3_LATENT_TAIL_MAX_TOKENS = EnvInt(32)
     # Extend the KDA and MoE pre-route fusions from the single-token bucket to
     # two tokens.
     SGLANG_ROCM_K3_AITER_B2_FUSIONS = EnvBool(False)
