@@ -68,11 +68,16 @@ def test_builder_rejects_invalid_schedule(keyword: str, value: int, message: str
     not torch.cuda.is_available() or get_gfx_runtime() != "gfx950",
     reason="Kimi-K3 FP8 latent-tail specialization requires gfx950",
 )
+@pytest.mark.parametrize("num_tokens", [1, 2, 4])
 @torch.inference_mode()
-def test_latent_moe_tail_fp8_matches_dequantized_oracle_and_replays():
+def test_latent_moe_tail_fp8_matches_dequantized_oracle_and_replays(num_tokens):
     generator = torch.Generator(device="cpu").manual_seed(20260730)
-    routed = torch.randn((1, LATENT_DIM), generator=generator).bfloat16().cuda()
-    shared = torch.randn((1, HIDDEN_DIM), generator=generator).bfloat16().cuda()
+    routed = (
+        torch.randn((num_tokens, LATENT_DIM), generator=generator).bfloat16().cuda()
+    )
+    shared = (
+        torch.randn((num_tokens, HIDDEN_DIM), generator=generator).bfloat16().cuda()
+    )
     rms_weight = torch.randn(LATENT_DIM, generator=generator).bfloat16().cuda()
     up_weight = (
         torch.randn((HIDDEN_DIM, LATENT_DIM), generator=generator)
