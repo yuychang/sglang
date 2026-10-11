@@ -76,7 +76,7 @@ def _reference(values):
     )
 
 
-@pytest.mark.parametrize("tokens", [1, 64])
+@pytest.mark.parametrize("tokens", [1, 4, 8, 64, 128, 256])
 @pytest.mark.parametrize(
     ("cache_dtype", "output_dtype"),
     [
@@ -109,6 +109,25 @@ def test_fused_mla_q_cache_skips_negative_slots():
     torch.testing.assert_close(values["out"][:2], expected_q[:2])
     torch.testing.assert_close(values["kv_cache"][:2], expected_k[:2])
     assert torch.count_nonzero(values["kv_cache"][2:]).item() == 0
+
+
+def test_fused_mla_q_cache_uses_each_token_slot_across_page_boundaries():
+    values = _inputs(8)
+    slots = torch.tensor(
+        [1, 127, 128, 129, 255, 256, 257, 299],
+        dtype=torch.int64,
+        device="cuda",
+    )
+    values["slot_mapping"] = slots
+    values["positions"] = torch.arange(100, 108, dtype=torch.int64, device="cuda")
+    values["kv_cache"] = torch.zeros(304, 1, 576, dtype=torch.bfloat16, device="cuda")
+    expected_q, expected_k = _reference(values)
+
+    actual = mla_q_cache_aiter_hip.run(**values)
+    torch.cuda.synchronize()
+
+    torch.testing.assert_close(actual, expected_q)
+    torch.testing.assert_close(values["kv_cache"][slots], expected_k)
 
 
 def test_fused_mla_q_cache_graph_replay_uses_changed_inputs():
