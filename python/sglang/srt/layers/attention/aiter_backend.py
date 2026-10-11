@@ -489,7 +489,7 @@ class AiterAttnBackend(AttentionBackend):
         if (
             self.use_mla
             and fp8_dtype == torch.float8_e4m3fn
-            and envs.SGLANG_K3_MLA_PREFILL_FUSED_FP8_QUANT.get()
+            and envs.SGLANG_ROCM_K3_MLA_PREFILL_FUSED_FP8_QUANT.get()
         ):
             from sglang.kernels.ops.quantization.mla_prefill_fp8_quant import (
                 mla_prefill_fp8_quant,
@@ -1613,7 +1613,7 @@ class AiterAttnBackend(AttentionBackend):
         self, *tensors: torch.Tensor
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
         """_quantize_mla_prefill_fp8 per operand, batched into two launches
-        when SGLANG_K3_MLA_PREFILL_FUSED_FP8_QUANT allows it."""
+        when SGLANG_ROCM_K3_MLA_PREFILL_FUSED_FP8_QUANT allows it."""
         if self._mla_prefill_fused_fp8_quant is not None:
             quantized = self._mla_prefill_fused_fp8_quant(tensors)
             if quantized is not None:

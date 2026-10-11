@@ -3,7 +3,7 @@
 Simulates every rank of a DCP group: each rank holds the prefix tokens whose
 absolute position p satisfies ``p % dcp_size == rank``, and the mocked
 all-gather supplies the other ranks' padded buffers from that ownership rule.
-Both the original and the ``SGLANG_DCP_FAST_KV_GATHER`` implementations must
+Both the original and the ``SGLANG_ROCM_K3_DCP_FAST_KV_GATHER`` implementations must
 return every request's prefix in token order.
 
 Usage:
@@ -113,7 +113,7 @@ class TestDcpKvGather(CustomTestCase):
         expected = _expected(lens, starts)
         with patch.object(
             comm, "get_parallel", return_value=parallel
-        ), envs.SGLANG_DCP_FAST_KV_GATHER.override(fast):
+        ), envs.SGLANG_ROCM_K3_DCP_FAST_KV_GATHER.override(fast):
             full = comm.all_gather_kv_cache_for_dcp(kv_a, k_pe, lens_t, starts_t)
             out_a, out_pe = comm.all_gather_kv_cache_for_mha_chunk_extend(
                 kv_a[:, 0], k_pe, lens_t, starts_t
