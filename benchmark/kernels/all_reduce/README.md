@@ -53,3 +53,17 @@ python -m sglang.launch_server \
 ```
 
 > **Note:** MSCCL++ performs auto-tuning on first initialization, which may add a few seconds to startup time. The tuned configurations are cached for the lifetime of the process.
+
+## Kimi-K3 prefill all-reduce (ROCm, TP8)
+
+`benchmark_k3_prefill_ar.py` times RCCL, AITER custom AR (1-/2-stage and legacy),
+sglang's 1-stage CA and quick-reduce (INT4/INT8/INT6/FP) at the bf16 shapes a
+Kimi-K3 prefill chunk produces (`[N x 7168]` o_proj/dense/embedding and
+`[N x 10752]` MoE latent|shared pair) and prints a latency table plus the backend
+serving would pick today. Run it inside the serving env on 8 idle GPUs:
+
+```bash
+cd kimi_k3/agentx && bash -c 'source ./common.sh; export REPRO_CONC=bench DSPARK_BLOCK_SIZE=0; setup_server >/dev/null \
+  && cd <worktree> && python3 -m torch.distributed.run --nproc_per_node 8 \
+     benchmark/kernels/all_reduce/benchmark_k3_prefill_ar.py --rel-err --json-out /tmp/k3_prefill_ar.json'
+```
