@@ -1438,20 +1438,38 @@ class AiterAttnBackend(AttentionBackend):
         """
         num_head = layer.tp_q_head_num
         q = q.reshape(-1, q.shape[-2], layer.qk_head_dim)
-        if q.shape[1] == self.num_head_padded:
-            q = q[:, :num_head, :]
-        elif q.shape[1] != num_head:
-            q = q.reshape(-1, num_head, layer.qk_head_dim)
-        num_tokens = q.shape[0]
-        if kwargs.get("q_scale") is None:
-            kwargs["q_scale"] = self.k_scale
-        if q.dtype == fp8_dtype:
-            q_fp8 = q
+        # An FP8 Q the producer already padded to num_head_padded heads, pad heads
+        # zeroed, is the kernel operand as is: skip the 12 -> 16 re-pad.
+        q_ready = (
+            q.dtype == fp8_dtype
+            and q.shape[1] == self.num_head_padded
+            and q.is_contiguous()
+            and getattr(layer, "mla_q_pad_heads_zero", False)
+        )
+        if q_ready:
+            q_in = q
+            num_tokens = q.shape[0]
+            if kwargs.get("q_scale") is None:
+                kwargs["q_scale"] = self.k_scale
         else:
-            q_fp8, _ = scaled_fp8_quant(q.reshape(num_tokens, -1), kwargs["q_scale"])
-            q_fp8 = q_fp8.view(num_tokens, num_head, layer.qk_head_dim)
-        q_in = q_fp8.new_zeros((num_tokens, self.num_head_padded, layer.qk_head_dim))
-        q_in[:, :num_head, :] = q_fp8
+            if q.shape[1] == self.num_head_padded:
+                q = q[:, :num_head, :]
+            elif q.shape[1] != num_head:
+                q = q.reshape(-1, num_head, layer.qk_head_dim)
+            num_tokens = q.shape[0]
+            if kwargs.get("q_scale") is None:
+                kwargs["q_scale"] = self.k_scale
+            if q.dtype == fp8_dtype:
+                q_fp8 = q
+            else:
+                q_fp8, _ = scaled_fp8_quant(
+                    q.reshape(num_tokens, -1), kwargs["q_scale"]
+                )
+                q_fp8 = q_fp8.view(num_tokens, num_head, layer.qk_head_dim)
+            q_in = q_fp8.new_zeros(
+                (num_tokens, self.num_head_padded, layer.qk_head_dim)
+            )
+            q_in[:, :num_head, :] = q_fp8
         o = q.new_empty(
             (num_tokens, self.num_head_padded, layer.v_head_dim),
             dtype=self.input_dtype,

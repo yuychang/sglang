@@ -24,6 +24,16 @@ import torch
 from sglang.srt.environ import envs
 
 _aiter_mla_gate = envs.SGLANG_ROCM_K3_AITER_MLA_GATE.get()
+_a8w8_fused_q = envs.SGLANG_ROCM_K3_MLA_A8W8_FUSED_Q.get()
+
+
+def _backend_uses_a8w8_asm() -> bool:
+    """Whether the active AITER MLA backend runs the fp8-Q persistent asm decode."""
+    from sglang.srt.model_executor.forward_context import get_attn_backend
+
+    backend = get_attn_backend()
+    backend = getattr(backend, "full_attn_backend", backend)
+    return bool(getattr(backend, "use_mla_a8w8_asm", False))
 
 
 def try_fused_mla_q_cache(
@@ -66,11 +76,24 @@ def try_fused_mla_q_cache(
         prefer_mla_gluon_decode,
     )
 
-    gluon_decode = not triton_decode and prefer_mla_gluon_decode(
-        head_pad_mode="zero",
-        num_head=heads,
-        kv_cache_dtype=kv_cache.dtype,
-        q_dtype=torch.bfloat16,
+    # The backend's fp8-Q asm decode quantizes with the layer's k_descale, which
+    # is the unit scale this kernel uses only while the layer has no k_scale.
+    a8w8_fused_q = (
+        _a8w8_fused_q
+        and not triton_decode
+        and self.attn_mqa.k_scale is None
+        and kv_cache.dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz)
+        and _backend_uses_a8w8_asm()
+    )
+    gluon_decode = (
+        not triton_decode
+        and not a8w8_fused_q
+        and prefer_mla_gluon_decode(
+            head_pad_mode="zero",
+            num_head=heads,
+            kv_cache_dtype=kv_cache.dtype,
+            q_dtype=torch.bfloat16,
+        )
     )
     q_out_dtype = q_nope_out.dtype if triton_decode or gluon_decode else kv_cache.dtype
     if (
@@ -89,7 +112,9 @@ def try_fused_mla_q_cache(
     # Do not use uninitialized pad heads: that is the fill-elim that
     # already failed GSM8K.
     aiter_pad_heads = (
-        heads if gluon_decode else (16 if (heads < 16 and 16 % heads != 0) else heads)
+        heads
+        if gluon_decode
+        else (16 if (heads < 16 and (a8w8_fused_q or 16 % heads != 0)) else heads)
     )
     q_out = mla_q_out_buffer(
         self,
@@ -221,6 +246,9 @@ def init_mla_rocm_state(self) -> None:
             torch.ones((1,), dtype=torch.float32),
             persistent=False,
         )
+        # try_fused_mla_q_cache is the only producer of 16-head FP8 Q on this
+        # layer and zero-initializes its pad heads (mla_q_out_buffer).
+        self.attn_mqa.mla_q_pad_heads_zero = True
     else:
         self.register_buffer("_k3_identity_rope_cos", None, persistent=False)
         self.register_buffer("_k3_identity_rope_sin", None, persistent=False)
