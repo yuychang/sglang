@@ -1785,8 +1785,6 @@ class RowParallelLinear(LinearBase):
                 )
             else:
                 apply_into = getattr(self.quant_method, "apply_into", None)
-                if apply_into is None and self.scheme is not None:
-                    apply_into = getattr(self.scheme, "apply_into", None)
                 if apply_into is None:
                     raise RuntimeError(
                         f"{type(self.quant_method).__name__} cannot write into "

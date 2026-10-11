@@ -949,11 +949,6 @@ class Envs:
     # into all-gather. Set MAX_TOKENS=4 to keep it on 1-stage sizes only.
     SGLANG_ROCM_AR_RESIDUAL = EnvBool(True)
     SGLANG_ROCM_AR_RESIDUAL_MAX_TOKENS = EnvInt(8)
-    # Let Kimi-K3 GEMM/MoE producers write directly into AITER custom-AR's
-    # registered input pool. This removes custom-AR's D2D staging copy while
-    # retaining the unregistered-output path. Keep opt-in until the TP8
-    # bit-exact/graph validation script has passed on the deployment stack.
-    SGLANG_K3_AR_INPLACE_INPUT = EnvBool(False)
     # Fold the Kimi-K3 KDA [f_a|b] tail into the wide [q,k,v,g] projection.
     # The merged N=6288 shape is used only up to MAX_TOKENS below, where decode
     # is bandwidth bound; larger batches keep the tuned N=6144 split path.
@@ -1890,7 +1885,7 @@ class Envs:
     # FlyDSL FP8 MLA prefill: quantize Q/K/V per tensor in two batched Triton
     # launches instead of a reduce, divide, clamp and quant per tensor.
     # Bit-identical scales and FP8 values. Set 0 for the per-tensor sequence.
-    SGLANG_K3_MLA_PREFILL_FUSED_FP8_QUANT = EnvBool(True)
+    SGLANG_ROCM_K3_MLA_PREFILL_FUSED_FP8_QUANT = EnvBool(True)
     # Merge the router gate and routed_expert_down_proj weights so the K3 MoE
     # front reads hidden_states once, and run the top-k plus the bf16 cast in one
     # epilogue kernel. See kernels/ops/moe/moe_front.py. Default on.
@@ -1900,10 +1895,10 @@ class Envs:
     # Build per-forward K3 prefill metadata (FLA chunk indices, conv
     # has_initial_state) once from host lengths instead of per layer or via
     # device->host reads that block on the overlapped previous step.
-    SGLANG_K3_PREFILL_HOST_METADATA = EnvBool(True)
+    SGLANG_ROCM_K3_PREFILL_HOST_METADATA = EnvBool(True)
     # DCP prefix KV all-gather: plan the per-request padding with host ints
     # and drop the intermediate full-prefix copies. 0 restores the original.
-    SGLANG_DCP_FAST_KV_GATHER = EnvBool(True)
+    SGLANG_ROCM_K3_DCP_FAST_KV_GATHER = EnvBool(True)
     # Fold the BM=16 MoE sort into the radix-4 launch for decode-sized M.
     SGLANG_ROCM_K3_RADIX4_FUSE_SORT = EnvBool(True)
     # Route Kimi-K3's non-EP merged BF16 MoE front through AITER tuned_gemm.

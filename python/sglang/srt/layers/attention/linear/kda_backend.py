@@ -559,7 +559,7 @@ class KDAAttnBackend(MambaAttnBackendBase):
                     self.forward_metadata.mamba_track_mask_indices
                 ]
             )
-        if envs.SGLANG_K3_PREFILL_HOST_METADATA.get():
+        if envs.SGLANG_ROCM_K3_PREFILL_HOST_METADATA.get():
             self._init_prefill_host_metadata(forward_batch)
 
     def _init_prefill_host_metadata(self, forward_batch: ForwardBatch):
