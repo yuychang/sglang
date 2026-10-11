@@ -139,6 +139,24 @@ def tensor_cache(fn: Callable[..., torch.Tensor]) -> Callable[..., torch.Tensor]
         cache_entries.append((args, kwargs, result))
         return result
 
+    def seed(result: Any, *args: Any, **kwargs: Any) -> None:
+        """Store ``result`` as fn(*args, **kwargs) without calling fn."""
+        nonlocal cache_entries
+        cache_entries = [
+            entry
+            for entry in cache_entries
+            if not (
+                len(entry[0]) == len(args)
+                and len(entry[1]) == len(kwargs)
+                and all(a is b for a, b in zip(args, entry[0]))
+                and all(k in entry[1] and v is entry[1][k] for k, v in kwargs.items())
+            )
+        ]
+        if len(cache_entries) >= cache_size:
+            cache_entries = cache_entries[1:]
+        cache_entries.append((args, kwargs, result))
+
+    wrapper.seed = seed
     return wrapper
 
 
