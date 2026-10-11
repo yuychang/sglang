@@ -127,6 +127,13 @@ def test_large_finite_values():
     _assert_bit_equal(tensors)
 
 
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+def test_non_finite_values(value):
+    tensors = _qkv(64, 64, seed=12)
+    tensors[1][3, 4, 5] = value
+    _assert_bit_equal(tensors)
+
+
 def test_tiny_and_subnormal_values():
     tensors = _qkv(300, 300, seed=7)
     tensors[0].mul_(1e-38)
@@ -171,6 +178,16 @@ def test_strided_and_misaligned_views():
         _assert_bit_equal([q, aligned])
         _assert_bit_equal([q, misaligned])
         _assert_bit_equal([misaligned, q, aligned])
+
+
+def test_regular_triton_launch(monkeypatch):
+    from sglang.kernels.ops.quantization import mla_prefill_fp8_quant as module
+
+    monkeypatch.setattr(module, "_DIRECT_LAUNCH", False)
+    monkeypatch.setattr(module, "_compiled", {})
+    for _ in range(2):
+        _assert_bit_equal(_qkv(700, 1300, seed=11))
+    assert module._compiled == {}
 
 
 def test_unsupported_inputs_decline():
