@@ -485,6 +485,13 @@ class AiterAttnBackend(AttentionBackend):
         self.use_mla_flydsl_fused_kv_proj = (
             self.use_mla and envs.SGLANG_AITER_MLA_FLYDSL_FUSED_KV_PROJ.get()
         )
+        self._mla_prefill_fused_fp8_quant = None
+        if self.use_mla and envs.SGLANG_K3_MLA_PREFILL_FUSED_FP8_QUANT.get():
+            from sglang.kernels.ops.quantization.mla_prefill_fp8_quant import (
+                mla_prefill_fp8_quant,
+            )
+
+            self._mla_prefill_fused_fp8_quant = mla_prefill_fp8_quant
         self._mla_flydsl_unit_descale = None
         self._mla_flydsl_fused_kv_logged = False
         self._mla_flydsl_fp8_fallback_logged = False
@@ -1588,6 +1595,17 @@ class AiterAttnBackend(AttentionBackend):
         quantized, scale = scaled_fp8_quant(flat, scale.view(1))
         return quantized.view(packed.shape), scale
 
+    def _quantize_mla_prefill_fp8_operands(
+        self, *tensors: torch.Tensor
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        """_quantize_mla_prefill_fp8 per operand, batched into two launches
+        when SGLANG_K3_MLA_PREFILL_FUSED_FP8_QUANT allows it."""
+        if self._mla_prefill_fused_fp8_quant is not None:
+            quantized = self._mla_prefill_fused_fp8_quant(tensors)
+            if quantized is not None:
+                return quantized
+        return [self._quantize_mla_prefill_fp8(x) for x in tensors]
+
     def _mla_flydsl_fp8_prefill_applicable(
         self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
     ) -> bool:
@@ -1630,8 +1648,8 @@ class AiterAttnBackend(AttentionBackend):
                     flydsl_flash_attn_varlen_func,
                 )
 
-                q8, q_descale = self._quantize_mla_prefill_fp8(q)
                 if k.dtype == fp8_dtype:
+                    ((q8, q_descale),) = self._quantize_mla_prefill_fp8_operands(q)
                     k8, v8 = k, v
                     if (
                         self._mla_flydsl_unit_descale is None
@@ -1642,8 +1660,9 @@ class AiterAttnBackend(AttentionBackend):
                         )
                     k_descale = v_descale = self._mla_flydsl_unit_descale
                 else:
-                    k8, k_descale = self._quantize_mla_prefill_fp8(k)
-                    v8, v_descale = self._quantize_mla_prefill_fp8(v)
+                    (q8, q_descale), (k8, k_descale), (v8, v_descale) = (
+                        self._quantize_mla_prefill_fp8_operands(q, k, v)
+                    )
                 result = flydsl_flash_attn_varlen_func(
                     q8,
                     k8,
