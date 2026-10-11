@@ -1,7 +1,7 @@
 # Mixin class for metadata management of Deepseek MHA forward (chunked prefix cache)
 # More details can be found in python/sglang/srt/models/deepseek_common/attention_forward_methods/forward_mha.py
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import torch
 
@@ -65,9 +65,30 @@ class ForwardBatchDeepSeekMHAMixin:
     mha_one_shot: Optional[bool] = None
     # KV Indices for MHA_ONE_SHOT forward method
     mha_one_shot_kv_indices: Optional[torch.Tensor] = None
+    # (seq_lens_cpu, its _version, sum) behind get_seq_lens_cpu_sum.
+    _seq_lens_cpu_sum_memo: Optional[Tuple[torch.Tensor, int, int]] = None
 
     def get_max_chunk_capacity(self):
         return envs.SGLANG_MAX_KV_CHUNK_CAPACITY.get()
+
+    def get_seq_lens_cpu_sum(self) -> int:
+        """sum(seq_lens_cpu), memoised for the per-layer attention dispatch.
+
+        Keyed on the tensor object and its in-place version counter so a
+        buffer refilled in place is summed again.
+        """
+        seq_lens_cpu = self.seq_lens_cpu
+        if seq_lens_cpu is None:
+            return 0
+        if not isinstance(seq_lens_cpu, torch.Tensor):
+            return sum(seq_lens_cpu)
+        key = (seq_lens_cpu, seq_lens_cpu._version)
+        memo = self._seq_lens_cpu_sum_memo
+        if memo is not None and memo[0] is key[0] and memo[1] == key[1]:
+            return memo[2]
+        total = int(seq_lens_cpu.sum())
+        self._seq_lens_cpu_sum_memo = (*key, total)
+        return total
 
     def set_prefix_chunk_idx(self, idx: int):
         self.prefix_chunk_idx = idx

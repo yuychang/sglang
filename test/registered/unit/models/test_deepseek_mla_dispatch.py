@@ -125,6 +125,7 @@ class TestCPMLADispatch(CustomTestCase):
                                 extend_prefix_lens_cpu=[prefix],
                                 extend_seq_lens_cpu=[num_tokens],
                                 seq_lens_cpu=[prefix + num_tokens],
+                                get_seq_lens_cpu_sum=lambda: prefix + num_tokens,
                                 get_max_chunk_capacity=lambda: capacity,
                             )
                             expected = (
