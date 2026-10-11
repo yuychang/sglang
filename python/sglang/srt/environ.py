@@ -1893,6 +1893,10 @@ class Envs:
     SGLANG_K3_FUSED_FRONT = EnvBool(True)
     # Use the ROCm radix-4 router for covered K3 top-k workloads.
     SGLANG_K3_RADIX4_TOPK = EnvBool(False)
+    # Build per-forward K3 prefill metadata (FLA chunk indices, conv
+    # has_initial_state) once from host lengths instead of per layer or via
+    # device->host reads that block on the overlapped previous step.
+    SGLANG_K3_PREFILL_HOST_METADATA = EnvBool(True)
     # Fold the BM=16 MoE sort into the radix-4 launch for decode-sized M.
     SGLANG_ROCM_K3_RADIX4_FUSE_SORT = EnvBool(True)
     # Route Kimi-K3's non-EP merged BF16 MoE front through AITER tuned_gemm.
