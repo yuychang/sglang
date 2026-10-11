@@ -205,6 +205,7 @@ def test_import_stays_metadata_only():
         ("gemm.latent_mxfp4", KernelBackend.AITER, "hip"),
         ("moe.kimi_k3_moe_tri_projection_fp8", KernelBackend.FLYDSL, "hip"),
         ("moe.latent_moe_tail_fp8", KernelBackend.FLYDSL, "hip"),
+        ("quantization.mla_prefill_fp8_quant", KernelBackend.TRITON, "hip"),
         ("communication.all_reduce_push_res", KernelBackend.JIT, "cuda"),
         ("communication.gemm_ag_up_proj", KernelBackend.JIT, "cuda"),
         ("communication.reduce_scatter_res", KernelBackend.JIT, "cuda"),

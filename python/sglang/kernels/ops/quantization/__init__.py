@@ -218,3 +218,13 @@ register_kernel(
         capabilities=frozenset({CapabilityRequirement.CUDA}),
     )
 )
+
+register_kernel(
+    KernelSpec(
+        op="quantization.mla_prefill_fp8_quant",
+        backend=KernelBackend.TRITON,
+        target="sglang.kernels.ops.quantization.mla_prefill_fp8_quant:mla_prefill_fp8_quant",
+        # Inline gfx9 v_rcp_f32 asm.
+        capabilities=frozenset({CapabilityRequirement.HIP}),
+    )
+)
