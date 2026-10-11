@@ -52,22 +52,10 @@ _use_aiter = envs.SGLANG_USE_AITER.get() and _is_hip
 _k3_ptpc_fp8 = _is_hip and envs.SGLANG_ROCM_K3_PTPC_FP8.get()
 _k3_ptpc_fp8_max_tokens = envs.SGLANG_ROCM_K3_PTPC_FP8_MAX_TOKENS.get()
 _k3_ptpc_fp8_min_tokens = envs.SGLANG_ROCM_K3_PTPC_FP8_MIN_TOKENS.get()
-_k3_ptpc_fp8_shared_down = _is_hip and envs.SGLANG_ROCM_K3_PTPC_FP8_SHARED_DOWN.get()
-
-
-_k3_ptpc_fp8_prefill_min_tokens = envs.SGLANG_ROCM_K3_PTPC_FP8_PREFILL_MIN_TOKENS.get()
 
 
 def _k3_ptpc_fp8_batch_ok(num_tokens: int) -> bool:
     return _k3_ptpc_fp8_min_tokens <= num_tokens <= _k3_ptpc_fp8_max_tokens
-
-
-def _k3_ptpc_fp8_moe_gemm_ok(num_tokens: int) -> bool:
-    """Batch gate for the latent-up and shared-down PTPC GEMMs, which also win
-    again at prefill-chunk sizes."""
-    return _k3_ptpc_fp8_batch_ok(num_tokens) or (
-        0 < _k3_ptpc_fp8_prefill_min_tokens <= num_tokens
-    )
 
 
 def _k3_linear_accepts_ptpc_tuple(module: nn.Module) -> bool:

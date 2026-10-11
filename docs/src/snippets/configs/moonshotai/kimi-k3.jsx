@@ -978,19 +978,6 @@ export const config = {
         ],
       },
       {
-        // Opt-in fused gfx950 KDA decode boundary (f_b + conv + recurrence +
-        // gated RMSNorm). Fail-closed: init arms it only on gfx950 with the
-        // FlyDSL kernels importable, and every decode step re-validates before
-        // dispatch. Env var, not a flag, so it emits via env/stripEnv.
-        id: "kdaFusedDecode", title: "Fused KDA Decode (AMD gfx950)",
-        showWhen: (b) => ["mi350x", "mi355x"].includes(b.hw),
-        stripEnv: ["SGLANG_ROCM_K3_KDA_FUSED_BACKEND"],
-        options: [
-          { id: "off",   label: "Off" },
-          { id: "aiter", label: "On (AITER fused boundary)", env: ["SGLANG_ROCM_K3_KDA_FUSED_BACKEND=aiter"] },
-        ],
-      },
-      {
         // Only meaningful with EP a2a on (MoE card or a large-scale preset).
         id: "eplb", title: "Expert Rebalancing (EPLB)",
         showWhen: (b) => !config.isNpuHw(b),

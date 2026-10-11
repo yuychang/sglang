@@ -149,6 +149,12 @@ _flashinfer_mxfp4_permute_indices_device_cache: dict[
 
 def _aiter_situ_uses_gu_interleaved_weights() -> bool:
     """Match AITER's SiTU activation-mode precedence when choosing weight layout."""
+    if _is_hip:
+        from sglang.srt.layers.moe.moe_runner.aiter_situv2_rocm import (
+            sync_aiter_situv2_moe_env,
+        )
+
+        sync_aiter_situv2_moe_env()
     a8w4 = get_bool_env_var("AITER_SITUV2_A8W4", "false")
     a4w4 = get_bool_env_var("AITER_SITUV2_A4W4", "false")
     return a8w4 or not a4w4

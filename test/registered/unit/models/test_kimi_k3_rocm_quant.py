@@ -12,15 +12,12 @@ import torch
 
 from sglang.srt.environ import envs
 from sglang.srt.layers.quantization.quark.schemes import QuarkW8A8Fp8
-from sglang.srt.layers.quantization.quark.schemes.quark_w4a4_mxfp4 import (
-    QuarkW4A4MXFP4,
-)
 from sglang.srt.models.kimi_k3 import _is_unquantized_mergeable
 from sglang.srt.models.kimi_k3_rocm_quant import (
     _k3_channel_fp8_to_bf16,
-    _k3_channel_fp8_to_tensor_fp8,
-    _k3_densify_quark_shared_experts,
     _k3_merge_kda_inproj_fp8,
+    k3_absorb_kv_b_rocm,
+    k3_per_batched_tensor_fp8,
 )
 from sglang.test.test_utils import CustomTestCase
 
@@ -73,40 +70,75 @@ class TestChannelFp8ToBf16(CustomTestCase):
         torch.testing.assert_close(flat, column)
 
 
-class TestChannelFp8ToTensorFp8(CustomTestCase):
-    """SGLANG_ROCM_K3_MLA_ABSORB_FP8 requantizes kv_b to one per-tensor scale
-    so the absorb BMMs can run aiter's a8w8 kernel."""
+def _vllm_per_batched_tensor_quant(x: torch.Tensor, dtype: torch.dtype):
+    # vllm/model_executor/layers/attention/mla_attention.py
+    dtype_max = torch.finfo(dtype).max
+    min_val, max_val = x.aminmax()
+    amax = torch.maximum(min_val.abs(), max_val.abs()).clamp(min=1e-10)
+    scale = dtype_max / amax
+    x_scl_sat = (x * scale).clamp(min=-dtype_max, max=dtype_max)
+    return x_scl_sat.to(dtype).contiguous(), scale.float().reciprocal()
 
-    def test_folds_channel_scales_into_one_tensor_scale(self):
-        weight, scale, _ = _per_channel_fp8(out_features=8, in_features=16)
-        module = SimpleNamespace(weight_scale=scale.squeeze(1))
 
-        q, tensor_scale = _k3_channel_fp8_to_tensor_fp8(module, weight)
+def _fp8_equal(a: torch.Tensor, b: torch.Tensor) -> bool:
+    return torch.equal(a.contiguous().view(torch.uint8), b.contiguous().view(torch.uint8))
 
-        self.assertEqual(q.dtype, weight.dtype)
-        self.assertEqual(q.shape, weight.shape)
-        self.assertEqual(tensor_scale.numel(), 1)
-        # The largest channel saturates the FP8 range, so it is not clipped.
-        exact = weight.to(torch.float32) * scale
-        self.assertAlmostEqual(
-            q.float().abs().max().item(), torch.finfo(weight.dtype).max
+
+class TestPerBatchedTensorFp8(CustomTestCase):
+    """The FP8BMM absorb quantizes W_K and W_V like vLLM ROCm."""
+
+    def test_matches_vllm_formula_bitwise(self):
+        from sglang.kernels.ops.quantization.fp8_kernel import fp8_dtype
+
+        torch.manual_seed(0)
+        x = (torch.randn(4, 32, 16) * 0.03).to(torch.bfloat16)
+        q, s = k3_per_batched_tensor_fp8(x)
+        q_ref, s_ref = _vllm_per_batched_tensor_quant(x, fp8_dtype)
+        self.assertEqual(q.dtype, fp8_dtype)
+        self.assertTrue(_fp8_equal(q, q_ref))
+        self.assertTrue(torch.equal(s, s_ref))
+        self.assertEqual(s.dtype, torch.float32)
+        self.assertEqual(s.numel(), 1)
+
+
+    @staticmethod
+    def _mla(heads=2, nope=4, v=3, lora=8):
+        weight, scale, _ = _per_channel_fp8(
+            out_features=heads * (nope + v), in_features=lora
         )
-        # Error is bounded by one FP8 step at the tensor-wide scale.
-        err = (q.float() * tensor_scale - exact).abs().max()
-        self.assertLess(err.item(), 0.07 * exact.abs().max().item())
-
-    def test_accepts_a_column_vector_scale(self):
-        weight, scale, _ = _per_channel_fp8(out_features=8, in_features=16)
-
-        flat = _k3_channel_fp8_to_tensor_fp8(
-            SimpleNamespace(weight_scale=scale.squeeze(1)), weight
+        attn = SimpleNamespace(
+            kv_b_proj=SimpleNamespace(weight_scale=scale.squeeze(1)),
+            qk_nope_head_dim=nope,
+            v_head_dim=v,
         )
-        column = _k3_channel_fp8_to_tensor_fp8(
-            SimpleNamespace(weight_scale=scale.clone()), weight
-        )
+        return attn, weight
 
-        torch.testing.assert_close(flat[0].float(), column[0].float())
-        torch.testing.assert_close(flat[1], column[1])
+    def test_absorb_splits_with_separate_tensor_scales(self):
+        attn, weight = self._mla()
+        with envs.SGLANG_USE_AITER.override(True):
+            with envs.SGLANG_ROCM_USE_AITER_FP8BMM.override(True):
+                self.assertTrue(k3_absorb_kv_b_rocm(attn, weight))
+
+        dense = _k3_channel_fp8_to_bf16(attn.kv_b_proj, weight).unflatten(0, (2, 7))
+        k_ref, ks_ref = k3_per_batched_tensor_fp8(dense[:, :4].transpose(1, 2))
+        v_ref, vs_ref = k3_per_batched_tensor_fp8(dense[:, 4:])
+        # w_kc is an [N, P, L] view of W_K [N, L, P]; w_vc an [N, L, V] view of
+        # W_V [N, V, L], the layouts AITER's batched GEMM reads.
+        self.assertEqual(tuple(attn.w_kc.shape), (2, 4, 8))
+        self.assertEqual(tuple(attn.w_vc.shape), (2, 8, 3))
+        self.assertTrue(attn.w_kc.transpose(1, 2).is_contiguous())
+        self.assertTrue(attn.w_vc.transpose(1, 2).is_contiguous())
+        self.assertTrue(_fp8_equal(attn.w_kc.transpose(1, 2), k_ref))
+        self.assertTrue(_fp8_equal(attn.w_vc.transpose(1, 2), v_ref))
+        self.assertTrue(torch.equal(attn.w_kc_tensor_scale, ks_ref))
+        self.assertTrue(torch.equal(attn.w_vc_tensor_scale, vs_ref))
+
+    def test_fp8bmm_off_keeps_bf16_absorb(self):
+        attn, weight = self._mla()
+        with envs.SGLANG_ROCM_USE_AITER_FP8BMM.override(False):
+            self.assertTrue(k3_absorb_kv_b_rocm(attn, weight))
+        self.assertEqual(attn.w_kc.dtype, torch.bfloat16)
+        self.assertFalse(hasattr(attn, "w_kc_tensor_scale"))
 
 
 class TestMergeDtypeGuard(CustomTestCase):
@@ -194,13 +226,13 @@ class TestMergeKdaInprojFp8(CustomTestCase):
         self.assertEqual(merged[expected.shape[0] :].abs().max().item(), 0.0)
         self.assertEqual(attn._qkvgbfa_sizes, [24, 8, 8, 3, merged.shape[0] - 43])
 
-    def test_f_b_is_served_in_bf16(self, _):
+    def test_f_b_stays_on_its_fp8_linear(self, _):
+        # As in vLLM, f_b keeps its own FP8 linear rather than a BF16 copy.
         attn = _kda_attn()
-        expected = _dequant(attn.f_b_proj).to(torch.bfloat16)
 
         self.assertTrue(_k3_merge_kda_inproj_fp8(attn))
 
-        torch.testing.assert_close(attn._bfa_f_b_w, expected)
+        self.assertIsNone(getattr(attn, "_bfa_f_b_w", None))
 
     def test_skips_non_fp8_projection(self, _):
         self.assertFalse(_k3_merge_kda_inproj_fp8(_kda_attn(bf16_b_proj=True)))
@@ -208,58 +240,6 @@ class TestMergeKdaInprojFp8(CustomTestCase):
     def test_env_disables_merge(self, _):
         with envs.SGLANG_ROCM_K3_FUSE_KDA_INPROJ.override(False):
             self.assertFalse(_k3_merge_kda_inproj_fp8(_kda_attn()))
-
-
-class TestDensifyQuarkSharedExperts(CustomTestCase):
-    """Quark MXFP4 shared experts become BF16 before the MoE front merge."""
-
-    @staticmethod
-    def _mlp():
-        scheme = object.__new__(QuarkW4A4MXFP4)
-        scheme.is_checkpoint_mxfp4_serialized = True
-
-        def linear():
-            # Packed nibbles 1/2 decode to 0.5/1.0 with a unit e8m0 scale.
-            return SimpleNamespace(
-                weight=torch.full((2, 16), 0x21, dtype=torch.uint8),
-                weight_scale=torch.full((2, 1), 127, dtype=torch.uint8),
-                scheme=scheme,
-            )
-
-        return SimpleNamespace(
-            shared_experts=SimpleNamespace(gate_up_proj=linear(), down_proj=linear())
-        )
-
-    def test_dequantizes_shared_experts_once(self):
-        mlp = self._mlp()
-        path = (
-            "sglang.srt.layers.quantization.quark.schemes."
-            "quark_w4a4_mxfp4._dequant_linear_to_bf16"
-        )
-        with mock.patch(path, True):
-            _k3_densify_quark_shared_experts(mlp)
-            weight = mlp.shared_experts.gate_up_proj.weight
-            # The loader's own pass must reuse the BF16 weight.
-            _k3_densify_quark_shared_experts(mlp)
-
-        expected = torch.tensor([0.5, 1.0], dtype=torch.bfloat16).repeat(2, 16)
-        for linear in (mlp.shared_experts.gate_up_proj, mlp.shared_experts.down_proj):
-            torch.testing.assert_close(linear.weight.data, expected)
-            self.assertIsNone(linear.weight_scale)
-        self.assertEqual(
-            mlp.shared_experts.gate_up_proj.weight.data_ptr(), weight.data_ptr()
-        )
-
-    def test_fp4_activation_keeps_packed_weights(self):
-        mlp = self._mlp()
-        path = (
-            "sglang.srt.layers.quantization.quark.schemes."
-            "quark_w4a4_mxfp4._dequant_linear_to_bf16"
-        )
-        with mock.patch(path, False):
-            _k3_densify_quark_shared_experts(mlp)
-
-        self.assertEqual(mlp.shared_experts.down_proj.weight.dtype, torch.uint8)
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""ROCm KDA input-projection and fused-decode paths for Kimi-K3.
+"""ROCm KDA input-projection and fused-decode setup for Kimi-K3.
 
 Shared ``kimi_k3.py`` keeps an ``_is_hip`` call. These functions still
 take the attention module as ``self``.
@@ -126,108 +126,12 @@ def may_fuse_kda_inproj(self) -> bool:
     return len({(weight.dtype, weight.shape[1]) for weight in weights}) == 1
 
 
-def prepare_group64_projection(self) -> None:
-    from sglang.srt.models.kimi_k3 import _is_unquantized_mergeable
-
-    if (
-        not envs.SGLANG_ROCM_K3_AITER_KDA_GROUP64.get()
-        or not self._attn_tp_is_full_tp
-        or not self.use_full_rank_gate
-    ):
-        return
-    srcs = [self.fused_qkvg_proj.weight, self.b_proj.weight, self.f_a_proj.weight]
-    # The shape check below passes for FP8 too, so pack() would reinterpret
-    # quantized bytes as bf16 and drop the per-channel scales.
-    if not _is_unquantized_mergeable(srcs):
-        return
-    from sglang.kernels.ops.gemm import kda_group64_aiter_hip
-
-    merged = torch.cat(
-        [*srcs, self.f_a_proj.weight.new_zeros((4, self.hidden_size))],
-        dim=0,
-    ).contiguous()
-    if tuple(merged.shape) != (6288, 7168):
-        return
-    weight, scale = kda_group64_aiter_hip.pack(merged)
-    self._kda_group64_weight = weight
-    self._kda_group64_scale = scale
-    kda_group64_aiter_hip.warmup(weight, scale)
-
-
 def prepare_fused_decode_hip(self) -> None:
-    from sglang.kernels.ops.attention import kda_fused_decode_aiter_hip
+    """Stage the fused HIP decode (conv + recurrence + gated norm) inputs."""
+    from sglang.srt.layers.attention.linear.kda_rocm import stage_fused_decode
 
-    layer = self.attn
-    w = layer.conv_weights
-    f_b_weight = self.f_b_proj.weight
-    # Quark ships f_b as PTPC FP8; _merge_bfa_weights already
-    # dequantized it into the BF16 tiny-GEMM buffer.
-    f_b_dense = getattr(self, "_bfa_f_b_w", None)
-    if f_b_weight.dtype != torch.bfloat16 and f_b_dense is not None:
-        f_b_weight = f_b_dense
-    backend = envs.SGLANG_ROCM_K3_KDA_FUSED_BACKEND.get().lower()
-    backend_available = backend == "aiter" and kda_fused_decode_aiter_hip.available(
-        f_b_weight.device
-    )
-    if (
-        backend_available
-        and w is not None
-        and tuple(w.shape) == (3 * 12 * 128, 4)
-        and w.dtype == torch.float32
-        and f_b_weight.shape == (12 * 128, 128)
-        and f_b_weight.dtype == torch.bfloat16
-        and layer.A_log is not None
-        and layer.A_log.numel() == 12
-        and layer.A_log.dtype == torch.float32
-        and layer.dt_bias is not None
-        and tuple(layer.dt_bias.shape) == (12 * 128,)
-        and layer.dt_bias.dtype == torch.float32
-        and layer.lower_bound is not None
-    ):
-        norm_weight = self.o_norm.weight.data.to(torch.bfloat16).contiguous()
-        f_b_weight = f_b_weight.view(12, 128, 128).contiguous()
-        a_log = layer.A_log.detach().reshape(-1).contiguous()
-        layer._k3_hip_fused_decode_args = (
-            f_b_weight,
-            norm_weight,
-            float(self.o_norm.eps),
-            a_log,
-        )
-        kda_fused_decode_aiter_hip.warmup(
-            f_b_weight=f_b_weight,
-            conv_weight=w,
-            A_log=a_log,
-            dt_bias=layer.dt_bias,
-            lower_bound=float(layer.lower_bound),
-            norm_weight=norm_weight,
-            norm_eps=float(self.o_norm.eps),
-        )
-        layer._k3_hip_fused_decode_backend = backend
-        self._kda_hip_fused_decode_ready = True
-
-
-def try_group64_qkv(self, hidden_states: torch.Tensor):
-    if self._kda_group64_weight is None or self._kda_group64_scale is None:
-        return None
-    from sglang.kernels.ops.gemm import kda_group64_aiter_hip
-
-    if not kda_group64_aiter_hip.covered(
-        hidden_states,
-        self._kda_group64_weight,
-        self._kda_group64_scale,
-    ):
-        return None
-    packed = kda_group64_aiter_hip.run(
-        hidden_states,
-        self._kda_group64_weight,
-        self._kda_group64_scale,
-    )
-    mixed_qkv, g_proj_states, beta, f_a, _padding = torch.split(
-        packed,
-        [self.split_sizes[0], self.split_sizes[1], 12, 128, 4],
-        dim=-1,
-    )
-    return mixed_qkv, beta, f_a, g_proj_states
+    if stage_fused_decode(self.attn, self.o_norm.weight.data, self.o_norm.eps):
+        self._kda_fused_decode_ready = True
 
 
 def init_kda_rocm_state(self) -> None:
@@ -238,8 +142,6 @@ def init_kda_rocm_state(self) -> None:
     self._qkvgbfa_fp8_w = None
     self._qkvgbfa_fp8_s = None
     self._qkvgbfa_fp8_n = 0
-    self._kda_group64_weight = None
-    self._kda_group64_scale = None
 
 
 def merge_bfa_weights_hip(self) -> bool:
@@ -256,11 +158,10 @@ def merge_bfa_weights_hip(self) -> bool:
 
 
 def prepare_kda_rocm(self) -> None:
-    prepare_group64_projection(self)
     prepare_qkvgbfa_ptpc_fp8(self)
 
 
-def try_inproj_hip(self, hidden_states, *, defer_f_b: bool):
+def try_inproj_hip(self, hidden_states):
     """(qkv, beta, forget_gate, g) from a fused ROCm in-proj, or None."""
     from sglang.srt.models.kimi_k3_rocm_fusion import _k3_hidden_num_tokens
     from sglang.srt.models.kimi_k3_rocm_quant import (
@@ -268,10 +169,6 @@ def try_inproj_hip(self, hidden_states, *, defer_f_b: bool):
         _k3_qkvgbfa_inproj,
     )
 
-    if not isinstance(hidden_states, tuple) and defer_f_b:
-        grouped = try_group64_qkv(self, hidden_states)
-        if grouped is not None:
-            return grouped
     token_count = _k3_hidden_num_tokens(hidden_states)
     if self._qkvgbfa_sizes is None or not (0 < token_count <= self._qkvgbfa_bs_limit):
         return None
@@ -283,9 +180,7 @@ def try_inproj_hip(self, hidden_states, *, defer_f_b: bool):
     qkv, g_proj_states, f_a, beta, _padding = torch.split(
         fused_states, self._qkvgbfa_sizes, dim=-1
     )
-    # Fused KDA decode consumes f_a and applies f_b itself.
-    forget_gate = f_a if defer_f_b else _k3_apply_f_b(self, f_a)
-    return qkv, beta, forget_gate, g_proj_states
+    return qkv, beta, _k3_apply_f_b(self, f_a), g_proj_states
 
 
 def try_o_norm_quant(self, core_attn_out, g_proj_states):

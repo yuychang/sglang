@@ -122,7 +122,7 @@ class TestKimiK3KDAInProjFusion(CustomTestCase):
                     self.assertLess(rel, TOL, f"{name} rel err {rel:.2e}")
 
     @unittest.skipUnless(torch.version.hip is not None, "ROCm-only fused path")
-    def test_deferred_f_b_returns_raw_f_a(self):
+    def test_merged_inproj_applies_f_b(self):
         x = torch.randn(1, HIDDEN, dtype=torch.bfloat16, device=self.merged.device)
         fused_states = torch.nn.functional.linear(x, self.merged)
         expected_f_a = torch.split(fused_states, self.all_sizes, dim=-1)[2]
@@ -137,8 +137,6 @@ class TestKimiK3KDAInProjFusion(CustomTestCase):
             _qkvgbfa_layer=object(),
             _bfa_f_b_w=self.f_b_w,
             _bfa_alt_stream=None,
-            _kda_group64_weight=None,
-            _kda_group64_scale=None,
             _use_qkvgbfa_ptpc_fp8=lambda _hidden_states: False,
             fused_qkvg_proj=SimpleNamespace(
                 quant_method=SimpleNamespace(
@@ -147,17 +145,11 @@ class TestKimiK3KDAInProjFusion(CustomTestCase):
             ),
         )
 
-        _, _, deferred_f_a, _ = KimiK3DeltaAttention.forward_qkvbfg_fused(
-            fake_attention, x, defer_f_b=True
-        )
-        self.assertEqual(deferred_f_a.shape[-1], HEAD_DIM)
-        self.assertTrue(torch.equal(deferred_f_a, expected_f_a))
-
         expected_gate = kimi_k3_tiny_gemm(expected_f_a, self.f_b_w)
-        _, _, eager_gate, _ = KimiK3DeltaAttention.forward_qkvbfg_fused(
-            fake_attention, x, defer_f_b=False
+        _, _, gate, _ = KimiK3DeltaAttention.forward_qkvbfg_fused(
+            fake_attention, x
         )
-        torch.testing.assert_close(eager_gate, expected_gate)
+        torch.testing.assert_close(gate, expected_gate)
 
 
 if __name__ == "__main__":

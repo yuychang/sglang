@@ -221,12 +221,6 @@ def _k3_bf16_gemm(
                 if out is None:
                     return cutedsl_bf16_gemm(x, weight)
                 return cutedsl_bf16_gemm_out(x, weight, out)
-        if _is_hip and out is None:
-            from sglang.srt.models.kimi_k3_rocm_moe import try_aiter_tuned_front_gemm
-
-            tuned = try_aiter_tuned_front_gemm(x, weight)
-            if tuned is not None:
-                return tuned
     if out is None:
         return torch.nn.functional.linear(x, weight)
     if out.dtype != x.dtype:
@@ -1850,13 +1844,10 @@ class KimiK3DeltaAttention(nn.Module):
         )
         # KDA safe gate: checkpoint trained with gate_lower_bound=-5.0
         self.attn.lower_bound = config.linear_attn_config.get("gate_lower_bound", None)
-        # AITER FlashKDA prefill only accepts beta logits.
-        self.attn.extend_beta_is_raw = (
-            _is_hip and envs.SGLANG_AITER_KDA_FLASH_PREFILL.get()
-        )
+        # The ROCm KDA prefill (vLLM's chunk_kda_prefill) takes beta logits.
+        self.attn.extend_beta_is_raw = _is_hip
         # Set by _prepare_fused_decode() once weights are loaded.
         self._kda_fused_decode_ready = False
-        self._kda_hip_fused_decode_ready = False
         if _is_hip:
             from sglang.srt.models.kimi_k3_rocm_kda import init_kda_rocm_state
 
@@ -1970,14 +1961,12 @@ class KimiK3DeltaAttention(nn.Module):
         )
         self._kda_fused_decode_ready = True
 
-    def forward_qkvbfg_fused(
-        self, hidden_states: torch.Tensor, defer_f_b: bool = False
-    ):
+    def forward_qkvbfg_fused(self, hidden_states: torch.Tensor):
         if self.use_full_rank_gate:
             if _is_hip:
                 from sglang.srt.models.kimi_k3_rocm_kda import try_inproj_hip
 
-                fused = try_inproj_hip(self, hidden_states, defer_f_b=defer_f_b)
+                fused = try_inproj_hip(self, hidden_states)
                 if fused is not None:
                     return fused
             if self._bfa_w is not None:
@@ -1998,11 +1987,7 @@ class KimiK3DeltaAttention(nn.Module):
                     fused_states, _ = self.fused_qkvg_proj(hidden_states)
                     with torch.cuda.stream(alt):
                         bfa = gemm(hidden_states, w)
-                        forget_gate = (
-                            bfa[..., :n_fa]
-                            if defer_f_b
-                            else gemm(bfa[..., :n_fa], self._bfa_f_b_w)
-                        )
+                        forget_gate = gemm(bfa[..., :n_fa], self._bfa_f_b_w)
                         beta = bfa[..., n_fa : n_fa + n_b]
                     qkv, g_proj_states = torch.split(
                         fused_states, self.split_sizes, dim=-1
@@ -2013,18 +1998,14 @@ class KimiK3DeltaAttention(nn.Module):
                 fused_states, _ = self.fused_qkvg_proj(hidden_states)
                 qkv, g_proj_states = torch.split(fused_states, self.split_sizes, dim=-1)
                 bfa = gemm(hidden_states, w)
-                forget_gate = (
-                    bfa[..., :n_fa]
-                    if defer_f_b
-                    else gemm(bfa[..., :n_fa], self._bfa_f_b_w)
-                )
+                forget_gate = gemm(bfa[..., :n_fa], self._bfa_f_b_w)
                 beta = bfa[..., n_fa : n_fa + n_b]
             else:
                 fused_states, _ = self.fused_qkvg_proj(hidden_states)
                 qkv, g_proj_states = torch.split(fused_states, self.split_sizes, dim=-1)
                 beta = self.b_proj(hidden_states)[0]
                 f_a = self.f_a_proj(hidden_states)[0]
-                forget_gate = f_a if defer_f_b else self.f_b_proj(f_a)[0]
+                forget_gate = self.f_b_proj(f_a)[0]
         else:
             fused_states = self.fused_qkvbfg_a_proj(hidden_states)
             qkv, beta, fg_a_states = torch.split(fused_states, self.split_sizes, dim=-1)
@@ -2040,12 +2021,9 @@ class KimiK3DeltaAttention(nn.Module):
         forward_batch: ForwardBatch,
         zero_allocator: BumpAllocator,
     ) -> torch.Tensor:
-        defer_f_b = (
-            self._kda_hip_fused_decode_ready and forward_batch.forward_mode.is_decode()
-        )
         if self.do_fuse_qkvbfg or self.use_full_rank_gate:
             mixed_qkv, beta, forget_gate, g_proj_states = self.forward_qkvbfg_fused(
-                hidden_states, defer_f_b=defer_f_b
+                hidden_states
             )
         else:
             mixed_qkv, beta, forget_gate, g_proj_states = self.forward_qkvbfg(
@@ -2057,9 +2035,8 @@ class KimiK3DeltaAttention(nn.Module):
             if not forward_batch.forward_mode.is_target_verify():
                 # Only chunk_kda (extend) wants pre-activated beta; the verify
                 # kernel sigmoids it in-kernel like decode.
-                beta = beta.float()
                 if not self.attn.extend_beta_is_raw:
-                    beta = beta.sigmoid()
+                    beta = beta.float().sigmoid()
             forget_gate = forget_gate.unsqueeze(0)
         beta = beta.unsqueeze(0)
 
@@ -2068,15 +2045,13 @@ class KimiK3DeltaAttention(nn.Module):
         # into the recurrence kernel. If the backend leaves the stash
         # unconsumed (env off or shape not covered), apply o_norm here as
         # before.
-        fused_onorm = (self._kda_fused_decode_ready or defer_f_b) and (
+        fused_onorm = self._kda_fused_decode_ready and (
             forward_batch.forward_mode.is_decode()
             or forward_batch.forward_mode.is_target_verify()
         )
         if fused_onorm:
             self.attn._k3_onorm_gate = g_proj_states
             self.attn._k3_onorm_consumed = False
-        if defer_f_b:
-            self.attn._k3_deferred_f_b = True
 
         core_attn_out = self.attn(
             forward_batch,
@@ -2088,8 +2063,6 @@ class KimiK3DeltaAttention(nn.Module):
         if fused_onorm:
             self.attn._k3_onorm_gate = None
             fused_onorm = self.attn._k3_onorm_consumed
-        if defer_f_b:
-            self.attn._k3_deferred_f_b = False
         quantized = None
         if _is_hip and not fused_onorm:
             from sglang.srt.models.kimi_k3_rocm_kda import try_o_norm_quant
@@ -3460,14 +3433,6 @@ class KimiK3LinearForCausalLM(nn.Module):
         # Also invoked by loader post-load hooks (DummyModelLoader,
         # ShardedStateLoader, remote-instance flows -- none of which call
         # load_weights), so e.g. dummy-weight benchmarks get the fused buffers.
-        if _is_hip:
-            # Quantize what the checkpoint left dense first, so the kv_b absorb
-            # and the KDA merges below see the per-channel FP8 Quark layout.
-            from sglang.srt.models.kimi_k3_rocm_online_fp8 import (
-                maybe_quantize_bf16_linears_fp8,
-            )
-
-            maybe_quantize_bf16_linears_fp8(self)
         # Post-load: absorb kv_b_proj into w_kc and w_vc for MLA layers
         for layer_id in self.config.full_attention_layer_ids:
             if layer_id >= len(self.model.layers):
@@ -3484,54 +3449,19 @@ class KimiK3LinearForCausalLM(nn.Module):
                 self_attn.use_deep_gemm_bmm = False
                 continue
             kv_b_weight = _get_k3_dense_weight(self_attn.kv_b_proj)
-            scale_folded_into_weight = False
-            kv_b_tensor_scale = None
-            if _is_hip and kv_b_weight.dtype in (
-                torch.float8_e4m3fn,
-                torch.float8_e4m3fnuz,
-            ):
-                scale = getattr(self_attn.kv_b_proj, "weight_scale", None)
-                if isinstance(scale, torch.Tensor) and scale.numel() > 1:
-                    from sglang.srt.models.kimi_k3_rocm_quant import (
-                        _k3_channel_fp8_to_bf16,
-                        _k3_channel_fp8_to_tensor_fp8,
-                    )
+            absorbed = False
+            if _is_hip:
+                from sglang.srt.models.kimi_k3_rocm_quant import k3_absorb_kv_b_rocm
 
-                    # Fold the per-channel scale while dim 0 is still the
-                    # channel axis it indexes, i.e. before the head split.
-                    if envs.SGLANG_ROCM_K3_MLA_ABSORB_FP8.get():
-                        kv_b_weight, kv_b_tensor_scale = _k3_channel_fp8_to_tensor_fp8(
-                            self_attn.kv_b_proj, kv_b_weight
-                        )
-                    else:
-                        kv_b_weight = _k3_channel_fp8_to_bf16(
-                            self_attn.kv_b_proj, kv_b_weight
-                        )
-                        scale_folded_into_weight = True
-            w_kc, w_vc = kv_b_weight.unflatten(
-                0, (-1, self_attn.qk_nope_head_dim + self_attn.v_head_dim)
-            ).split([self_attn.qk_nope_head_dim, self_attn.v_head_dim], dim=1)
-            self_attn.w_kc = w_kc.transpose(1, 2).contiguous().transpose(1, 2)
-            self_attn.w_vc = w_vc.contiguous().transpose(1, 2)
-            kv_b_scale = getattr(self_attn.kv_b_proj, "weight_scale", None)
-            if kv_b_tensor_scale is not None:
-                self_attn.w_scale = kv_b_tensor_scale
-            elif _is_hip and (
-                scale_folded_into_weight
-                or not (
-                    isinstance(kv_b_scale, torch.Tensor) and kv_b_scale.numel() == 1
-                )
-            ):
-                # aiter's absorb GEMM dereferences w_scale as one scalar. A scale
-                # folded into the now-bf16 w_kc/w_vc, a vector the branch above
-                # could not fold, or the None quark leaves on a dequantized
-                # narrow partition must keep DeepseekV2AttentionMLA's 1.0
-                # default. Skip the assignment rather than reset afterwards:
-                # assigning a Parameter registers it, and nn.Module then refuses
-                # a float in its place.
-                pass
-            elif hasattr(self_attn.kv_b_proj, "weight_scale"):
-                self_attn.w_scale = self_attn.kv_b_proj.weight_scale
+                absorbed = k3_absorb_kv_b_rocm(self_attn, kv_b_weight)
+            if not absorbed:
+                w_kc, w_vc = kv_b_weight.unflatten(
+                    0, (-1, self_attn.qk_nope_head_dim + self_attn.v_head_dim)
+                ).split([self_attn.qk_nope_head_dim, self_attn.v_head_dim], dim=1)
+                self_attn.w_kc = w_kc.transpose(1, 2).contiguous().transpose(1, 2)
+                self_attn.w_vc = w_vc.contiguous().transpose(1, 2)
+                if hasattr(self_attn.kv_b_proj, "weight_scale"):
+                    self_attn.w_scale = self_attn.kv_b_proj.weight_scale
             if _is_hip and isinstance(self_attn, KimiK3MLAAttention):
                 from sglang.srt.models.kimi_k3_rocm_mla import prepare_mla_rocm
 

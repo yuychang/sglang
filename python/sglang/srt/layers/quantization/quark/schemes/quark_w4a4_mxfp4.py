@@ -2,12 +2,10 @@
 
 import logging
 import threading
-import warnings
 from typing import Any, Callable, Optional
 
 import torch
 
-from sglang.srt.environ import envs
 from sglang.srt.layers.parameter import (
     GroupQuantScaleParameter,
     ModelWeightParameter,
@@ -31,44 +29,23 @@ NVFP4_BLOCK_SIZE = 16
 
 _is_hip = is_hip()
 
-# Activation precision for MXFP4 dense linears; see the env docs for the bf16
-# default. bf16 is also the only option on GPUs without the fp4-activation
-# WMMA scale instruction (e.g. gfx1250), which cannot run the a4w4 GEMM; those
-# set AITER_FORCE_A8W4=1, which overrides an explicit fp4 request.
-_MXFP4_LINEAR_ACTS = ("fp4", "bf16")
+# On GPUs that lack the fp4-activation WMMA scale instruction
+# (V_WMMA_SCALE_F32_32X16X128_F4, e.g. gfx1250) the a4w4 (fp4 x fp4) linear GEMM
+# cannot run. The MoE path is switched to a8w4 via AITER_FORCE_A8W4=1 (handled
+# inside aiter.fused_moe); there is currently no working dense a8w4 GEMM for
+# plain nn.Linear on this arch, so under the same flag the (few) MXFP4-quantized
+# linear layers dequantize their FP4 weights to bf16 once at load and run a
+# plain bf16 GEMM. This trades a little memory for correctness on hardware that
+# cannot execute the fp4 kernel at all.
+_dequant_linear_to_bf16 = _is_hip and get_bool_env_var("AITER_FORCE_A8W4", "false")
 
+# ROCm: vLLM-aligned MXFP4 linear kernels (fp4 GEMM or emulate), see
+# quark_w4a4_mxfp4_rocm.py.
+_rocm_mxfp4_mode = None
+if _is_hip and not _dequant_linear_to_bf16:
+    from sglang.srt.layers.quantization.quark.schemes import quark_w4a4_mxfp4_rocm
 
-def _resolve_dequant_linear_to_bf16(
-    act: str, is_hip: bool, force_a8w4: bool = False
-) -> bool:
-    """Whether MXFP4 dense linears dequantize to bf16 at load. Off ROCm the
-    answer is always False: both branches are HIP-only aiter kernels."""
-    if not is_hip:
-        if envs.SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT.is_set():
-            warnings.warn(
-                "SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT is a ROCm-only switch and "
-                "is ignored on this platform."
-            )
-        return False
-    if act not in _MXFP4_LINEAR_ACTS:
-        raise ValueError(
-            "SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT must be one of "
-            f"{', '.join(_MXFP4_LINEAR_ACTS)}; got {act!r}"
-        )
-    if force_a8w4 and act == "fp4":
-        warnings.warn(
-            "SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT=fp4 needs FP4 activation "
-            "support, which AITER_FORCE_A8W4=1 marks as missing; using bf16."
-        )
-        return True
-    return act == "bf16"
-
-
-_dequant_linear_to_bf16 = _resolve_dequant_linear_to_bf16(
-    envs.SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT.get(),
-    _is_hip,
-    force_a8w4=get_bool_env_var("AITER_FORCE_A8W4", "false"),
-)
+    _rocm_mxfp4_mode = quark_w4a4_mxfp4_rocm.resolve_mxfp4_linear_mode()
 
 # MXFP4 (OCP MX FP4 / e2m1) decode table, indexed by the 4-bit code.
 _MXFP4_VALUES = [
@@ -301,23 +278,19 @@ class QuarkW4A4MXFP4(QuarkLinearScheme):
     def get_min_capability(cls) -> int:
         return 70
 
-    def materialize_bf16_weight(self, layer: torch.nn.Module) -> torch.Tensor:
-        """Dense BF16 view of this linear's checkpoint weight.
-
-        Lets a model build decode-side caches without depending on Quark's
-        packed MXFP4 representation.
-        """
-        if getattr(layer, "dequantized_bf16", False):
-            return layer.weight
-        return _dequant_mxfp4_to_bf16(layer.weight.data, layer.weight_scale.data)
-
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         if not self.is_checkpoint_mxfp4_serialized:
             assert layer.weight.dtype == torch.uint8
             assert layer.weight_scale.dtype == torch.uint8
 
+        if _rocm_mxfp4_mode is not None and self.is_checkpoint_mxfp4_serialized:
+            quark_w4a4_mxfp4_rocm.process_weights_after_loading(
+                layer, _rocm_mxfp4_mode
+            )
+            return
+
         if _dequant_linear_to_bf16:
-            w_bf16 = self.materialize_bf16_weight(layer)
+            w_bf16 = _dequant_mxfp4_to_bf16(layer.weight.data, layer.weight_scale.data)
             layer.weight = torch.nn.Parameter(w_bf16, requires_grad=False)
             # FP4 block scales are folded into the bf16 weight; drop them.
             layer.weight_scale = None
@@ -731,6 +704,27 @@ class QuarkW4A4MXFP4(QuarkLinearScheme):
         x: torch.Tensor,
         bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        rocm_kernel = getattr(layer, "mxfp4_rocm_kernel", None)
+        if rocm_kernel is not None:
+            if not isinstance(x, tuple):
+                if x.dim() == 2:
+                    return quark_w4a4_mxfp4_rocm.apply_weights(
+                        layer, x, self.out_dtype, bias=bias
+                    )
+                y = quark_w4a4_mxfp4_rocm.apply_weights(
+                    layer, x.reshape(-1, x.shape[-1]), self.out_dtype, bias=bias
+                )
+                return y.view(*x.shape[:-1], y.shape[-1])
+            if len(x) == 3 and x[1] is None:
+                return quark_w4a4_mxfp4_rocm.apply_weights(
+                    layer, x[0], self.out_dtype, out=x[2], bias=bias
+                )
+            if rocm_kernel != "triton":
+                raise NotImplementedError(
+                    f"MXFP4 {rocm_kernel} linear does not take pre-quantized "
+                    "or split-cat tuple inputs"
+                )
+
         # bf16 fallback: FP4 weights were dequantized to bf16 at load time
         # because this HW cannot run the fp4 GEMM. Run a plain bf16 linear.
         # (The fused tuple-input paths below are only used by MLA attention

@@ -60,6 +60,27 @@ def log_mla_gluon_capability(log: logging.Logger | None = None) -> None:
     )
 
 
+_MLA_SMALL_HEAD_MODES = ("auto", "gluon", "asm")
+_MLA_GLUON_MIN_HEADS = 16
+
+
+@functools.lru_cache(maxsize=1)
+def mla_small_head_mode() -> str:
+    """SGLANG_ROCM_AITER_MLA_ASM_PADDING, vLLM's _aiter_mla_small_head_mode."""
+    mode = (envs.SGLANG_ROCM_AITER_MLA_ASM_PADDING.get() or "auto").lower()
+    if mode not in _MLA_SMALL_HEAD_MODES:
+        raise ValueError(
+            f"SGLANG_ROCM_AITER_MLA_ASM_PADDING={mode!r}; expected one of "
+            f"{_MLA_SMALL_HEAD_MODES}"
+        )
+    if mode == "gluon" and _gluon_fn() is None:
+        logger.warning(
+            "SGLANG_ROCM_AITER_MLA_ASM_PADDING=gluon requested, but Gluon MLA "
+            "decode is unavailable; using the padded ASM decode instead."
+        )
+    return mode
+
+
 def prefer_mla_gluon_decode(
     *,
     head_pad_mode: str,
@@ -67,14 +88,22 @@ def prefer_mla_gluon_decode(
     kv_cache_dtype: torch.dtype,
     q_dtype: torch.dtype | None = None,
 ) -> bool:
-    return (
-        head_pad_mode == "zero"
-        and num_head == 12
-        and kv_cache_dtype == fp8_dtype
-        # Gluon decode takes BF16 Q; an FP8 Q stays on the ASM decode path.
-        and (q_dtype is None or q_dtype == torch.bfloat16)
-        and _gluon_fn() is not None
-    )
+    """vLLM's AiterMLABackend.use_gluon_decode for zero-padded small heads.
+
+    Gluon takes a BF16 Q over an unquantized KV cache; an FP8 cache always
+    runs the padded ASM decode. Under "auto" only head counts dividing 16 take
+    Gluon, so K3's 12 TP8 heads stay on the padded ASM decode.
+    """
+    if head_pad_mode != "zero" or num_head >= _MLA_GLUON_MIN_HEADS:
+        return False
+    if kv_cache_dtype.itemsize == 1:
+        return False
+    if q_dtype is not None and q_dtype != torch.bfloat16:
+        return False
+    mode = mla_small_head_mode()
+    if mode == "asm" or _gluon_fn() is None:
+        return False
+    return mode == "gluon" or _MLA_GLUON_MIN_HEADS % num_head == 0
 
 
 def mla_gluon_decode(
