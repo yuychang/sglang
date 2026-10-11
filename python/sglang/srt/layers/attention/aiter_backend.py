@@ -486,7 +486,11 @@ class AiterAttnBackend(AttentionBackend):
             self.use_mla and envs.SGLANG_AITER_MLA_FLYDSL_FUSED_KV_PROJ.get()
         )
         self._mla_prefill_fused_fp8_quant = None
-        if self.use_mla and envs.SGLANG_K3_MLA_PREFILL_FUSED_FP8_QUANT.get():
+        if (
+            self.use_mla
+            and fp8_dtype == torch.float8_e4m3fn
+            and envs.SGLANG_K3_MLA_PREFILL_FUSED_FP8_QUANT.get()
+        ):
             from sglang.kernels.ops.quantization.mla_prefill_fp8_quant import (
                 mla_prefill_fp8_quant,
             )

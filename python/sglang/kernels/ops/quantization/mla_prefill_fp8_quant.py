@@ -254,8 +254,10 @@ _MAX_INT32 = 2**31 - 1
 # 16-byte alignment and (AMD buffer ops) whether its storage spans at most
 # 2 GB. The scratch and output buffers are allocated here, so they are always
 # aligned and, with numel < 2**31 FP8 elements, within 2 GB; only the inputs
-# vary.
+# vary. That mirrors Triton 3.7's binder; other versions take the regular
+# launch path.
 _compiled: dict = {}
+_DIRECT_LAUNCH = triton.__version__.split(".")[:2] == ["3", "7"]
 
 
 def _launch(kernel, grid, args, constexprs, device_index, specialization):
@@ -263,7 +265,7 @@ def _launch(kernel, grid, args, constexprs, device_index, specialization):
     compiled = _compiled.get(key)
     if compiled is None:
         compiled = kernel[grid](*args, *constexprs, num_warps=_NUM_WARPS)
-        if all(
+        if _DIRECT_LAUNCH and all(
             hasattr(compiled, attr)
             for attr in ("run", "function", "packed_metadata", "launch_metadata")
         ):
