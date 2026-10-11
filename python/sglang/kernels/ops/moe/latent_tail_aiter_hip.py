@@ -95,7 +95,20 @@ def warmup(
 ) -> None:
     if not enabled():
         return
-    for num_tokens in (1, 2, 4):
+    max_tokens = min(256, envs.SGLANG_ROCM_K3_LATENT_TAIL_MAX_TOKENS.get())
+    # Runtime M does not enter the compilation key. Exercising the largest
+    # needed TILE_M values precompiles every launch used by decode/verify
+    # CUDA-graph buckets.
+    token_buckets = tuple(
+        sorted(
+            {
+                min(num_tokens, max_tokens)
+                for num_tokens in (1, 2, 4, 8)
+                if max_tokens > 0
+            }
+        )
+    )
+    for num_tokens in token_buckets:
         routed = torch.zeros(
             (num_tokens, 3584), dtype=torch.bfloat16, device=up_weight.device
         )
