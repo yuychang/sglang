@@ -1148,14 +1148,7 @@ class AiterAttnBackend(AttentionBackend):
         (page_table, qo_indptr, max_q_len=draft_num).
         """
         device = seq_lens.device
-        qo_indptr = self.qo_indptr[: bs + 1]
-        qo_indptr[: bs + 1] = torch.arange(
-            0,
-            (1 + bs) * draft_num,
-            step=draft_num,
-            dtype=torch.int32,
-            device=device,
-        )
+        qo_indptr = self._set_uniform_qo_indptr(bs, draft_num)
 
         page_size = self.page_size
         max_blocks = (self.max_context_len + page_size - 1) // page_size
@@ -1430,15 +1423,17 @@ class AiterAttnBackend(AttentionBackend):
         return tok_idx, cu_k
 
     def _set_uniform_qo_indptr(
-        self, bs: int, tokens_per_req: int, device: torch.device
+        self, bs: int, tokens_per_req: int
     ) -> torch.Tensor:
         qo_indptr = self.qo_indptr[: bs + 1]
-        qo_indptr[: bs + 1] = torch.arange(
+        # This metadata builder also runs outside graph replay. Writing arange
+        # directly into the persistent buffer avoids a temporary allocation and
+        # the second copy kernel on every verify step.
+        torch.arange(
             0,
             bs * tokens_per_req + 1,
             step=tokens_per_req,
-            dtype=torch.int32,
-            device=device,
+            out=qo_indptr,
         )
         return qo_indptr
 
@@ -2421,7 +2416,7 @@ class AiterAttnBackend(AttentionBackend):
             if self.use_mla:
                 device = forward_batch.seq_lens.device
                 num_draft_tokens = self._resolve_v2_num_draft_tokens()
-                qo_indptr = self._set_uniform_qo_indptr(bs, num_draft_tokens, device)
+                qo_indptr = self._set_uniform_qo_indptr(bs, num_draft_tokens)
 
                 kv_indptr = self.kv_indptr[: bs + 1]
                 kv_indptr[1 : bs + 1] = torch.cumsum(forward_batch.seq_lens, dim=0)
@@ -2517,14 +2512,7 @@ class AiterAttnBackend(AttentionBackend):
                     kv_lens = forward_batch.seq_lens + draft_num
                     kv_lens_sum = forward_batch.seq_lens_sum + draft_num * bs
 
-                qo_indptr = self.qo_indptr[: bs + 1]
-                qo_indptr[: bs + 1] = torch.arange(
-                    0,
-                    (1 + bs) * draft_num,
-                    step=draft_num,
-                    dtype=torch.int32,
-                    device=device,
-                )
+                qo_indptr = self._set_uniform_qo_indptr(bs, draft_num)
                 kv_indptr = self.kv_indptr[: bs + 1]
                 kv_indptr[1 : bs + 1] = torch.cumsum(kv_lens, dim=0)
                 kv_indices = self._get_kv_indices_scratch(
@@ -3339,14 +3327,7 @@ class AiterAttnBackend(AttentionBackend):
             tokens_per_req = (
                 self.num_draft_tokens if self.use_mla else verify_tokens_per_req
             )
-            qo_indptr = self.qo_indptr[: bs + 1]
-            qo_indptr[: bs + 1] = torch.arange(
-                0,
-                (1 + bs) * tokens_per_req,
-                step=tokens_per_req,
-                dtype=torch.int32,
-                device=self.device,
-            )
+            qo_indptr = self._set_uniform_qo_indptr(bs, tokens_per_req)
             if self.use_mla:
                 use_asm_cprr_verify = self._asm_cprr_supports_verify_shape(
                     self.num_draft_tokens
