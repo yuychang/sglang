@@ -83,6 +83,8 @@ class ForwardMetadata:
     has_mamba_track_mask: bool = False
     mamba_track_mask_indices: Optional[torch.Tensor] = None
     conv_states_mask_indices: Optional[torch.Tensor] = None
+    # extend_prefix_lens > 0, built once per extend forward for the prefill conv.
+    extend_has_initial_state: Optional[torch.Tensor] = None
 
 
 @dataclass(kw_only=True)
