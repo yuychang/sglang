@@ -35,6 +35,7 @@ from sglang.srt.runtime_context import get_parallel
 _use_aiter = envs.SGLANG_USE_AITER.get()
 _aiter_moe_preroute_fp8 = envs.SGLANG_ROCM_K3_AITER_MOE_PREROUTE_FP8.get()
 _aiter_latent_tail_fp8 = envs.SGLANG_ROCM_K3_AITER_LATENT_TAIL_FP8.get()
+_latent_tail_max_tokens = envs.SGLANG_ROCM_K3_LATENT_TAIL_MAX_TOKENS.get()
 _aiter_tuned_moe_front = envs.SGLANG_ROCM_K3_AITER_TUNED_MOE_FRONT.get()
 _aiter_tuned_moe_front_min_tokens = (
     envs.SGLANG_ROCM_K3_AITER_TUNED_MOE_FRONT_MIN_TOKENS.get()
@@ -245,6 +246,7 @@ def prepare_shared_down_ptpc_fp8(self) -> None:
 def prepare_latent_tail_fp8(self) -> None:
     if (
         not _aiter_latent_tail_fp8
+        or _latent_tail_max_tokens < 1
         or not self.fuse_ar_norm
         or self.routed_expert_up_proj is None
         or self.routed_expert_norm is None
@@ -737,11 +739,10 @@ def forward_fused_rocm(
         )
     self._forward_routed(hidden_states, router_logits, routed_input, latent)
 
-    # The persistent kernel has compile-time M specializations for 1/2/4.
-    # TARGET_VERIFY is equally valid when its flattened token count lands in
-    # one of those buckets (in practice, one request with qlen=4).
+    # One runtime-M kernel covers decode and target verify, up to
+    # SGLANG_ROCM_K3_LATENT_TAIL_MAX_TOKENS.
     use_latent_tail = (
-        num_tokens in (1, 2, 4)
+        1 <= num_tokens <= _latent_tail_max_tokens
         and forward_mode is not None
         and (forward_mode.is_decode_or_idle() or forward_mode.is_target_verify())
         and self._latent_tail_weight is not None
