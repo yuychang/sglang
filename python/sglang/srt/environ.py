@@ -1887,11 +1887,6 @@ class Envs:
     # materialization, Q concat and latent KV-cache write into AITER's
     # per-head kernel. Fail closed to the existing split/cat/cache chain.
     SGLANG_ROCM_K3_AITER_MLA_Q_CACHE_FUSION = EnvBool(False)
-    # With the fp8-Q asm decode (SGLANG_AITER_MLA_A8W8_ASM), let the fused Q/cache
-    # kernel emit the final zero-padded 16-head FP8 Q so the backend skips its own
-    # quant, pad-fill and copy launches. The kernel casts q_pe without the clamp
-    # the standalone static quant applies, so |q_pe| > 448 can differ; off by default.
-    SGLANG_ROCM_K3_MLA_A8W8_FUSED_Q = EnvBool(False)
     # FlyDSL FP8 MLA prefill: quantize Q/K/V per tensor in two batched Triton
     # launches instead of a reduce, divide, clamp and quant per tensor.
     # Bit-identical scales and FP8 values. Set 0 for the per-tensor sequence.
