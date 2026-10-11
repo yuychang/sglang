@@ -102,9 +102,7 @@ def test_latent_moe_tail_fp8_matches_dequantized_oracle_and_replays(num_tokens):
         torch.mm(normalized.float(), dequantized.t()).bfloat16().float()
         + shared.float()
     ).bfloat16()
-    dequantized_oracle = (
-        dequantized_oracle.float() + prefix.float()
-    ).bfloat16()
+    dequantized_oracle = (dequantized_oracle.float() + prefix.float()).bfloat16()
     bf16_oracle = (
         torch.mm(normalized.float(), up_weight.float().t()).bfloat16().float()
         + shared.float()
