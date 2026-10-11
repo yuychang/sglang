@@ -26,7 +26,13 @@ def _chunk_indices_from_lens(lens: torch.Tensor, chunk_size: int) -> torch.Tenso
 def prepare_chunk_indices(
     cu_seqlens: torch.LongTensor, chunk_size: int
 ) -> torch.LongTensor:
-    return _chunk_indices_from_lens(prepare_lens(cu_seqlens), chunk_size).to(cu_seqlens)
+    indices = torch.cat(
+        [
+            torch.arange(n)
+            for n in triton.cdiv(prepare_lens(cu_seqlens), chunk_size).tolist()
+        ]
+    )
+    return torch.stack([indices.eq(0).cumsum(0) - 1, indices], 1).to(cu_seqlens)
 
 
 @tensor_cache

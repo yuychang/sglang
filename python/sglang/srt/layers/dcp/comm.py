@@ -192,7 +192,7 @@ def all_gather_kv_cache_for_mha_chunk_extend(
 ):
     if get_parallel().dcp_enabled:
         kv_a = kv_a.unsqueeze(1)
-        if envs.SGLANG_ROCM_K3_DCP_FAST_KV_GATHER.get():
+        if _is_hip and envs.SGLANG_ROCM_K3_DCP_FAST_KV_GATHER.get():
             kv_a, k_pe = _all_gather_kv_cache_for_dcp_split(
                 kv_a, k_pe, prefix_kv_lens_cpu, prefix_starts_cpu
             )
@@ -341,7 +341,7 @@ def all_gather_kv_cache_for_dcp(
     parallel = get_parallel()
     if not parallel.dcp_enabled:
         return torch.cat([prefix_kv_a, prefix_k_pe], dim=-1)
-    if envs.SGLANG_ROCM_K3_DCP_FAST_KV_GATHER.get():
+    if _is_hip and envs.SGLANG_ROCM_K3_DCP_FAST_KV_GATHER.get():
         plan = _dcp_gather_plan_for(prefix_kv_lens_cpu, prefix_starts_cpu)
         gathered = _dcp_all_gather_padded(
             _dcp_pad_local_kv(prefix_kv_a, prefix_k_pe, plan)
