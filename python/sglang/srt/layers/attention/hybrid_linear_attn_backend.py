@@ -45,7 +45,7 @@ from sglang.srt.model_executor.model_runner import ModelRunner
 from sglang.srt.runtime_context import get_exec, get_memory, get_spec
 from sglang.srt.speculative.eagle_info import EagleDraftInput, EagleVerifyInput
 from sglang.srt.speculative.spec_info import SpecInput
-from sglang.srt.utils import is_pin_memory_available
+from sglang.srt.utils import is_hip, is_pin_memory_available
 
 if TYPE_CHECKING:
     from sglang.srt.layers.attention.verify_mask import VerifyMask
@@ -323,7 +323,9 @@ class MambaAttnBackendBase(AttentionBackend):
                         query_start_loc,
                         forward_batch,
                         track_mask_indices,
-                        num_tokens=logical_num_tokens,
+                        # ROCm passes the host token count so clamp does not
+                        # sync on query_start_loc[-1]. CUDA keeps that read.
+                        num_tokens=logical_num_tokens if is_hip() else None,
                     )
 
                     (

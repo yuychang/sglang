@@ -763,7 +763,7 @@ class KDAAttnBackend(MambaAttnBackendBase):
                     self.device,
                     self.mamba_chunk_size,
                 )
-        if envs.SGLANG_ROCM_K3_PREFILL_HOST_METADATA.get():
+        if is_hip() and envs.SGLANG_ROCM_K3_PREFILL_HOST_METADATA.get():
             self._init_prefill_host_metadata(forward_batch)
 
     def _init_prefill_host_metadata(self, forward_batch: ForwardBatch):
@@ -1301,10 +1301,16 @@ class KDAAttnBackend(MambaAttnBackendBase):
                 replayssm_beta=replayssm_beta,
             )
         intermediate_conv_window_cache = mamba_cache_params.intermediate_conv_window[0]
+        row_end = query_start_loc.shape[0] - 1
+        if is_hip():
+            # Unused unless PP speculative decode is on, so don't launch the compare.
+            valid_rows = lambda: cache_indices[:row_end] >= 0
+        else:
+            valid_rows = cache_indices[:row_end] >= 0
         intermediate_state_indices = select_verify_intermediate_state_indices(
             self.verify_intermediate_state_indices,
             forward_batch.req_pool_indices,
-            lambda: cache_indices[: query_start_loc.shape[0] - 1] >= 0,
+            valid_rows,
             self.req_to_token_pool.size,
         )
 

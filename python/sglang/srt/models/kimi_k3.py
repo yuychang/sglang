@@ -1335,12 +1335,16 @@ class KimiK3MoE(nn.Module):
         if self._route_quant_fuse_eligible:
             route_quant_handoff.stage(routed_input)
         try:
-            # topk runs inside the context so the fused radix-4 route+sort
-            # kernel sees the destination and zeroes it in its own launch;
-            # otherwise fused_moe issues a separate fill for the atomic gemm2.
-            with zero_copy_context.set_moe_output(latent):
+            if _is_hip:
+                # The fused radix-4 route+sort kernel zeroes the destination
+                # itself, so fused_moe skips its fill. CUDA keeps topk outside.
+                with zero_copy_context.set_moe_output(latent):
+                    topk_output = self.topk(hidden_states, router_logits)
+                    expert_output = self.experts(routed_input, topk_output)
+            else:
                 topk_output = self.topk(hidden_states, router_logits)
-                expert_output = self.experts(routed_input, topk_output)
+                with zero_copy_context.set_moe_output(latent):
+                    expert_output = self.experts(routed_input, topk_output)
         finally:
             route_quant_handoff.clear()
         if expert_output.data_ptr() != latent.data_ptr():
