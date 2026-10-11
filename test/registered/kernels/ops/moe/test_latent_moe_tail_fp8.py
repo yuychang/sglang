@@ -151,7 +151,9 @@ def test_latent_moe_tail_fp8_matches_dequantized_oracle_and_replays(num_tokens):
         torch.nn.functional.cosine_similarity(
             actual.float(),
             bf16_oracle.float(),
-        ).item()
+        )
+        .min()
+        .item()
         > 0.999
     )
 
