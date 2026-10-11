@@ -1892,6 +1892,10 @@ class Envs:
     # quant, pad-fill and copy launches. The kernel casts q_pe without the clamp
     # the standalone static quant applies, so |q_pe| > 448 can differ; off by default.
     SGLANG_ROCM_K3_MLA_A8W8_FUSED_Q = EnvBool(False)
+    # FlyDSL FP8 MLA prefill: quantize Q/K/V per tensor in two batched Triton
+    # launches instead of a reduce, divide, clamp and quant per tensor.
+    # Bit-identical scales and FP8 values. Set 0 for the per-tensor sequence.
+    SGLANG_K3_MLA_PREFILL_FUSED_FP8_QUANT = EnvBool(True)
     # Merge the router gate and routed_expert_down_proj weights so the K3 MoE
     # front reads hidden_states once, and run the top-k plus the bf16 cast in one
     # epilogue kernel. See kernels/ops/moe/moe_front.py. Default on.
