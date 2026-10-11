@@ -27,6 +27,7 @@ from sglang.srt.distributed.device_communicators.pynccl_allocator import (
 from sglang.srt.environ import envs
 from sglang.srt.layers.communication.hip_k3_moe_pair_ar import (
     all_reduce_moe_latent_shared,
+    moe_pair_will_split,
 )
 from sglang.srt.layers.dp_attention import is_allocation_symmetric
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
@@ -729,8 +730,12 @@ def forward_fused_rocm(
     total_numel = latent_numel + num_tokens * hidden_size
     from sglang.srt.layers.communication.k3_ar_input import get_k3_ar_input
 
-    direct_ar_input = get_k3_ar_input(
-        (total_numel,), hidden_states.dtype, hidden_states.device
+    # A split pair stages its shared half from inside the pool back to the pool
+    # base; once shared outgrows latent the two ranges overlap.
+    direct_ar_input = (
+        None
+        if moe_pair_will_split(total_numel * hidden_states.element_size())
+        else get_k3_ar_input((total_numel,), hidden_states.dtype, hidden_states.device)
     )
     if direct_ar_input is not None:
         buf = direct_ar_input

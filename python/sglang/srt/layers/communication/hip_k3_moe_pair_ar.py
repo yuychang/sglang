@@ -47,6 +47,14 @@ def should_split_oversized_moe_pair(
     return bool(enabled and qr_max_bytes is not None and total_bytes > qr_max_bytes)
 
 
+def moe_pair_will_split(total_bytes: int) -> bool:
+    return should_split_oversized_moe_pair(
+        total_bytes,
+        qr_max_size_bytes(),
+        envs.SGLANG_ROCM_K3_SPLIT_OVERSIZED_MOE_AR.get(),
+    )
+
+
 def moe_pair_nbytes(num_tokens: int, dtype: torch.dtype) -> int:
     return num_tokens * (MOE_LATENT_WIDTH + MOE_SHARED_WIDTH) * dtype.itemsize
 
@@ -60,9 +68,7 @@ def all_reduce_moe_latent_shared(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """All-reduce the packed [latent | shared] buffer, splitting when needed."""
     latent_numel = num_tokens * moe_hidden_size
-    total_bytes = buf.numel() * buf.element_size()
-    enabled = envs.SGLANG_ROCM_K3_SPLIT_OVERSIZED_MOE_AR.get()
-    if should_split_oversized_moe_pair(total_bytes, qr_max_size_bytes(), enabled):
+    if moe_pair_will_split(buf.numel() * buf.element_size()):
         latent = buf[:latent_numel].view(num_tokens, moe_hidden_size)
         shared = buf[latent_numel:].view(num_tokens, hidden_size)
         return (
