@@ -86,10 +86,13 @@ def covered(
         and kv_cache.shape[-1] == _HEAD_DIM
         and kv_cache.dtype in (torch.bfloat16, *_FP8_DTYPES)
         and slot_mapping.shape == (tokens,)
-        and slot_mapping.dtype in (torch.int32, torch.int64)
+        # AITER's gfx950 decode specializations consume one int64 slot and
+        # position per token. Keep the adapter fail-closed even though the
+        # generic Triton fallback also accepts int32 metadata.
+        and slot_mapping.dtype == torch.int64
         and slot_mapping.stride(0) == 1
         and positions.shape == (tokens,)
-        and positions.dtype in (torch.int32, torch.int64)
+        and positions.dtype == torch.int64
         and positions.stride(0) == 1
         and k_scale.numel() == 1
         and k_scale.dtype == torch.float32
