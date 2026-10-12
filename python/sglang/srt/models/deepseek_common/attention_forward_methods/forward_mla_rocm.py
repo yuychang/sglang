@@ -45,7 +45,10 @@ from sglang.srt.lora.deepseek_mla_correction import (
 from sglang.srt.mem_cache.hisparse_memory_pool import HiSparseDSATokenToKVPool
 from sglang.srt.mem_cache.memory_pool import KVWriteLoc
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
-from sglang.srt.model_executor.forward_context import get_token_to_kv_pool
+from sglang.srt.model_executor.forward_context import (
+    get_attn_backend,
+    get_token_to_kv_pool,
+)
 from sglang.srt.model_executor.runner_backend_utils.tc_piecewise_cuda_graph import (
     is_in_tc_piecewise_cuda_graph,
 )
@@ -388,6 +391,7 @@ def _fused_rope_cat_and_cache(
     k_pe: torch.Tensor,
     positions: torch.Tensor,
     out_cache_loc: torch.Tensor,
+    q_wide: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """RoPE + concat + KV-cache write via the AITER fused kernel on gfx95."""
     kv_cache_dtype = (
@@ -409,7 +413,21 @@ def _fused_rope_cat_and_cache(
         out_cache_loc = kv_pool.translate_loc_to_hisparse_device(out_cache_loc)
     # AITER reads slot_mapping with stride 1, including on the resident path.
     out_cache_loc = out_cache_loc.contiguous()
-    return fused_qk_rope_cat_and_cache_mla(
+    tokens = q_nope_out.shape[0]
+    q_heads = q_nope_out.shape[1]
+    q_dim = q_nope_out.shape[-1] + q_pe.shape[-1]
+    q_out = None
+    if (
+        q_wide is not None
+        and q_wide.dtype == q_out_dtype
+        and q_wide.shape[0] >= tokens
+        and q_wide.shape[1] > q_heads
+        and q_wide.shape[2] == q_dim
+    ):
+        # Real heads only. The kernel stores through q_out's stride, so the
+        # extra heads of q_wide stay at the zeros written before capture.
+        q_out = q_wide[:tokens, :q_heads]
+    written = fused_qk_rope_cat_and_cache_mla(
         q_nope_out,
         q_pe,
         k_nope,
@@ -421,8 +439,12 @@ def _fused_rope_cat_and_cache(
         attn.rotary_emb.sin_cache,
         attn.attn_mqa.k_scale,
         attn.rotary_emb.is_neox_style,
+        q_out=q_out,
         q_out_dtype=q_out_dtype,
     )
+    if q_out is not None:
+        return q_wide[:tokens], written[1], written[2], written[3]
+    return written
 
 
 def _can_fuse_bmm_rope_cat_and_cache(attn: DeepseekV2AttentionMLA) -> bool:
@@ -1022,6 +1044,32 @@ class DeepseekMLARocmForwardMixin:
                     save_kv_cache = False
 
             if q is None and self._skip_rope_for_aiter_fused_mla():
+                q_wide = None
+                if (
+                    forward_batch.forward_mode.is_decode_or_idle()
+                    or forward_batch.forward_mode.is_target_verify()
+                ):
+                    backend = get_attn_backend()
+                    ask = getattr(backend, "repeat_head_zero_q", None)
+                    if ask is not None:
+                        q_dtype = (
+                            fp8_dtype
+                            if self.kv_cache_dtype == "fp8_e4m3"
+                            else q_nope_out.dtype
+                        )
+                        if (
+                            self.kv_cache_dtype == "fp8_e4m3"
+                            and self.current_attention_backend == "aiter"
+                            and q_nope_out.shape[-2] == 12
+                            and envs.SGLANG_AITER_MLA_GLUON.get()
+                        ):
+                            q_dtype = q_nope_out.dtype
+                        q_wide = ask(
+                            q_nope_out.shape[0],
+                            self.kv_lora_rank + self.qk_rope_head_dim,
+                            q_dtype,
+                            q_nope_out.device,
+                        )
                 q, _, _, k = _fused_rope_cat_and_cache(
                     self,
                     q_nope_out,
@@ -1030,6 +1078,7 @@ class DeepseekMLARocmForwardMixin:
                     k_pe,
                     positions,
                     forward_batch.out_cache_loc,
+                    q_wide=q_wide,
                 )
                 save_kv_cache = False
             elif q is None:

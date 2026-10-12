@@ -1043,6 +1043,34 @@ class TestDflashDraftKvBudget(CustomTestCase):
             0,
         )
 
+    def test_mla_draft_uses_latent_width(self):
+        import torch
+
+        from sglang.srt.configs.model_config import AttentionArch
+        from sglang.srt.speculative.dflash_utils import (
+            dflash_draft_cell_size_per_token,
+        )
+
+        draft = SimpleNamespace(
+            attention_arch=AttentionArch.MLA,
+            kv_lora_rank=512,
+            qk_rope_head_dim=64,
+            hf_config=SimpleNamespace(architectures=["K3DSparkModel"]),
+            get_num_kv_heads=lambda tp: 8,
+            head_dim=192,
+            v_head_dim=128,
+        )
+        # 576-d latent * 5 layers * fp8, not 8 * (192 + 128) * 5.
+        self.assertEqual(
+            dflash_draft_cell_size_per_token(
+                draft_model_config=draft,
+                draft_num_layers=5,
+                draft_kv_cache_dtype=torch.float8_e4m3fn,
+                tp_size=8,
+            ),
+            2880,
+        )
+
     def test_dcp_replication_scales_draft_budget(self):
         """The replicated draft pool spans every DCP virtual location."""
         draft_kv_per_token = 10_240

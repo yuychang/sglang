@@ -341,6 +341,7 @@ class AiterAttnBackend(AttentionBackend):
         self.num_draft_tokens = get_spec().speculative_num_draft_tokens
         self.speculative_num_steps = get_spec().speculative_num_steps
         self.topk = topk
+        self.is_draft_worker = bool(getattr(model_runner, "is_draft_worker", False))
         self.num_head = (
             model_runner.model_config.num_attention_heads // get_parallel().attn_tp_size
         )
@@ -353,6 +354,9 @@ class AiterAttnBackend(AttentionBackend):
         self.req_to_token = model_runner.req_to_token_pool.req_to_token
 
         self.use_mla = model_runner.model_config.attention_arch == AttentionArch.MLA
+        # Captured at init. The process-wide flag is flipped for the K3 MLA
+        # draft only; the target keeps the value it saw when it was built.
+        self.use_mla_ps_kernel = False
 
         self.dcp_world_size = get_parallel().attn_dcp_size
         self.mla_dcp_decode_backend = (
@@ -380,6 +384,15 @@ class AiterAttnBackend(AttentionBackend):
                 model_runner.model_config.qk_nope_head_dim
                 + model_runner.model_config.qk_rope_head_dim
             )
+            # Absorbed decode Q is kv_lora_rank + rope (576), not qk_nope + rope.
+            kv_lora = getattr(model_runner.model_config, "kv_lora_rank", None)
+            qk_rope = getattr(model_runner.model_config, "qk_rope_head_dim", None)
+            if kv_lora is not None and qk_rope is not None:
+                self.mla_absorb_q_dim = int(kv_lora) + int(qk_rope)
+                self.mla_absorb_v_dim = int(kv_lora)
+            else:
+                self.mla_absorb_q_dim = self.qk_head_dim
+                self.mla_absorb_v_dim = self.v_head_dim
         elif hasattr(model_runner.token_to_kv_pool, "get_v_head_dim"):
             # For hybrid models (Mamba+attention, GDN, Kimi linear),
             # layer_id=0 may not be a full attention layer
@@ -701,11 +714,81 @@ class AiterAttnBackend(AttentionBackend):
                 self.max_split_per_batch = 64
 
             self.fix_max_split_per_batch = self.max_split_per_batch
+            self.use_mla_ps_kernel = bool(_use_mla_ps_kernel)
+
+    def _static_rows(
+        self,
+        name: str,
+        rows: int,
+        tail: tuple,
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> Optional[torch.Tensor]:
+        """Prefix of a buffer allocated before CUDA-graph capture.
+
+        Replay keeps this address. Allocating inside the draft forward
+        (``repeat`` / ``new_zeros``) breaks that and leaves a GPU bubble
+        between the index kernels and the next GEMM.
+        """
+        buf = getattr(self, name, None)
+        if (
+            not isinstance(buf, torch.Tensor)
+            or buf.dtype != dtype
+            or buf.device != device
+            or buf.shape[0] < rows
+            or tuple(buf.shape[1:]) != tuple(tail)
+        ):
+            return None
+        return buf[:rows]
 
     def pad_heads(self, x: torch.Tensor, padded: int) -> torch.Tensor:
         num_head = x.shape[1]
         reps = -(-padded // num_head)  # ceil(padded / num_head)
-        return x.repeat(1, reps, 1)[:, :padded, :].contiguous()
+        out = None
+        if reps * num_head == padded:
+            out = self._static_rows(
+                "cuda_graph_head_pad",
+                x.shape[0],
+                (padded, x.shape[-1]),
+                x.dtype,
+                x.device,
+            )
+        if out is None:
+            return x.repeat(1, reps, 1)[:, :padded, :].contiguous()
+        # One broadcast into a contiguous (T, reps, H, D) view. Slicing each
+        # tile is a non-contiguous dest and comes out as index_elementwise.
+        out.view(x.shape[0], reps, num_head, x.shape[-1]).copy_(x.unsqueeze(1))
+        return out
+
+    def repeat_head_zero_q(
+        self,
+        tokens: int,
+        head_dim: int,
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> Optional[torch.Tensor]:
+        """16-head Q whose extra heads were zeroed before CUDA-graph capture.
+
+        The fused Q writer fills ``[:, :num_head]`` through this buffer's
+        stride. Replay keeps the address, so the 8→16 repeat copy does not
+        run on the draft step.
+        """
+        if self.num_head >= getattr(self, "num_head_padded", self.num_head):
+            return None
+        if self.dcp_world_size > 1:
+            return None
+        # 8-head draft repeats into the zero lanes. 12-head target zero-pads
+        # the same way. Either way the extra heads are already zero, so the
+        # per-step pad_heads / a8w8 slice copy does not run.
+        if getattr(self, "head_pad_mode", None) not in ("repeat", "zero"):
+            return None
+        return self._static_rows(
+            "cuda_graph_q_zero_pad",
+            tokens,
+            (self.num_head_padded, head_dim),
+            dtype,
+            device,
+        )
 
     def check_fp8_prefill_num_head(
         self, *, num_head: int, num_kv_head: int, v_head_dim: int
@@ -758,7 +841,7 @@ class AiterAttnBackend(AttentionBackend):
         Matches main's ``_use_mla_ps_kernel and dcp_world_size <= 1`` when ASM
         is off. DCP ASM needs the same buffers with fast_mode scheduling.
         """
-        return (_use_mla_ps_kernel and self.dcp_world_size <= 1) or (
+        return (self.use_mla_ps_kernel and self.dcp_world_size <= 1) or (
             self.use_mla_dcp_asm and self.dcp_world_size > 1
         )
 
@@ -1361,6 +1444,136 @@ class AiterAttnBackend(AttentionBackend):
         fm.asm_ctx_tok_idx, fm.asm_ctx_cu_k = tok_idx, cu_k
         return tok_idx, cu_k
 
+    def _qlen3_no_pad(self) -> bool:
+        """8-head K3 draft block keeps three query rows.
+
+        aiter maps qlen 3 with causal=False onto the msk0 tile and reads
+        ``qo_indptr``'s width, so the fourth row must not be allocated.
+        The replay backend that launched MLA did not observe
+        ``is_draft_worker``, so this is keyed on the repeat head-pad mode.
+        The 12-head target stays on causal qlen 4.
+        """
+        return (
+            getattr(self, "head_pad_mode", None) == "repeat"
+            and self.use_mla_ps_kernel
+            and self.dcp_world_size <= 1
+            and getattr(self, "mla_kernel_num_head_padded", None) == 16
+            and self.num_head < getattr(self, "num_head_padded", self.num_head)
+        )
+
+    def _draft_repeat_block(self, max_q_len: int) -> bool:
+        """K3 draft block is bidirectional. aiter maps qlen 3, causal=False
+        onto ``mla_a8w8_qh16_qseqlen4_gqaratio16_msk0`` and reads qo_indptr's
+        width, so the tensor stays 3 rows.
+        """
+        return self._qlen3_no_pad() and int(max_q_len) > 1
+
+    def _persistent_qh16_launch_qlen(self, real_qlen: int) -> int:
+        """``mla_a8w8_qh16_qseqlen4`` loads four query rows when causal.
+
+        The 12-head target still launches qlen 4 and zero-pads the extra row.
+        The 8-head draft block passes causal=False and keeps qo_indptr at 3,
+        which selects the msk0 tile and does not read a fourth row.
+        """
+        skip_pad = self._qlen3_no_pad()
+        if not getattr(self, "_qlen_logged", False) and real_qlen >= 3 and self.use_mla:
+            logger.info(
+                "qh16 launch qlen real=%s skip_pad=%s draft=%s heads=%s mode=%s ps=%s dcp=%s padded=%s",
+                real_qlen,
+                skip_pad,
+                getattr(self, "is_draft_worker", False),
+                getattr(self, "num_head", None),
+                getattr(self, "head_pad_mode", None),
+                self.use_mla_ps_kernel,
+                self.dcp_world_size,
+                getattr(self, "mla_kernel_num_head_padded", None),
+            )
+            self._qlen_logged = True
+        if (
+            real_qlen == 3
+            and self.use_mla_ps_kernel
+            and self.dcp_world_size <= 1
+            and self.mla_kernel_num_head_padded == 16
+            and not skip_pad
+        ):
+            return 4
+        return real_qlen
+
+    def _pad_q_for_qseqlen4(
+        self,
+        q: torch.Tensor,
+        qo_indptr: Optional[torch.Tensor],
+        max_q_len: int,
+    ) -> tuple[torch.Tensor, Optional[int]]:
+        """Zero-pad packed qlen 3 to the qseqlen4 launch width.
+
+        Returns ``(q, real_qlen)``. ``real_qlen`` is 3 only when padding was
+        applied; the extra row is masked by being zero and is sliced off the
+        output. Request count comes from ``qo_indptr`` so a real qlen-4 batch
+        whose token count is divisible by 3 is left alone.
+        """
+        if (
+            max_q_len != 4
+            or qo_indptr is None
+            or q.ndim < 2
+            or qo_indptr.shape[0] < 2
+        ):
+            return q, None
+        bs = qo_indptr.shape[0] - 1
+        if q.shape[0] != bs * 3:
+            return q, None
+        q_rows = q.reshape(bs, 3, *q.shape[1:])
+        buf_name = (
+            "cuda_graph_qseqlen4_q"
+            if q.shape[1] == getattr(self, "num_head_padded", q.shape[1])
+            else "cuda_graph_qseqlen4_q_native"
+        )
+        out = self._static_rows(
+            buf_name,
+            bs * max_q_len,
+            tuple(q.shape[1:]),
+            q.dtype,
+            q.device,
+        )
+        if out is None:
+            padded = q.new_zeros((bs, max_q_len, *q.shape[1:]))
+            padded[:, :3].copy_(q_rows)
+            return padded.reshape(bs * max_q_len, *q.shape[1:]), 3
+        # Row 3 was zeroed before capture and is never written. A per-step
+        # ``[:, 3:].zero_()`` is a second index launch and leaves a host
+        # stall before the copy.
+        out.view(bs, max_q_len, *q.shape[1:])[:, :3].copy_(q_rows)
+        return out, 3
+
+    def _unpad_qseqlen4_out(
+        self,
+        o: torch.Tensor,
+        max_q_len: int,
+        real_qlen: Optional[int],
+    ) -> torch.Tensor:
+        """Copy the real qlen rows into a static buffer.
+
+        ``[:, :real_qlen]`` of a qlen-4 tensor is not contiguous, so a
+        reshape allocates. The static buffer is a different allocation from
+        the attention output, so the copy does not overlap its source.
+        """
+        if real_qlen is None:
+            return o
+        bs = o.shape[0] // max_q_len
+        tail = tuple(o.shape[1:])
+        dst = self._static_rows(
+            "cuda_graph_qseqlen4_out",
+            bs * real_qlen,
+            tail,
+            o.dtype,
+            o.device,
+        )
+        src = o.reshape(bs, max_q_len, *tail)
+        if dst is None:
+            return src[:, :real_qlen].reshape(bs * real_qlen, *tail)
+        dst.view(bs, real_qlen, *tail).copy_(src[:, :real_qlen])
+        return dst
+
     def _set_uniform_qo_indptr(
         self, bs: int, tokens_per_req: int, device: torch.device
     ) -> torch.Tensor:
@@ -1400,22 +1613,67 @@ class AiterAttnBackend(AttentionBackend):
         # Fused MLA Q may already occupy the 16-head pad buffer (dummy heads
         # zeroed by the producer). Skip Fill(fp8)+float8_copy in that case.
         if q.shape[1] == self.num_head_padded:
-            o = q.new_empty(
-                (q.shape[0], self.num_head_padded, layer.v_head_dim),
-                dtype=self.input_dtype,
+            o = self._static_rows(
+                "cuda_graph_mla_out",
+                q.shape[0],
+                (self.num_head_padded, layer.v_head_dim),
+                self.input_dtype,
+                q.device,
             )
+            if o is None:
+                o = q.new_empty(
+                    (q.shape[0], self.num_head_padded, layer.v_head_dim),
+                    dtype=self.input_dtype,
+                )
             mla_decode_fwd(q, k_buffer_flat, o, **kwargs)
             return o[:, : self.num_head, :]
         if self.head_pad_mode == "repeat" or (
             self.head_pad_mode == "none" and self.num_head_padded != self.num_head
         ):
-            q_in = self.pad_heads(q, self.num_head_padded)
-            o = q.new_empty(
-                (q.shape[0], self.num_head_padded, layer.v_head_dim),
-                dtype=self.input_dtype,
+            # K3 draft is 8 heads. Repeat to 16 so aiter stays on the qh16
+            # qseqlen4 tile. Quantize Q with the scale the kernel uses to
+            # dequantize it; bf16 Q would select the a16w8 kernel instead.
+            q_for_pad = q
+            if (
+                self.head_pad_mode == "repeat"
+                and self.use_mla_ps_kernel
+                and self.kv_cache_dtype == fp8_dtype
+                and q.dtype != fp8_dtype
+            ):
+                if kwargs.get("q_scale") is None:
+                    kwargs["q_scale"] = self.k_scale
+                num_tokens = q.shape[0]
+                q_fp8, _ = scaled_fp8_quant(
+                    q.reshape(num_tokens, -1), kwargs["q_scale"]
+                )
+                q_for_pad = q_fp8.view(num_tokens, q.shape[1], layer.qk_head_dim)
+                k_buffer_flat[0].zero_()
+            q_in = self.pad_heads(q_for_pad, self.num_head_padded)
+            o = self._static_rows(
+                "cuda_graph_mla_out",
+                q_in.shape[0],
+                (self.num_head_padded, layer.v_head_dim),
+                self.input_dtype,
+                q_in.device,
             )
+            if o is None:
+                o = q.new_empty(
+                    (q.shape[0], self.num_head_padded, layer.v_head_dim),
+                    dtype=self.input_dtype,
+                )
             mla_decode_fwd(q_in, k_buffer_flat, o, **kwargs)
-            return o[:, : self.num_head, :]
+            compact = self._static_rows(
+                "cuda_graph_mla_out_compact",
+                o.shape[0],
+                (self.num_head, layer.v_head_dim),
+                self.input_dtype,
+                o.device,
+            )
+            if compact is None:
+                sliced = o[:, : self.num_head, :]
+                return sliced if sliced.is_contiguous() else sliced.contiguous()
+            compact.copy_(o[:, : self.num_head, :])
+            return compact
         if self.head_pad_mode == "zero":
             q_in = torch.nn.functional.pad(
                 q, (0, 0, 0, self.num_head_padded - num_head)
@@ -1443,24 +1701,54 @@ class AiterAttnBackend(AttentionBackend):
         """
         num_head = layer.tp_q_head_num
         q = q.reshape(-1, q.shape[-2], layer.qk_head_dim)
-        if q.shape[1] == self.num_head_padded:
-            q = q[:, :num_head, :]
-        elif q.shape[1] != num_head:
+        already_wide = q.shape[1] == self.num_head_padded
+        if not already_wide and q.shape[1] != num_head:
             q = q.reshape(-1, num_head, layer.qk_head_dim)
         num_tokens = q.shape[0]
         if kwargs.get("q_scale") is None:
             kwargs["q_scale"] = self.k_scale
-        if q.dtype == fp8_dtype:
-            q_fp8 = q
-        else:
+        dim = layer.qk_head_dim
+        if already_wide and q.dtype == fp8_dtype:
+            # Fused writer already filled heads [:num_head] of a pre-zeroed
+            # 16-wide buffer. Slicing back to 12 and padding again is the
+            # index_elementwise pair.
+            q_in = q
+        elif already_wide:
             q_fp8, _ = scaled_fp8_quant(q.reshape(num_tokens, -1), kwargs["q_scale"])
-            q_fp8 = q_fp8.view(num_tokens, num_head, layer.qk_head_dim)
-        q_in = q_fp8.new_zeros((num_tokens, self.num_head_padded, layer.qk_head_dim))
-        q_in[:, :num_head, :] = q_fp8
-        o = q.new_empty(
-            (num_tokens, self.num_head_padded, layer.v_head_dim),
-            dtype=self.input_dtype,
+            q_in = q_fp8.view(num_tokens, self.num_head_padded, dim)
+        else:
+            if q.dtype == fp8_dtype:
+                q_fp8 = q
+            else:
+                q_fp8, _ = scaled_fp8_quant(
+                    q.reshape(num_tokens, -1), kwargs["q_scale"]
+                )
+                q_fp8 = q_fp8.view(num_tokens, num_head, dim)
+            wide = self._static_rows(
+                "cuda_graph_q_fp8_wide",
+                num_tokens,
+                (self.num_head_padded, dim),
+                fp8_dtype,
+                q.device,
+            )
+            if wide is None:
+                wide = q_fp8.new_zeros((num_tokens, self.num_head_padded, dim))
+            wide.view(num_tokens, self.num_head_padded, dim)[:, :num_head, :].copy_(
+                q_fp8
+            )
+            q_in = wide
+        o = self._static_rows(
+            "cuda_graph_mla_out",
+            num_tokens,
+            (self.num_head_padded, layer.v_head_dim),
+            self.input_dtype,
+            q.device,
         )
+        if o is None:
+            o = q.new_empty(
+                (num_tokens, self.num_head_padded, layer.v_head_dim),
+                dtype=self.input_dtype,
+            )
         # Leave the split count to aiter.
         kwargs["num_kv_splits"] = None
         # The asm kernel loads KV row 0 for masked positions and weights it by
@@ -1468,7 +1756,21 @@ class AiterAttnBackend(AttentionBackend):
         # write target of CUDA-graph padding tokens, whose K/V can be NaN.
         k_buffer_flat[0].zero_()
         mla_decode_fwd(q_in, k_buffer_flat, o, **kwargs)
-        return o[:, :num_head, :]
+        # ``o[:, :num_head]`` is not contiguous. Returning that view makes the
+        # qlen unpad reshape allocate. Pack into the buffer allocated before
+        # capture.
+        compact = self._static_rows(
+            "cuda_graph_mla_out_compact",
+            num_tokens,
+            (num_head, layer.v_head_dim),
+            self.input_dtype,
+            o.device,
+        )
+        if compact is None:
+            sliced = o[:, :num_head, :]
+            return sliced if sliced.is_contiguous() else sliced.contiguous()
+        compact.copy_(o[:, :num_head, :])
+        return compact
 
     def _fp8_prefill_asm_enabled(self) -> bool:
         """PS-ASM fp8 prefill. 12-head zero-pad stays off unless opted in.
@@ -1700,9 +2002,16 @@ class AiterAttnBackend(AttentionBackend):
         reduce_partial_map = self.forward_metadata.reduce_partial_map
         num_kv_splits = self.forward_metadata.num_kv_splits
 
-        return self._mla_decode_fwd_with_head_pad(
+        q, real_qlen = self._pad_q_for_qseqlen4(
+            q, self.forward_metadata.qo_indptr, max_q_len
+        )
+        k_buffer_flat = k_buffer.view(-1, 1, 1, layer.qk_head_dim)
+        if real_qlen is not None:
+            # Masked query rows load KV index 0. A NaN there poisons the batch.
+            k_buffer_flat[0].zero_()
+        o = self._mla_decode_fwd_with_head_pad(
             q,
-            k_buffer.view(-1, 1, 1, layer.qk_head_dim),
+            k_buffer_flat,
             layer,
             qo_indptr=self.forward_metadata.qo_indptr,
             kv_indptr=self.forward_metadata.kv_indptr,
@@ -1721,7 +2030,9 @@ class AiterAttnBackend(AttentionBackend):
             kv_scale=k_descale,
             intra_batch_mode=intra_batch_mode,
             num_kv_splits=num_kv_splits,
+            causal=not self._draft_repeat_block(max_q_len),
         )
+        return self._unpad_qseqlen4_out(o, max_q_len, real_qlen)
 
     def _get_dcp_graph_max_local_kv_len(self) -> int:
         """Static upper bound on this rank's shard, ceil(max_context_len / W)."""
@@ -2197,7 +2508,7 @@ class AiterAttnBackend(AttentionBackend):
                     TOKEN_BLOCK_PARALLEL=num_token_blocks > 1,
                 )
 
-                if _use_mla_ps_kernel:
+                if self.use_mla_ps_kernel:
                     max_seqlen_qo = num_draft_tokens
                     (
                         work_metadata,
@@ -2262,6 +2573,8 @@ class AiterAttnBackend(AttentionBackend):
         elif forward_batch.forward_mode.is_target_verify():
             if self.use_mla:
                 draft_num = spec_info.draft_token_num
+                # qseqlen4 loads 4 query rows. Keep KV at the real qlen.
+                launch_q = self._persistent_qh16_launch_qlen(draft_num)
                 device = forward_batch.seq_lens.device
                 if self.dcp_world_size > 1:
                     kv_lens = forward_batch.seq_lens.to(torch.int32).clone()
@@ -2273,8 +2586,8 @@ class AiterAttnBackend(AttentionBackend):
                 qo_indptr = self.qo_indptr[: bs + 1]
                 qo_indptr[: bs + 1] = torch.arange(
                     0,
-                    (1 + bs) * draft_num,
-                    step=draft_num,
+                    (1 + bs) * launch_q,
+                    step=launch_q,
                     dtype=torch.int32,
                     device=device,
                 )
@@ -2315,8 +2628,8 @@ class AiterAttnBackend(AttentionBackend):
                         (max_kv_len + self.dcp_world_size - 1) // self.dcp_world_size,
                     )
 
-                if _use_mla_ps_kernel and self.dcp_world_size <= 1:
-                    max_seqlen_qo = draft_num
+                if self.use_mla_ps_kernel and self.dcp_world_size <= 1:
+                    max_seqlen_qo = launch_q
                     (
                         work_metadata,
                         work_indptr,
@@ -2350,7 +2663,7 @@ class AiterAttnBackend(AttentionBackend):
                     qo_indptr,
                     # self.mla_indices_updater_prefill.kv_last_page_len,
                     self.kv_last_page_len[:bs],
-                    draft_num,
+                    launch_q,
                     None,
                     work_metadata=work_metadata,
                     work_info_set=work_info_set,
@@ -2756,10 +3069,14 @@ class AiterAttnBackend(AttentionBackend):
             )
 
         # if self.use_mla and (_use_mla_ps_kernel or self.kv_cache_dtype == fp8_dtype):
-        if self.use_mla and (_use_mla_ps_kernel or self.use_mla_dcp_asm):
+        if self.use_mla and (self.use_mla_ps_kernel or self.use_mla_dcp_asm):
             # for persistent mla_decode_fwd
             max_seqlen_qo = (
                 1 if self.num_draft_tokens is None else self.num_draft_tokens
+            )
+            # qlen 3 launches as qseqlen4; the static metadata buffer must fit.
+            max_seqlen_qo = max(
+                max_seqlen_qo, self._persistent_qh16_launch_qlen(max_seqlen_qo)
             )
             metadata_fast_mode, metadata_intra_batch_mode = (
                 (True, False) if self.use_mla_dcp_asm else (fast_mode, intra_batch_mode)
@@ -2787,6 +3104,71 @@ class AiterAttnBackend(AttentionBackend):
             self.reduce_indptr = None
             self.reduce_final_map = None
             self.reduce_partial_map = None
+
+        # Draft qlen-3 and the 8→16 / 12→16 head pad write these instead of
+        # allocating a new tensor on every layer. Sized for qseqlen4.
+        # Absorbed Q is kv_lora + rope; model qk_head_dim is the pre-absorb
+        # width and does not match the tensor mla_decode_fwd sees.
+        if self.use_mla and getattr(self, "qk_head_dim", None):
+            rows = max(int(max_num_tokens), int(max_bs) * 4)
+            n_head = self.num_head
+            n_head_pad = getattr(self, "num_head_padded", n_head)
+            absorb_q = getattr(self, "mla_absorb_q_dim", self.qk_head_dim)
+            absorb_v = getattr(self, "mla_absorb_v_dim", self.v_head_dim)
+            # 12-head gluon keeps bf16 Q. The 8-head draft writer emits fp8.
+            # A dtype miss makes repeat_head_zero_q return None and the
+            # per-step head copy comes back.
+            if self.kv_cache_dtype == fp8_dtype and not (
+                n_head == 12 and envs.SGLANG_AITER_MLA_GLUON.get()
+            ):
+                wide_dtype = fp8_dtype
+            else:
+                wide_dtype = self.input_dtype
+            if n_head < n_head_pad:
+                # Dead heads stay zero for the life of the buffer. The fused
+                # writer only fills the real-head slice.
+                self.cuda_graph_q_zero_pad = torch.zeros(
+                    (rows, n_head_pad, absorb_q),
+                    dtype=wide_dtype,
+                    device=self.device,
+                )
+                self.cuda_graph_q_fp8_wide = torch.zeros(
+                    (rows, n_head_pad, absorb_q),
+                    dtype=fp8_dtype,
+                    device=self.device,
+                )
+            # Fourth query row stays zero. The pad copies only the real rows.
+            self.cuda_graph_qseqlen4_q = torch.zeros(
+                (rows, n_head_pad, absorb_q),
+                dtype=wide_dtype,
+                device=self.device,
+            )
+            if n_head != n_head_pad:
+                self.cuda_graph_qseqlen4_q_native = torch.zeros(
+                    (rows, n_head, absorb_q),
+                    dtype=wide_dtype,
+                    device=self.device,
+                )
+            self.cuda_graph_head_pad = torch.empty(
+                (rows, n_head_pad, absorb_q),
+                dtype=fp8_dtype,
+                device=self.device,
+            )
+            self.cuda_graph_mla_out = torch.empty(
+                (rows, n_head_pad, absorb_v),
+                dtype=self.input_dtype,
+                device=self.device,
+            )
+            self.cuda_graph_mla_out_compact = torch.empty(
+                (rows, n_head, absorb_v),
+                dtype=self.input_dtype,
+                device=self.device,
+            )
+            self.cuda_graph_qseqlen4_out = torch.empty(
+                (rows, n_head, absorb_v),
+                dtype=self.input_dtype,
+                device=self.device,
+            )
 
         if self.use_sliding_window_kv_pool:
             max_num_blocks_per_seq = (
@@ -2992,25 +3374,25 @@ class AiterAttnBackend(AttentionBackend):
         elif forward_mode.is_target_verify():
             bs = len(req_pool_indices)
             assert verify_tokens_per_req is not None
-            # MLA uses a fixed draft length (num_draft_tokens); the non-MLA
-            # unified path derives it per batch from input_ids.
-            tokens_per_req = (
-                self.num_draft_tokens if self.use_mla else verify_tokens_per_req
+            # Packed query width is the live batch, not speculative_num_draft_tokens.
+            # K3 DSpark captures query_token_num=gamma (3) while num_draft_tokens
+            # is gamma+1 (4). Extending KV by num_draft_tokens reads one page
+            # past the real cache on replay. qseqlen4 still launches at 4; the
+            # extra query row is zero-padded inside the captured forward.
+            real_q = verify_tokens_per_req
+            launch_q = (
+                self._persistent_qh16_launch_qlen(real_q) if self.use_mla else real_q
             )
             qo_indptr = self.qo_indptr[: bs + 1]
             qo_indptr[: bs + 1] = torch.arange(
                 0,
-                (1 + bs) * tokens_per_req,
-                step=tokens_per_req,
+                (1 + bs) * launch_q,
+                step=launch_q,
                 dtype=torch.int32,
                 device=self.device,
             )
             if self.use_mla:
-                kv_lens = (
-                    seq_lens
-                    if self.dcp_world_size > 1
-                    else seq_lens + self.num_draft_tokens
-                )
+                kv_lens = seq_lens if self.dcp_world_size > 1 else seq_lens + real_q
             else:
                 kv_lens = seq_lens
             kv_indptr = self.kv_indptr[: bs + 1]
@@ -3018,9 +3400,7 @@ class AiterAttnBackend(AttentionBackend):
             kv_indices = self.cuda_graph_kv_indices
             # seq_lens_sum is None at capture (dummy seq_lens); only check on replay.
             if seq_lens_sum is not None:
-                kv_indices_used = seq_lens_sum + (
-                    self.num_draft_tokens * bs if self.use_mla else 0
-                )
+                kv_indices_used = seq_lens_sum + (real_q * bs if self.use_mla else 0)
                 assert_buffer_fits(
                     kv_indices_used,
                     kv_indices.numel(),
@@ -3067,8 +3447,8 @@ class AiterAttnBackend(AttentionBackend):
                 )
 
             if self.use_mla:
-                max_q_len = self.num_draft_tokens
-                if _use_mla_ps_kernel and self.dcp_world_size <= 1:
+                max_q_len = launch_q
+                if self.use_mla_ps_kernel and self.dcp_world_size <= 1:
                     num_kv_splits = self.max_split_per_batch
 
                     self.make_mla_meta_data(
@@ -3198,7 +3578,7 @@ class AiterAttnBackend(AttentionBackend):
             kv_last_page_len = self.cuda_graph_kv_last_page_len[:bs]
             max_q_len = num_tokens_per_req
 
-            if self.use_mla and _use_mla_ps_kernel:
+            if self.use_mla and self.use_mla_ps_kernel:
                 num_kv_splits = self.max_split_per_batch
 
                 self.make_mla_meta_data(
@@ -3866,15 +4246,31 @@ class AiterAttnBackend(AttentionBackend):
 
                 num_kv_splits = self.forward_metadata.num_kv_splits
 
+                # _forward_mla_decode zero-pads qlen 3 to the qseqlen4 tile.
+                # This verify branch used to pass the packed qlen-3 tensor
+                # while qo_indptr already steps by 4, so the kernel reads one
+                # row past the allocation. Eager captures hide that inside the
+                # caching allocator; the CUDA-graph pool is exact and faults.
+                max_q_len = self.forward_metadata.max_q_len or 1
+                # A fused writer may already have produced 16 heads. Viewing
+                # that storage as tp_q_head_num interleaves the zero lanes
+                # into the real heads.
+                q_mla = self._mla_q_heads(q, layer)
+                q_mla, real_qlen = self._pad_q_for_qseqlen4(
+                    q_mla, self.forward_metadata.qo_indptr, max_q_len
+                )
+                k_flat = K_Buffer.view(-1, 1, 1, layer.qk_head_dim)
+                if real_qlen is not None:
+                    k_flat[0].zero_()
                 o = self._mla_decode_fwd_with_head_pad(
-                    q,
-                    K_Buffer.view(-1, 1, 1, layer.qk_head_dim),
+                    q_mla,
+                    k_flat,
                     layer,
                     qo_indptr=self.forward_metadata.qo_indptr,
                     kv_indptr=self.forward_metadata.kv_indptr,
                     kv_indices=self.forward_metadata.kv_indices,
                     kv_last_page_lens=self.forward_metadata.kv_last_page_len,
-                    max_seqlen_q=self.forward_metadata.max_q_len,
+                    max_seqlen_q=max_q_len,
                     sm_scale=layer.scaling,
                     logit_cap=layer.logit_cap,
                     work_meta_data=work_metadata,
@@ -3887,8 +4283,9 @@ class AiterAttnBackend(AttentionBackend):
                     kv_scale=k_descale,
                     intra_batch_mode=intra_batch_mode,
                     num_kv_splits=num_kv_splits,
+                    causal=not self._draft_repeat_block(max_q_len),
                 )
-                return o
+                return self._unpad_qseqlen4_out(o, max_q_len, real_qlen)
             elif forward_batch.forward_mode.is_draft_extend_v2():
                 work_metadata = self.forward_metadata.work_metadata
                 work_indptr = self.forward_metadata.work_indptr
