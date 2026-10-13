@@ -4,7 +4,8 @@
 Launch: torchrun --nproc_per_node=8 \\
   python/sglang/test/manual/kernels/bench_hip_ar_residual.py
 
-SGLANG_ROCM_AR_RESIDUAL defaults on after this pair won (17.90 vs 17.01 us).
+SGLANG_ROCM_AR_RESIDUAL defaults off: fused AR+residual is slower than plain AR
+at M=1/2 and within 5% at M=4/8 once the add is folded into attn_res_hip.
 """
 
 from __future__ import annotations

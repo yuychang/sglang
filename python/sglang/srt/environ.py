@@ -952,7 +952,10 @@ class Envs:
     # Fold a pending residual add into AITER custom all-reduce. M in {1,2,4}
     # uses 1-stage; M=8 uses a 2-stage residual epilogue that folds the add
     # into all-gather. Set MAX_TOKENS=4 to keep it on 1-stage sizes only.
-    SGLANG_ROCM_AR_RESIDUAL = EnvBool(True)
+    # Off by default: Kimi-K3 already folds the add into attn_res_hip, so the
+    # baseline is plain AR. MI355X TP8 decode TPOT is 1.1% worse at c1, 0.7%
+    # at c2, and unchanged at c4/c8 with it on.
+    SGLANG_ROCM_AR_RESIDUAL = EnvBool(False)
     SGLANG_ROCM_AR_RESIDUAL_MAX_TOKENS = EnvInt(8)
     # Fold the Kimi-K3 KDA [f_a|b] tail into the wide [q,k,v,g] projection.
     # The merged N=6288 shape is used only up to MAX_TOKENS below, where decode
