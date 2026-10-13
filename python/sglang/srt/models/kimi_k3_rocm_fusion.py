@@ -249,9 +249,9 @@ def _k3_fuse_kda_o_norm_ptpc(
     ):
         return None
     # The split path materializes gated RMSNorm in bf16 and then launches
-    # dynamic per-token quant for o_proj. AITER's sigmoid variant preserves
-    # that bf16 rounding boundary and emits the tuple consumed directly by
-    # apply_fp8_ptpc_linear.
+    # dynamic per-token quant for o_proj. AITER's sigmoid variant quantizes
+    # the fp32 gated value directly (no bf16 round trip; GSM8K-neutral) and
+    # emits the tuple consumed directly by apply_fp8_ptpc_linear.
     from aiter import dtypes as aiter_dtypes
     from aiter.ops.gated_rmsnorm_fp8_per_token_quant import (
         gated_rmsnorm_fp8_per_token_quant,
@@ -273,7 +273,7 @@ def _k3_fuse_kda_o_norm_ptpc(
         norm_gate,
         o_norm.weight,
         o_norm.eps,
-        sigmoid_gate=True,
+        use_sigmoid=True,
     )
     _k3_log_once(
         "kda_onorm_ptpc",
