@@ -131,6 +131,10 @@ def try_fused_mla_q_cache(
             q_scale=self._k3_mla_q_cache_scale,
         )
     else:
+        # The Triton kernel indexes cos/sin by position without clamping. All-zero
+        # positions read row 0 of the one-row identity tables (cos=1, sin=0),
+        # which is identity RoPE with no out-of-bounds reads on padded tokens.
+        # q_scale is omitted because K3's Q scale is always 1.0.
         q, _, _, _ = fused_qk_rope_cat_and_cache_mla(
             q_nope_out,
             q_pe,
@@ -138,15 +142,12 @@ def try_fused_mla_q_cache(
             k_pe,
             kv_cache,
             out_cache_loc,
-            positions,
+            mla_zero_positions(self, tokens, positions.device),
             cos_cache,
             sin_cache,
             scale,
             True,
-            q_scale=self._k3_mla_q_cache_scale,
             q_out_dtype=q_out_dtype,
-            compute_all_q_rope=False,
-            identity_rope=True,
         )
     k_placeholder = mla_k_placeholder(
         self, k_nope.shape[0], k_nope.dtype, k_nope.device
@@ -177,6 +178,19 @@ def mla_q_out_buffer(
         if zero_init:
             buf.view(torch.uint8).zero_()
         self._k3_mla_q_out = buf
+    return buf[:tokens]
+
+
+def mla_zero_positions(self, tokens: int, device: torch.device) -> torch.Tensor:
+    """Persistent all-zero positions for the identity-RoPE Triton fallback."""
+    buf = getattr(self, "_k3_mla_zero_positions", None)
+    if (
+        not isinstance(buf, torch.Tensor)
+        or buf.device != device
+        or buf.shape[0] < tokens
+    ):
+        buf = torch.zeros((tokens,), dtype=torch.int64, device=device)
+        self._k3_mla_zero_positions = buf
     return buf[:tokens]
 
 
