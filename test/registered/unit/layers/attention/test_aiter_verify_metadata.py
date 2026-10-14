@@ -1,4 +1,4 @@
-"""AITER unified-verify metadata when the scheduler hands over no host seq_lens."""
+"""AITER verify metadata builders."""
 
 import unittest
 from types import SimpleNamespace
@@ -125,6 +125,29 @@ class TestAiterUnifiedVerifyWithoutHostSeqLens(CustomTestCase):
             backend,
             lambda fb: backend.init_forward_metadata_out_graph(fb, in_capture=False),
         )
+
+
+class TestAiterUniformQoIndptr(CustomTestCase):
+    """Verify and draft-extend metadata reuse the persistent qo_indptr buffer that
+    captured graphs read, so the write must stay in place, int32 and exactly
+    bs + 1 rows long, matching arange(0, (bs + 1) * n, n)."""
+
+    def test_writes_prefix_of_persistent_buffer(self):
+        max_bs = 9
+        backend = aiter_backend.AiterAttnBackend.__new__(aiter_backend.AiterAttnBackend)
+        backend.qo_indptr = torch.full((max_bs + 1,), -1, dtype=torch.int32)
+        buffer_ptr = backend.qo_indptr.data_ptr()
+        for bs, tokens_per_req in ((1, 1), (3, 4), (max_bs, 2), (2, 17)):
+            backend.qo_indptr.fill_(-1)
+            qo_indptr = backend._set_uniform_qo_indptr(bs, tokens_per_req)
+            expected = torch.arange(
+                0, (bs + 1) * tokens_per_req, tokens_per_req, dtype=torch.int32
+            )
+            self.assertEqual(qo_indptr.data_ptr(), buffer_ptr)
+            self.assertEqual(backend.qo_indptr.data_ptr(), buffer_ptr)
+            self.assertEqual(qo_indptr.dtype, torch.int32)
+            self.assertTrue(torch.equal(qo_indptr, expected))
+            self.assertTrue(torch.all(backend.qo_indptr[bs + 1 :] == -1))
 
 
 if __name__ == "__main__":
