@@ -16,12 +16,14 @@
 # aggregate_stream_torch is the eager reference (tests and the
 # H % _BLOCK_H != 0 shape fallback of aggregate_stream).
 
+from functools import cache
 from typing import Optional
 
 import torch
 import triton
 import triton.language as tl
 
+from sglang.srt.environ import envs
 from sglang.srt.layers.layernorm import RMSNorm
 from sglang.srt.layers.linear import ReplicatedLinear
 from sglang.srt.utils import is_cuda, is_hip, is_npu
@@ -61,6 +63,11 @@ def _use_hip_fused(hidden_size: int, nvb: int) -> bool:
 
         _HIP_SHAPE_GATE = supports_attn_res_hip
     return _HIP_SHAPE_GATE(hidden_size, nvb)
+
+
+@cache
+def _hip_tuned_launch() -> bool:
+    return envs.SGLANG_OPT_HIP_K3_ATTN_RES_TUNED_LAUNCH.get()
 
 
 def get_cw(
@@ -311,6 +318,7 @@ def _aggregate_hip(
         addend=addend,
         prefix_out=prefix,
         write_prefix=write_bank_row,
+        tuned_launch=_hip_tuned_launch(),
     )
     return out, prefix
 

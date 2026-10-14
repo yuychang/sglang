@@ -21,6 +21,10 @@ import triton.language as tl
 # next_pow2(nvb)=8 is 2.0x faster, 16 is 1.2x, 32 is 0.2x. K3 sits right at the
 # limit with H=7168 (one masked tile of 8192) and nvb <= 8.
 MAX_REGISTER_TILE: int = 8 * 8192
+# (num_warps, waves_per_eu) by padded bank depth, measured at T=2 under graph
+# replay on MI355X; other depths keep the untuned (4, 0).
+_UNTUNED_LAUNCH: tuple[int, int] = (4, 0)
+_TUNED_LAUNCH: dict[int, tuple[int, int]] = {1: (4, 3), 2: (4, 3), 4: (4, 1), 8: (8, 2)}
 
 
 @cache
@@ -146,6 +150,7 @@ def attn_res_hip(
     addend: Optional[torch.Tensor] = None,
     prefix_out: Optional[torch.Tensor] = None,
     write_prefix: bool = False,
+    tuned_launch: bool = False,
 ) -> None:
     """Single-kernel attention-residual aggregation for ROCm.
 
@@ -169,6 +174,7 @@ def attn_res_hip(
     write_prefix : also snapshot the prefix row into bank[:, nvb, :] (bit-exact
                  copy, fused into the score pass which already has the row in
                  registers); requires NB > nvb
+    tuned_launch : use the per-depth num_warps / waves_per_eu from _TUNED_LAUNCH
     """
     T, H = prefix_sum.shape
     assert nvb >= 1, "nvb == 0 has nothing to aggregate; the caller must handle it"
@@ -185,6 +191,10 @@ def attn_res_hip(
     prefix_out_arg = prefix_out if has_add else prefix_sum
     ow_arg = ow if ow is not None else cw
 
+    r_pad = triton.next_power_of_2(nvb)
+    num_warps, waves_per_eu = (
+        _TUNED_LAUNCH.get(r_pad, _UNTUNED_LAUNCH) if tuned_launch else _UNTUNED_LAUNCH
+    )
     _agg_kernel[(T,)](
         prefix_sum,
         addend_arg,
@@ -204,9 +214,10 @@ def attn_res_hip(
         H=H,
         BLOCK_H=triton.next_power_of_2(H),
         NVB=nvb,
-        R_PAD=triton.next_power_of_2(nvb),
+        R_PAD=r_pad,
         HAS_ADD=has_add,
         WRITE_BANK=write_prefix,
         APPLY_OUT_NORM=ow is not None,
-        num_warps=4,
+        num_warps=num_warps,
+        waves_per_eu=waves_per_eu,
     )
