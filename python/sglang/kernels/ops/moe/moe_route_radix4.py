@@ -305,6 +305,8 @@ def _launch_with_sort(
     )
     return {
         "topk_ids_ptr": int(out_i.data_ptr()),
+        # sorted_weights were gathered from out_w; ROCm/aiter#6484 matches on it.
+        "topk_weights_ptr": int(out_w.data_ptr()),
         "M": M,
         "block_m": _SORT_BM,
         "num_experts": _NUM_EXPERTS,
