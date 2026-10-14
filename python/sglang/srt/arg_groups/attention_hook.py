@@ -308,28 +308,28 @@ def handle_linear_attn_backend(server_args: Any):
     # SM100+ FlashInfer GDN decode requires bf16 state; SM90 uses float32.
     decode = cfg.linear_attn_decode_backend or cfg.linear_attn_backend
 
-    # FlashKDA is a prefill-only KDA kernel (no decode kernel) but shares the
-    # backend choice list, so guard it from being selected for decode: error
-    # on an explicit --linear-attn-decode-backend flashkda, and fall back to
-    # triton decode when it was only inherited from base=flashkda (prefill
+    # FlashKDA and AITER FlashKDA are prefill-only KDA kernels (no decode kernel)
+    # but share the backend choice list, so guard them from being selected for
+    # decode: error on an explicit --linear-attn-decode-backend, and fall back to
+    # triton decode when it was only inherited from the base backend (prefill
     # keeps FlashKDA).
-    if decode == "flashkda":
-        if cfg.linear_attn_decode_backend == "flashkda":
+    if decode in ("flashkda", "aiter_flashkda"):
+        if cfg.linear_attn_decode_backend == decode:
             raise ValueError(
-                "--linear-attn-decode-backend flashkda is not supported: "
-                "FlashKDA is prefill-only. Use "
-                "--linear-attn-prefill-backend flashkda (decode stays on triton)."
+                f"--linear-attn-decode-backend {decode} is not supported: "
+                f"it is prefill-only. Use --linear-attn-prefill-backend {decode} "
+                "(decode stays on triton)."
             )
         declare_resolution(
             server_args,
             "_handle_linear_attn_backend",
             linear_attn_decode_backend="triton",
         )
-        decode = "triton"
         logger.info(
-            "FlashKDA is prefill-only; using triton for KDA decode "
-            "(FlashKDA stays on prefill)."
+            f"{decode} is prefill-only; using triton for KDA decode "
+            f"({decode} stays on prefill)."
         )
+        decode = "triton"
 
     if (
         decode == "flashinfer"
