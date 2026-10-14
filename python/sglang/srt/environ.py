@@ -1888,6 +1888,12 @@ class Envs:
     # them from this many tokens per batch; BF16 weights stay as the fallback.
     SGLANG_OPT_HIP_K3_MOE_LATENT_MXFP4 = EnvBool(False)
     SGLANG_OPT_HIP_K3_MOE_LATENT_MXFP4_MIN_TOKENS = EnvInt(2048)
+    # Kimi-K3 on ROCm: quantize decode activations to FP8 per token inside the
+    # kernels that produce them, for per-channel FP8 attention linears, within
+    # this decode batch window.
+    SGLANG_OPT_HIP_K3_PTPC_FP8 = EnvBool(False)
+    SGLANG_OPT_HIP_K3_PTPC_FP8_MIN_TOKENS = EnvInt(1)
+    SGLANG_OPT_HIP_K3_PTPC_FP8_MAX_TOKENS = EnvInt(256)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_CACHE_CAPACITY = EnvInt(2)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_MIN_HITS = EnvInt(2)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_MAX_SEQLEN = EnvInt(6144)
