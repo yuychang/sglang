@@ -197,6 +197,26 @@ del _mod, _fn
 
 register_kernel(
     KernelSpec(
+        op="quantization.mla_prefill_fp8_quant",
+        backend=KernelBackend.TRITON,
+        target=(
+            "sglang.kernels.ops.quantization.mla_prefill_fp8_quant_hip"
+            ":mla_prefill_fp8_quant"
+        ),
+        capabilities=frozenset({CapabilityRequirement.HIP}),
+        format_signature=FormatSignature(
+            supported_dtypes=("float8_e4m3fn",),
+            description=(
+                "per-tensor e4m3fn quant of up to three bf16/fp16 "
+                "(tokens, heads, dim) operands; returns (fp8, descale) pairs"
+            ),
+        ),
+        description="Batched MLA prefill Q/K/V per-tensor FP8 quant (Triton, AMDGCN asm).",
+    )
+)
+
+register_kernel(
+    KernelSpec(
         op="quantization.nvfp4_gemm_swiglu_nvfp4_quant",
         backend=KernelBackend.CUTE_DSL,
         target=(

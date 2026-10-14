@@ -477,6 +477,14 @@ class AiterAttnBackend(AttentionBackend):
             if self.use_mla_flydsl_fp8_prefill
             else None
         )
+        self._mla_prefill_batched_fp8_quant = None
+        if self.use_mla_flydsl_fp8_prefill:
+            # FlyDSL support implies e4m3fn, the only format the batched quant emits.
+            from sglang.kernels.ops.quantization.mla_prefill_fp8_quant_hip import (
+                mla_prefill_fp8_quant,
+            )
+
+            self._mla_prefill_batched_fp8_quant = mla_prefill_fp8_quant
         self._mla_flydsl_fallback_logged = False
         self.use_fp8_prefill_attn = (
             _use_fp8_prefill_attn
@@ -1936,18 +1944,24 @@ class AiterAttnBackend(AttentionBackend):
         quantized, scale = scaled_fp8_quant(flat, scale.view(1))
         return quantized.view(packed.shape), scale
 
+    def _quantize_mla_prefill_fp8_operands(
+        self, *tensors: torch.Tensor
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        # The batched kernel matches _quantize_mla_prefill_fp8 bit for bit in two launches.
+        quantized = None
+        if self._mla_prefill_batched_fp8_quant is not None:
+            quantized = self._mla_prefill_batched_fp8_quant(tensors)
+        if quantized is None:
+            quantized = [self._quantize_mla_prefill_fp8(x) for x in tensors]
+        return quantized
+
     def _quantize_mla_flydsl_operands(
         self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        q_fp8 = self._quantize_mla_prefill_fp8(q)
         if k.dtype == fp8_dtype:
             unit = self._mla_flydsl_unit_descale
-            return [q_fp8, (k, unit), (v, unit)]
-        return [
-            q_fp8,
-            self._quantize_mla_prefill_fp8(k),
-            self._quantize_mla_prefill_fp8(v),
-        ]
+            return [*self._quantize_mla_prefill_fp8_operands(q), (k, unit), (v, unit)]
+        return self._quantize_mla_prefill_fp8_operands(q, k, v)
 
     @staticmethod
     def _mla_flydsl_accepts(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> bool:

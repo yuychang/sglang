@@ -26,6 +26,7 @@ def _backend(flydsl_fn):
     backend.use_mla_flydsl_fp8_prefill = True
     backend._mla_flydsl_varlen_attn = flydsl_fn
     backend._mla_flydsl_unit_descale = torch.ones(1)
+    backend._mla_prefill_batched_fp8_quant = None
     backend._mla_flydsl_fallback_logged = False
     # The real quant runs AITER's GPU kernel.
     backend._quantize_mla_prefill_fp8 = _fake_quant
