@@ -28,6 +28,36 @@ register_cpu_ci(est_time=5, suite="base-a-test-cpu")
 DOUBLE_ROUND_PROBE = 1.0 + 2.0**-11 + 2.0**-23
 
 
+class TestTrackConvIndices(CustomTestCase):
+    def test_host_token_bound_matches_device_bound(self):
+        """Conv-track positions clamp to [0, query_start_loc[-1] - 1]; the host
+        token count must give the same indices as the device bound."""
+        backend = object.__new__(GDNAttnBackend)
+        backend.conv_states_shape = (8, 4)
+        backend.device = torch.device("cpu")
+        query_start_loc = torch.tensor([0, 5, 8, 11], dtype=torch.int32)
+        # Row 0 underflows the start, row 2 overflows the last token.
+        aligned_lens = torch.tensor([2, 3, 6], dtype=torch.int32)
+        batch = SimpleNamespace(
+            mamba_track_aligned_lens=lambda: aligned_lens,
+            mamba_track_mask=torch.tensor([True, False, True]),
+        )
+        start_indices = (query_start_loc[:-1] + aligned_lens - 4)[[0, 2]]
+        expected = (
+            start_indices.unsqueeze(-1) + torch.arange(4, dtype=torch.int32)
+        ).clamp(0, query_start_loc[-1] - 1)
+        for track_mask_indices in (None, torch.tensor([0, 2])):
+            with self.subTest(track_mask_indices=track_mask_indices):
+                indices = backend._init_track_conv_indices(
+                    query_start_loc=query_start_loc,
+                    forward_batch=batch,
+                    track_mask_indices=track_mask_indices,
+                    num_tokens=11,
+                )
+                torch.testing.assert_close(indices, expected, rtol=0, atol=0)
+                self.assertEqual(indices.tolist(), [[0, 0, 0, 1], [10, 10, 10, 10]])
+
+
 class TestTrackMambaStateDtype(CustomTestCase):
     """The fp32 track snapshot is cast to the pool dtype exactly once.
 
