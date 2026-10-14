@@ -651,3 +651,11 @@ register_kernel(
         capabilities=frozenset({CapabilityRequirement.HIP}),
     )
 )
+register_kernel(
+    KernelSpec(
+        op="gemm.ptpc_fp8",
+        backend=KernelBackend.AITER,
+        target="sglang.kernels.ops.gemm.ptpc_fp8_aiter_hip:run",
+        capabilities=frozenset({CapabilityRequirement.HIP}),
+    )
+)
