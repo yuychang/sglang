@@ -48,6 +48,7 @@ if _use_aiter_gfx95:
     from aiter.ops.triton.fused_fp8_quant import fused_rms_fp8_group_quant
 
     from sglang.kernels.ops.quantization.fp8_kernel import fp8_dtype
+    from sglang.srt.layers.attention.aiter_backend import AiterAttnBackend
     from sglang.srt.layers.quantization.rocm_mxfp4_utils import fused_rms_mxfp4_quant
 
 
@@ -363,3 +364,26 @@ class DeepseekMHARocmForwardMixin:
             )
             kv_a = kv_a.squeeze(1).contiguous()
         return kv_a, k_pe
+
+    def _use_fp8_prefix_kv_proj_rocm(self: DeepseekV2AttentionMLA, backend) -> bool:
+        return (
+            _use_aiter_gfx95
+            and isinstance(backend, AiterAttnBackend)
+            and backend.use_mla_flydsl_fused_kv_proj
+            and self.kv_b_proj.weight.dtype == torch.uint8
+        )
+
+    def _project_prefix_kv_fp8_rocm(
+        self: DeepseekV2AttentionMLA, kv_a: torch.Tensor, k_pe: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        # The MXFP4 kv_b_proj epilogue splits nope/v, concats k_pe and writes
+        # unit-scale FP8 K/V, which FlyDSL FP8 prefill consumes directly.
+        return self.kv_b_proj(
+            (
+                kv_a,
+                k_pe.expand(-1, self.num_local_heads, -1),
+                self.qk_nope_head_dim,
+                self.v_head_dim,
+                fp8_dtype,
+            )
+        )[0]
