@@ -86,6 +86,10 @@ class ForwardMetadata:
     # extend_prefix_lens > 0 for the KDA prefill conv, shared by every layer.
     # None when the forward's metadata did not come from init_forward_metadata.
     extend_has_initial_state: Optional[torch.Tensor] = None
+    # chunk_kda varlen tables for query_start_loc, built from host extend lengths
+    # in the same forward; None means chunk_kda derives them on the device.
+    prefill_chunk_indices: Optional[torch.Tensor] = None
+    prefill_chunk_offsets: Optional[torch.Tensor] = None
 
 
 @dataclass(kw_only=True)
