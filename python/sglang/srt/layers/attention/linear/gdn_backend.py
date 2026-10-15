@@ -18,7 +18,7 @@ from sglang.srt.layers.attention.linear.utils import (
     LinearAttnKernelBackend,
     build_verify_intermediate_state_indices,
     pp_spec_stable_rows_enabled,
-    select_verify_intermediate_state_indices,
+    select_verify_intermediate_state_indices_by_cache,
 )
 from sglang.srt.layers.radix_linear_attention import RadixLinearAttention
 from sglang.srt.mem_cache.memory_pool import MambaPool
@@ -991,11 +991,14 @@ class GDNAttnBackend(MambaAttnBackendBase):
             intermediate_conv_window_cache = (
                 mamba_cache_params.intermediate_conv_window[0]
             )
-            intermediate_state_indices = select_verify_intermediate_state_indices(
-                self.verify_intermediate_state_indices,
-                forward_batch.req_pool_indices,
-                cache_indices[: query_start_loc.shape[0] - 1] >= 0,
-                self.req_to_token_pool.size,
+            intermediate_state_indices = (
+                select_verify_intermediate_state_indices_by_cache(
+                    default_indices=self.verify_intermediate_state_indices,
+                    req_pool_indices=forward_batch.req_pool_indices,
+                    cache_indices=cache_indices,
+                    num_rows=query_start_loc.shape[0] - 1,
+                    pool_size=self.req_to_token_pool.size,
+                )
             )
             mamba_pool = self.req_to_token_pool.mamba_pool
             use_replayssm_fold = (

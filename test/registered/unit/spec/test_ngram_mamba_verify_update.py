@@ -310,6 +310,43 @@ class TestDelayedMambaCommitBatchPairing(CustomTestCase):
             result, torch.tensor([17, 64, 31], dtype=torch.int32)
         )
 
+    def test_verify_scratch_rows_by_cache_match_eager_mask(self):
+        """KDA/GDN verify passes cache_indices so the valid-rows compare launches
+        only under PP spec; results must match the eager-mask helper either way."""
+        from sglang.srt.layers.attention.linear import utils
+
+        default = torch.arange(8, dtype=torch.int32)
+        req_rows = torch.tensor([17, 23, 31, 40], dtype=torch.int64)
+        # The trailing row past num_rows is padding and must be ignored.
+        cache_indices = torch.tensor([4, -1, 9, -1], dtype=torch.int32)
+
+        with patch.object(utils, "pp_spec_stable_rows_enabled", return_value=False):
+            # An unindexable placeholder fails if the mask is built while unused.
+            result = utils.select_verify_intermediate_state_indices_by_cache(
+                default_indices=default,
+                req_pool_indices=req_rows,
+                cache_indices=object(),
+                num_rows=3,
+                pool_size=64,
+            )
+        self.assertIs(result, default)
+
+        with patch.object(utils, "pp_spec_stable_rows_enabled", return_value=True):
+            expected = utils.select_verify_intermediate_state_indices(
+                default, req_rows, cache_indices[:3] >= 0, 64
+            )
+            result = utils.select_verify_intermediate_state_indices_by_cache(
+                default_indices=default,
+                req_pool_indices=req_rows,
+                cache_indices=cache_indices,
+                num_rows=3,
+                pool_size=64,
+            )
+        torch.testing.assert_close(result, expected)
+        torch.testing.assert_close(
+            result, torch.tensor([17, 64, 31], dtype=torch.int32)
+        )
+
 
 class TestMtpVerifyHookSignature(CustomTestCase):
     """Every ``update_mamba_state_after_mtp_verify`` override must accept the full

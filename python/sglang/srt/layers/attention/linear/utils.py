@@ -113,16 +113,30 @@ def resolve_linear_attn_backends(
 
 
 def select_verify_intermediate_state_indices(
-    default_indices, req_pool_indices, valid, pool_size: int
+    default_indices, req_pool_indices, valid_rows, pool_size: int
 ):
     if not pp_spec_stable_rows_enabled():
         return default_indices
 
     import torch
 
-    req_rows = req_pool_indices[: valid.shape[0]]
-    return torch.where(valid, req_rows, torch.full_like(req_rows, pool_size)).to(
+    req_rows = req_pool_indices[: valid_rows.shape[0]]
+    return torch.where(valid_rows, req_rows, torch.full_like(req_rows, pool_size)).to(
         torch.int32
+    )
+
+
+def select_verify_intermediate_state_indices_by_cache(
+    default_indices, req_pool_indices, cache_indices, num_rows: int, pool_size: int
+):
+    # The valid-rows compare is a device launch; build it only when consumed.
+    if not pp_spec_stable_rows_enabled():
+        return default_indices
+    return select_verify_intermediate_state_indices(
+        default_indices=default_indices,
+        req_pool_indices=req_pool_indices,
+        valid_rows=cache_indices[:num_rows] >= 0,
+        pool_size=pool_size,
     )
 
 
