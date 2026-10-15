@@ -1,4 +1,4 @@
-"""Unit tests for get_amdgpu_memory_capacity — no GPU needed."""
+"""Unit tests for get_amdgpu_memory_capacity; no GPU needed."""
 
 import subprocess
 import unittest

@@ -6,11 +6,12 @@ import torch
 from sglang.srt.layers import zero_copy_context
 from sglang.srt.models.kimi_k3 import KimiK3MoE
 from sglang.test.ci.ci_register import register_cpu_ci
+from sglang.test.test_utils import CustomTestCase
 
 register_cpu_ci(est_time=5, suite="base-a-test-cpu")
 
 
-class TestRoutedMoeOutputContext(unittest.TestCase):
+class TestRoutedMoeOutputContext(CustomTestCase):
     def test_topk_and_experts_both_see_the_latent_destination(self):
         latent = torch.zeros(4, 8)
         seen = {}

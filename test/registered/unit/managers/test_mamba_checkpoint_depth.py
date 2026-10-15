@@ -25,6 +25,7 @@ from sglang.srt.server_args import (
     set_global_server_args_for_scheduler,
 )
 from sglang.test.ci.ci_register import register_cpu_ci
+from sglang.test.test_utils import CustomTestCase
 
 register_cpu_ci(est_time=10, suite="base-a-test-cpu")
 
@@ -125,7 +126,7 @@ class TestMambaCheckpointDepth(unittest.TestCase):
         )
 
 
-class TestChunkedPrefillStaysOnTheChunkGrid(unittest.TestCase):
+class TestChunkedPrefillStaysOnTheChunkGrid(CustomTestCase):
     """The scheduler side of the same constraint.
 
     `test_dcp_depth_satisfies_tree_page_and_snapshot_grids` shows a prefix of

@@ -211,9 +211,9 @@ def mla_q_out_buffer(
     zero_init: bool = False,
 ) -> torch.Tensor:
     """Persistent fused-Q workspace, including optional MLA pad heads."""
-    buf = getattr(self, "_k3_mla_q_out", None)
+    buf = self._k3_mla_q_out
     if (
-        not isinstance(buf, torch.Tensor)
+        buf is None
         or buf.dtype != dtype
         or buf.device != device
         or buf.shape[1] != heads
@@ -231,9 +231,9 @@ def mla_k_placeholder(
     self, tokens: int, dtype: torch.dtype, device: torch.device
 ) -> torch.Tensor:
     width = self.kv_lora_rank + self.qk_rope_head_dim
-    buf = getattr(self, "_k3_mla_k_placeholder", None)
+    buf = self._k3_mla_k_placeholder
     if (
-        not isinstance(buf, torch.Tensor)
+        buf is None
         or buf.dtype != dtype
         or buf.device != device
         or buf.shape[1] != 1
@@ -247,6 +247,8 @@ def mla_k_placeholder(
 
 def init_mla_rocm_state(self) -> None:
     self._k3_mla_q_cache_fusion = envs.SGLANG_ROCM_K3_AITER_MLA_Q_CACHE_FUSION.get()
+    self._k3_mla_q_out: Optional[torch.Tensor] = None
+    self._k3_mla_k_placeholder: Optional[torch.Tensor] = None
     if self._k3_mla_q_cache_fusion:
         self.register_buffer(
             "_k3_identity_rope_cos",

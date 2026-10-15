@@ -13,6 +13,7 @@ N=6144 does), so they agree to bf16 rounding, not bitwise.
 
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import torch
 
@@ -125,7 +126,9 @@ class TestKimiK3KDAInProjFusion(CustomTestCase):
     def test_deferred_f_b_returns_raw_f_a(self):
         x = torch.randn(1, HIDDEN, dtype=torch.bfloat16, device=self.merged.device)
         fused_states = torch.nn.functional.linear(x, self.merged)
-        expected_f_a = torch.split(fused_states, self.all_sizes, dim=-1)[2]
+        expected_qkv, expected_g, expected_f_a, expected_beta, _pad = torch.split(
+            fused_states, self.all_sizes, dim=-1
+        )
         fake_attention = SimpleNamespace(
             use_full_rank_gate=True,
             _bfa_w=object(),
@@ -147,9 +150,16 @@ class TestKimiK3KDAInProjFusion(CustomTestCase):
             ),
         )
 
-        _, _, deferred_f_a, _ = KimiK3DeltaAttention.forward_qkvbfg_fused(
-            fake_attention, x, defer_f_b=True
-        )
+        def unexpected_gemm(*args, **kwargs):
+            raise AssertionError("the deferred f_b path must not launch the f_b GEMM")
+
+        with patch("sglang.kernels.ops.gemm.kimi_k3_tiny_gemm", unexpected_gemm):
+            qkv, beta, deferred_f_a, g = KimiK3DeltaAttention.forward_qkvbfg_fused(
+                fake_attention, x, defer_f_b=True
+            )
+        self.assertTrue(torch.equal(qkv, expected_qkv))
+        self.assertTrue(torch.equal(g, expected_g))
+        self.assertTrue(torch.equal(beta, expected_beta))
         self.assertEqual(deferred_f_a.shape[-1], HEAD_DIM)
         self.assertTrue(torch.equal(deferred_f_a, expected_f_a))
 

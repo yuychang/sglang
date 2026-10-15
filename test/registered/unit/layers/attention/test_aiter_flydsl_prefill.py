@@ -13,11 +13,12 @@ from sglang.srt.models.deepseek_common.attention_forward_methods.forward_mha_roc
     project_prefix_kv_fp8,
 )
 from sglang.test.ci.ci_register import register_cpu_ci
+from sglang.test.test_utils import CustomTestCase
 
 register_cpu_ci(est_time=5, suite="base-a-test-cpu")
 
 
-class TestAiterFlyDSLPrefill(unittest.TestCase):
+class TestAiterFlyDSLPrefill(CustomTestCase):
     def setUp(self):
         self.backend = AiterAttnBackend.__new__(AiterAttnBackend)
         self.backend.use_mla_flydsl_fp8_prefill = True
@@ -51,7 +52,7 @@ class _PrefixProj:
         return (k, v), None
 
 
-class TestPrefixKvFp8Projection(unittest.TestCase):
+class TestPrefixKvFp8Projection(CustomTestCase):
     def _module(self, dtype):
         module = DeepseekMHAForwardMixin()
         module.kv_b_proj = _PrefixProj(dtype)

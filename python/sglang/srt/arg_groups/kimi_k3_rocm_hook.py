@@ -5,7 +5,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from sglang.srt.arg_groups.overrides import declare_resolution, resolving_view
+from sglang.srt.arg_groups.overrides import (
+    declare_resolution,
+    model_config_of,
+    resolving_view,
+)
 from sglang.srt.runtime_context import get_platform
 
 if TYPE_CHECKING:
@@ -33,7 +37,7 @@ def disable_kimi_k3_rocm_symm_mem(server_args: ServerArgs) -> None:
         return
     if parse_connector_type(cfg.model_path) == ConnectorType.INSTANCE:
         return
-    if server_args.get_model_config().hf_config.architectures[0] not in (
+    if model_config_of(server_args).hf_config.architectures[0] not in (
         "KimiLinearForCausalLM",
         "KimiK3ForConditionalGeneration",
     ):

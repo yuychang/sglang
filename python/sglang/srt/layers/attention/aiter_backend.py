@@ -399,6 +399,9 @@ class AiterAttnBackend(AttentionBackend):
         self.kv_index_translator = model_runner.kv_index_translator
 
         self.use_mla = model_runner.model_config.attention_arch == AttentionArch.MLA
+        # MLA overwrites both. MHA prefill still reads them.
+        self.head_pad_mode = "none"
+        self.num_head_padded = self.num_head
 
         self.dcp_world_size = get_parallel().attn_dcp_size
         self.mla_decode_backend = envs.SGLANG_AITER_MLA_DECODE_BACKEND.get().lower()
@@ -1577,7 +1580,7 @@ class AiterAttnBackend(AttentionBackend):
             return False
         if not self.use_fp8_prefill_attn:
             return False
-        if getattr(self, "head_pad_mode", "none") != "zero":
+        if self.head_pad_mode != "zero":
             return True
         return envs.SGLANG_AITER_MLA_ZERO_PAD_FP8_PREFILL.get()
 
@@ -4893,7 +4896,7 @@ class AiterAttnBackend(AttentionBackend):
         q_pre_padded = (
             self.use_mla
             and q.ndim == 3
-            and q.shape[1] == getattr(self, "num_head_padded", -1)
+            and q.shape[1] == self.num_head_padded
             and q.shape[-1] == layer.qk_head_dim
         )
         if not q_pre_padded:

@@ -2291,7 +2291,6 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
         positions: torch.Tensor,
         out_cache_loc: torch.Tensor,
     ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
-        # Looked up by forward_mla_rocm.
         if not _is_hip:
             return None
         from sglang.srt.models.kimi_k3_rocm_mla import try_fused_mla_q_cache

@@ -1995,6 +1995,8 @@ class Envs:
     SGLANG_ROCM_K3_AITER_B2_FUSIONS = EnvBool(False)
     # Route two- and four-token MoE decode through the cooperative FlyDSL
     # tri-projection, which returns the shared expert already SiTU-activated.
+    # No effect unless SGLANG_ROCM_K3_AITER_MOE_PREROUTE_FP8 is also on and
+    # SGLANG_ROCM_K3_FLYDSL_SOURCE is not "aiter".
     SGLANG_ROCM_K3_PREROUTE_PREACTIVATED_SHARED = EnvBool(False)
     # Launch geometry for that cooperative kernel: compute units, waves per
     # block, waves per execution unit, and the weight-load cache modifier.

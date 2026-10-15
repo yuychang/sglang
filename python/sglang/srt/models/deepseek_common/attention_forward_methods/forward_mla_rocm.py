@@ -1020,27 +1020,12 @@ class DeepseekMLARocmForwardMixin:
         else:
             q = None
             k = None
-            k3_fused_q_cache = getattr(self, "_try_fused_mla_q_cache", None)
-            if (
-                k3_fused_q_cache is not None
-                and self.current_attention_backend in ("aiter", "triton", "triton_mla")
-                and not get_parallel().dcp_enabled
-                and (
-                    forward_batch.forward_mode.is_decode_or_idle()
-                    or forward_batch.forward_mode.is_target_verify()
-                )
-            ):
-                result = k3_fused_q_cache(
-                    q_nope_out,
-                    q_pe,
-                    k_nope,
-                    k_pe,
-                    positions,
-                    forward_batch.out_cache_loc,
-                )
-                if result is not None:
-                    q, k = result
-                    save_kv_cache = False
+            fused = self._maybe_fused_mla_q_cache(
+                q_nope_out, q_pe, k_nope, k_pe, positions, forward_batch
+            )
+            if fused is not None:
+                q, k = fused
+                save_kv_cache = False
 
             if q is None and self._skip_rope_for_aiter_fused_mla():
                 q, _, _, k = _fused_rope_cat_and_cache(
@@ -1165,6 +1150,43 @@ class DeepseekMLARocmForwardMixin:
             return output, None
         else:
             return output, topk_indices
+
+    def _maybe_fused_mla_q_cache(
+        self: DeepseekV2AttentionMLA,
+        q_nope_out: torch.Tensor,
+        q_pe: torch.Tensor,
+        k_nope: torch.Tensor,
+        k_pe: torch.Tensor,
+        positions: torch.Tensor,
+        forward_batch: ForwardBatch,
+    ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
+        """``_try_fused_mla_q_cache`` where the backend and forward mode allow it."""
+        mode = forward_batch.forward_mode
+        if (
+            self.current_attention_backend not in ("aiter", "triton", "triton_mla")
+            or get_parallel().dcp_enabled
+            or not (mode.is_decode_or_idle() or mode.is_target_verify())
+        ):
+            return None
+        return self._try_fused_mla_q_cache(
+            q_nope_out, q_pe, k_nope, k_pe, positions, forward_batch.out_cache_loc
+        )
+
+    def _try_fused_mla_q_cache(
+        self: DeepseekV2AttentionMLA,
+        q_nope_out: torch.Tensor,
+        q_pe: torch.Tensor,
+        k_nope: torch.Tensor,
+        k_pe: torch.Tensor,
+        positions: torch.Tensor,
+        out_cache_loc: torch.Tensor,
+    ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
+        """Model hook for a fused decode/verify Q build plus latent KV-cache write.
+
+        Returns ``(q, k)`` once the cache is written, or ``None`` to keep the
+        default rope/cat path.
+        """
+        return None
 
     def _skip_rope_for_dsa_tilelang_fused(self: DeepseekV2AttentionMLA) -> bool:
         """

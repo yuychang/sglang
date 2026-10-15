@@ -27,14 +27,10 @@ MOE_SHARED_WIDTH = 7168
 
 
 def qr_max_size_bytes() -> Optional[int]:
-    group = get_tp_group()
-    qr = getattr(group, "qr_comm", None)
-    if qr is None or getattr(qr, "disabled", True):
+    qr = get_tp_group().qr_comm
+    if qr is None or qr.disabled or qr.qr_max_size <= 0:
         return None
-    max_size = getattr(qr, "qr_max_size", None)
-    if max_size is None or int(max_size) <= 0:
-        return None
-    return int(max_size)
+    return int(qr.qr_max_size)
 
 
 def should_split_oversized_moe_pair(
