@@ -450,5 +450,53 @@ class TestMlaDcpAsmDecode(CustomTestCase):
         self.assertFalse(be._use_mla_decode_persist_metadata())
 
 
+class TestFp8QAsmSelection(CustomTestCase):
+    """c4/c14/c16 (verify qlen <= 4) take fp8-Q ASM; c1 block 7 stays on Gluon."""
+
+    def test_qlen_4_selects_fp8_q_asm(self):
+        self.assertTrue(
+            mod.fp8_q_asm_mla_selected(
+                decode_backend="asm",
+                verify_backend="asm",
+                dcp_world_size=1,
+                verify_qlen=4,
+                gfx95=True,
+            )
+        )
+
+    def test_qlen_8_stays_off(self):
+        self.assertFalse(
+            mod.fp8_q_asm_mla_selected(
+                decode_backend="asm",
+                verify_backend="asm",
+                dcp_world_size=1,
+                verify_qlen=8,
+                gfx95=True,
+            )
+        )
+
+    def test_gluon_backend_stays_off(self):
+        self.assertFalse(
+            mod.fp8_q_asm_mla_selected(
+                decode_backend="gluon",
+                verify_backend="asm",
+                dcp_world_size=1,
+                verify_qlen=1,
+                gfx95=True,
+            )
+        )
+
+    def test_dcp_stays_off(self):
+        self.assertFalse(
+            mod.fp8_q_asm_mla_selected(
+                decode_backend="asm",
+                verify_backend="asm",
+                dcp_world_size=8,
+                verify_qlen=1,
+                gfx95=True,
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

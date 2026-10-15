@@ -77,6 +77,49 @@ def prefer_mla_gluon_decode(
     )
 
 
+# Native 16-head fp8-query persistent ASM covers this query length. A longer
+# DSpark verify window is remapped onto a slower kernel, so those servers
+# stay on Gluon. Same bound as AiterAttnBackend._MLA_ASM_PS_MAX_QLEN.
+FP8_Q_ASM_MAX_QLEN = 4
+
+
+def fp8_q_asm_mla_selected(
+    *,
+    decode_backend: str,
+    verify_backend: str,
+    dcp_world_size: int,
+    verify_qlen: int,
+    gfx95: bool,
+) -> bool:
+    """Whether h12 fp8 MLA should run the persistent fp8-query ASM kernel.
+
+    ``SGLANG_AITER_MLA_PERSIST=0`` does not block this. The backend turns
+    persistent metadata back on when the verify window fits.
+    """
+    return (
+        decode_backend == "asm"
+        and verify_backend == "asm"
+        and dcp_world_size <= 1
+        and gfx95
+        and 1 <= verify_qlen <= FP8_Q_ASM_MAX_QLEN
+    )
+
+
+def fp8_q_asm_mla_enabled() -> bool:
+    """Runtime form of :func:`fp8_q_asm_mla_selected` for the Q producer."""
+    from sglang.srt.runtime_context import get_parallel, get_spec
+    from sglang.srt.utils import is_gfx95_supported
+
+    verify_qlen = int(get_spec().speculative_num_draft_tokens or 1)
+    return fp8_q_asm_mla_selected(
+        decode_backend=envs.SGLANG_AITER_MLA_DECODE_BACKEND.get().lower(),
+        verify_backend=envs.SGLANG_AITER_MLA_VERIFY_BACKEND.get().lower(),
+        dcp_world_size=int(get_parallel().attn_dcp_size),
+        verify_qlen=verify_qlen,
+        gfx95=bool(is_gfx95_supported()),
+    )
+
+
 def mla_gluon_decode(
     *,
     q: torch.Tensor,
