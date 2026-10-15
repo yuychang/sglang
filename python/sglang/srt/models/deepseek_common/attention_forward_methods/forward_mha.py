@@ -268,15 +268,13 @@ class DeepseekMHAForwardMixin:
                 # BF16/FP16 path: directly fetch from cache
                 if self.dcp_size > 1:
                     kv_a, k_pe = all_gather_kv_cache_for_mha_extend(
-                        get_token_to_kv_pool(),
-                        self.attn_mha,
-                        forward_batch.attn_dcp_metadata.dcp_local_prefix_kv_indices,
-                        forward_batch.seq_lens,
-                        forward_batch.extend_prefix_lens,
-                        forward_batch.extend_prefix_lens_cpu,
-                        forward_batch.extend_seq_lens,
-                        kv_a,
-                        k_pe,
+                        token_to_kv_pool=get_token_to_kv_pool(),
+                        attn_mqa=self.attn_mha,
+                        dcp_local_prefix_kv_indices=forward_batch.attn_dcp_metadata.dcp_local_prefix_kv_indices,
+                        extend_prefix_lens_cpu=forward_batch.extend_prefix_lens_cpu,
+                        extend_seq_lens_cpu=forward_batch.extend_seq_lens_cpu,
+                        kv_a=kv_a,
+                        k_pe=k_pe,
                     )
                 else:
                     kv_a, k_pe = self._get_mla_kv_buffer(

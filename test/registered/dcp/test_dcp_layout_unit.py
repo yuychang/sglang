@@ -13,6 +13,7 @@ Usage:
 """
 
 import math
+import random
 import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -22,6 +23,7 @@ import torch
 from sglang.srt import runtime_context as rc
 from sglang.srt.configs.model_config import ModelConfig
 from sglang.srt.layers.attention.triton_backend import TritonAttnBackend
+from sglang.srt.layers.dcp import comm as dcp_comm
 from sglang.srt.layers.dcp.layout import (
     filter_dcp_local_chunk_kv_indices,
     get_dcp_lens,
@@ -543,6 +545,107 @@ class TestGetDcpLens(CustomTestCase):
 
         self.assertEqual(pool.get_kv_buffer_shape(), expected)
         pool.full_kv_pool.get_kv_buffer_shape.assert_called_once_with()
+
+
+_KV_A_DIM, _K_PE_DIM = 4, 2
+
+
+def _kv_rows(values) -> torch.Tensor:
+    t = torch.tensor(values, dtype=torch.float32).view(-1, 1, 1)
+    return torch.cat(
+        [t.expand(-1, 1, _KV_A_DIM), (-t).expand(-1, 1, _K_PE_DIM)], dim=-1
+    )
+
+
+def _token_value(req: int, pos: int) -> float:
+    return float(req * 100000 + pos)
+
+
+def _padded_rows_for_rank(lens, starts, world, rank) -> torch.Tensor:
+    # NaN marks padding rows, so selecting one fails torch.equal.
+    values = []
+    for i, (n, s) in enumerate(zip(lens, starts)):
+        off = s % world
+        for j in range((n + off + world - 1) // world):
+            p = s - off + j * world + rank
+            values.append(_token_value(i, p) if s <= p < s + n else float("nan"))
+    return _kv_rows(values)
+
+
+class _SimulatedDcpGroup:
+    def __init__(self, lens, starts, world, rank):
+        self.lens, self.starts, self.world, self.rank = lens, starts, world, rank
+
+    def all_gather_into_tensor(self, out, inp):
+        parts = [
+            (
+                inp
+                if r == self.rank
+                else _padded_rows_for_rank(self.lens, self.starts, self.world, r)
+            )
+            for r in range(self.world)
+        ]
+        for part in parts:
+            assert part.shape == inp.shape
+        out.copy_(torch.cat(parts, dim=0))
+
+
+class TestAllGatherKvCacheForDcp(CustomTestCase):
+    """Every rank must get each request's prefix KV back in token order."""
+
+    def _cases(self):
+        rng = random.Random(0)
+        cases = [([3544], [7]), ([1], [5]), ([0], [3]), ([5, 0, 17], [0, 3, 9])]
+        for _ in range(30):
+            bs = rng.randint(1, 6)
+            lens = [rng.randint(0, 300) for _ in range(bs)]
+            cases.append((lens, [rng.randint(0, 50) for _ in range(bs)]))
+        return cases
+
+    def _check(self, lens, starts, world, rank, pass_starts):
+        parallel = SimpleNamespace(
+            dcp_enabled=True,
+            dcp_size=world,
+            dcp_rank=rank,
+            dcp_group=_SimulatedDcpGroup(lens, starts, world, rank),
+        )
+        local = _kv_rows(
+            [
+                _token_value(i, p)
+                for i, (n, s) in enumerate(zip(lens, starts))
+                for p in range(s, s + n)
+                if p % world == rank
+            ]
+        )
+        kv_a = local[..., :_KV_A_DIM].contiguous()
+        k_pe = local[..., _KV_A_DIM:].contiguous()
+        lens_t = torch.tensor(lens)
+        starts_t = torch.tensor(starts) if pass_starts else None
+        expected = _kv_rows(
+            [
+                _token_value(i, p)
+                for i, (n, s) in enumerate(zip(lens, starts))
+                for p in range(s, s + n)
+            ]
+        )
+        with patch.object(dcp_comm, "get_parallel", return_value=parallel):
+            full = dcp_comm.all_gather_kv_cache_for_dcp(kv_a, k_pe, lens_t, starts_t)
+            out_a, out_pe = dcp_comm.all_gather_kv_cache_for_mha_chunk_extend(
+                kv_a[:, 0], k_pe, lens_t, starts_t
+            )
+        msg = f"{lens=} {starts=} {world=} {rank=}"
+        self.assertTrue(torch.equal(full, expected), msg)
+        self.assertTrue(torch.equal(out_a, expected[:, 0, :_KV_A_DIM]), msg)
+        self.assertTrue(torch.equal(out_pe, expected[..., _KV_A_DIM:]), msg)
+        self.assertTrue(out_a.is_contiguous() and out_pe.is_contiguous(), msg)
+
+    def test_every_rank_reassembles_token_order(self):
+        for lens, starts in self._cases():
+            for world in (1, 2, 4, 8):
+                for rank in range(world):
+                    self._check(lens, starts, world, rank, pass_starts=True)
+                    zeros = [0] * len(lens)
+                    self._check(lens, zeros, world, rank, pass_starts=False)
 
 
 if __name__ == "__main__":
