@@ -273,7 +273,7 @@ def _k3_fuse_kda_o_norm_ptpc(
         norm_gate,
         o_norm.weight,
         o_norm.eps,
-        use_sigmoid=True,
+        sigmoid_gate=True,
     )
     _k3_log_once(
         "kda_onorm_ptpc",
