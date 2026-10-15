@@ -488,6 +488,9 @@ class DeepseekMHAForwardMixin:
         backend = resolve_attn_backend(forward_batch)
         pack_fn = getattr(backend, "pack_prefix_chunk_kv", None)
         kv_a_dtype = torch.bfloat16 if pack_fn is not None else q.dtype
+        fp8_prefix_kv_proj = (
+            _is_hip and pack_fn is None and self._use_fp8_prefix_kv_proj_rocm(backend)
+        )
         get_mla_kv_buffer = (
             self._get_mla_kv_buffer_rocm if _is_hip else self._get_mla_kv_buffer
         )
@@ -534,31 +537,35 @@ class DeepseekMHAForwardMixin:
                     forward_batch.prefix_chunk_seq_lens_cpu[i],
                     forward_batch.prefix_chunk_starts_cpu[i],
                 )
-                kv = self.kv_b_proj(kv_a_normed)[0]
-                kv = kv.view(
-                    -1,
-                    self.num_local_heads,
-                    self.qk_nope_head_dim + self.v_head_dim,
-                )
-                v_dense = kv[..., self.qk_nope_head_dim :]
-                k_nope = kv[..., : self.qk_nope_head_dim]
-
-                if pack_fn is not None:
-                    k, v = pack_fn(k_nope, k_pe, v_dense)
+                if fp8_prefix_kv_proj:
+                    k, v = self._project_prefix_kv_fp8_rocm(kv_a_normed, k_pe)
+                    del kv_a_normed, k_pe
                 else:
-                    v = v_dense
-                    k = torch.empty(
-                        (
-                            k_nope.shape[0],
-                            self.num_local_heads,
-                            self.qk_nope_head_dim + self.qk_rope_head_dim,
-                        ),
-                        dtype=v.dtype,
-                        device=v.device,
+                    kv = self.kv_b_proj(kv_a_normed)[0]
+                    kv = kv.view(
+                        -1,
+                        self.num_local_heads,
+                        self.qk_nope_head_dim + self.v_head_dim,
                     )
-                    k[..., : self.qk_nope_head_dim] = k_nope
-                    k[..., self.qk_nope_head_dim :] = k_pe
-                del kv_a_normed, k_pe, kv, k_nope, v_dense
+                    v_dense = kv[..., self.qk_nope_head_dim :]
+                    k_nope = kv[..., : self.qk_nope_head_dim]
+
+                    if pack_fn is not None:
+                        k, v = pack_fn(k_nope, k_pe, v_dense)
+                    else:
+                        v = v_dense
+                        k = torch.empty(
+                            (
+                                k_nope.shape[0],
+                                self.num_local_heads,
+                                self.qk_nope_head_dim + self.qk_rope_head_dim,
+                            ),
+                            dtype=v.dtype,
+                            device=v.device,
+                        )
+                        k[..., : self.qk_nope_head_dim] = k_nope
+                        k[..., self.qk_nope_head_dim :] = k_pe
+                    del kv_a_normed, k_pe, kv, k_nope, v_dense
 
             output, lse = self.attn_mha(
                 q,

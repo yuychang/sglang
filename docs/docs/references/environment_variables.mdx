@@ -1995,6 +1995,15 @@ SGLang supports various environment variables that can be used to configure its 
       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Largest batch, in tokens, that takes the tuned MoE front GEMM.</td>
       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>192</code></td>
     </tr>
+      <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}><code>SGLANG_OPT_HIP_MLA_FLYDSL_FP8_PREFILL</code></td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>On gfx950, run MLA prefill on AITER's FlyDSL FP8 FMHA with per-tensor FP8 Q/K/V instead of the PS-ASM FP8 or bf16 FMHA kernels. Applies only to head shapes FlyDSL supports (for example Kimi-K3 at TP8: 12 heads, QK 192, V 128); calls it declines run bf16 FMHA.</td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>false</code></td>
+    </tr>
+    <tr>
+      <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}><code>SGLANG_OPT_HIP_MLA_FLYDSL_FUSED_KV_PROJ</code></td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>With <code>SGLANG_OPT_HIP_MLA_FLYDSL_FP8_PREFILL</code> active and an MXFP4 <code>kv_b_proj</code>, project prefix K/V straight to unit-scale FP8 in the GEMM epilogue instead of materializing bf16 K/V and quantizing it.</td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>false</code></td>
+    </tr>
   </tbody>
 </table>
 

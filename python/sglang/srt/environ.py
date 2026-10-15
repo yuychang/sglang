@@ -989,6 +989,12 @@ class Envs:
     SGLANG_AITER_MLA_VERIFY_BACKEND = EnvStr("asm")
     # Let aiter plan the KV splits for the asm persistent MLA decode.
     SGLANG_AITER_MLA_AUTO_KV_SPLITS = EnvBool(False)
+    # Run gfx950 MLA prefill on FlyDSL FP8 FMHA with per-tensor FP8 Q/K/V,
+    # in place of PS-ASM or bf16 FMHA, for head shapes FlyDSL supports.
+    SGLANG_OPT_HIP_MLA_FLYDSL_FP8_PREFILL = EnvBool(False)
+    # With FlyDSL FP8 prefill and an MXFP4 kv_b_proj, project prefix K/V straight
+    # to unit-scale FP8 in the GEMM epilogue instead of quantizing bf16 K/V.
+    SGLANG_OPT_HIP_MLA_FLYDSL_FUSED_KV_PROJ = EnvBool(False)
     # Run gfx942 block-FP8 linears with the AITER CK blockscale GEMM instead of Triton.
     SGLANG_AITER_GFX942_BLOCKSCALE_USE_CK = EnvBool(False)
 
