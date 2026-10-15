@@ -98,11 +98,12 @@ def _get_sum_extend_prefix_lens(forward_batch):
 
 
 def _support_mha_one_shot(attn, forward_batch, backend_name):
-    attn_supported = backend_name in MHA_ONE_SHOT_SUPPORTED_BACKENDS
-    sum_seq_lens = (
-        sum(forward_batch.seq_lens_cpu) if forward_batch.seq_lens_cpu is not None else 0
-    )
-    return attn_supported and sum_seq_lens <= forward_batch.get_max_chunk_capacity()
+    if backend_name not in MHA_ONE_SHOT_SUPPORTED_BACKENDS:
+        return False
+    seq_lens_cpu = forward_batch.seq_lens_cpu
+    # Called in every MLA layer of each extend; keep it a single reduction.
+    sum_seq_lens = int(seq_lens_cpu.sum()) if seq_lens_cpu is not None else 0
+    return sum_seq_lens <= forward_batch.get_max_chunk_capacity()
 
 
 def _handle_attention_backend(attn, forward_batch, backend_name):

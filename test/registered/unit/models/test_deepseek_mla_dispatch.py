@@ -14,6 +14,8 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
+import torch
+
 from sglang.srt.layers.cp import base as cp_base
 from sglang.srt.layers.cp.zigzag import ZigzagCPStrategy
 from sglang.srt.model_executor.forward_batch_info import ForwardMode
@@ -124,7 +126,7 @@ class TestCPMLADispatch(CustomTestCase):
                                 attn_cp_metadata=None,
                                 extend_prefix_lens_cpu=[prefix],
                                 extend_seq_lens_cpu=[num_tokens],
-                                seq_lens_cpu=[prefix + num_tokens],
+                                seq_lens_cpu=torch.tensor([prefix + num_tokens]),
                                 get_max_chunk_capacity=lambda: capacity,
                             )
                             expected = (
@@ -140,6 +142,33 @@ class TestCPMLADispatch(CustomTestCase):
                                 abh._handle_attention_backend(attn, batch, "fa3"),
                                 expected,
                             )
+
+
+class TestMHAOneShotCapacity(CustomTestCase):
+    def test_matches_python_sum_at_capacity_boundary(self):
+        # The one-shot check is sum(seq_lens_cpu) <= capacity, including
+        # graph-padding rows; None counts as 0.
+        for dtype in (torch.int32, torch.int64):
+            seq_lens_cpu = torch.tensor([4000, 1, 96, 1], dtype=dtype)
+            total = int(sum(seq_lens_cpu))
+            for seq_lens, capacity in (
+                (seq_lens_cpu, total),
+                (seq_lens_cpu, total - 1),
+                (None, 0),
+            ):
+                with self.subTest(dtype=dtype, seq_lens=seq_lens, capacity=capacity):
+                    batch = SimpleNamespace(
+                        seq_lens_cpu=seq_lens,
+                        get_max_chunk_capacity=lambda capacity=capacity: capacity,
+                    )
+                    expected = (
+                        sum(seq_lens) if seq_lens is not None else 0
+                    ) <= capacity
+                    for backend in ("aiter", "fa3", "triton"):
+                        self.assertEqual(
+                            abh._support_mha_one_shot(None, batch, backend),
+                            expected and backend != "triton",
+                        )
 
 
 class TestKVShardedMLADispatch(CustomTestCase):
@@ -176,7 +205,7 @@ class TestKVShardedMLADispatch(CustomTestCase):
             attn_cp_metadata=None,
             extend_prefix_lens_cpu=[prefix],
             extend_seq_lens_cpu=[num_tokens],
-            seq_lens_cpu=[prefix + num_tokens],
+            seq_lens_cpu=torch.tensor([prefix + num_tokens]),
             get_max_chunk_capacity=lambda: capacity,
         )
 
