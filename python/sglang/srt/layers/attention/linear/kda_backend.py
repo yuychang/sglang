@@ -204,6 +204,21 @@ class KDAKernelDispatcher:
             )
 
             self.extend_kernel = FlashKDAKernel()
+        elif prefill_backend.is_aiter_flashkda():
+            if not is_hip():
+                raise ValueError("AITER FlashKDA prefill backend requires ROCm")
+            if is_gfx95_supported():
+                from sglang.srt.layers.attention.linear.kernels.kda_aiter_flash import (
+                    AiterFlashKDAKernel,
+                )
+
+                self.extend_kernel = AiterFlashKDAKernel(triton_fallback=triton_kernel)
+            else:
+                self.extend_kernel = triton_kernel
+                rank0_log(
+                    "AITER FlashKDA prefill needs gfx95x; falling back to Triton "
+                    "extend."
+                )
         elif prefill_backend.is_flashinfer():
             if not is_cuda():
                 raise ValueError("KDA FlashInfer prefill backend requires CUDA")
@@ -262,9 +277,10 @@ class KDAKernelDispatcher:
         else:
             raise ValueError(
                 f"Unsupported KDA prefill backend: {prefill_backend}. "
-                "KDA supports 'triton', 'helion', 'flashinfer', 'flashkda', 'cutedsl', "
-                "'nvidia_kda', or 'ptx_kda' (cutedsl/nvidia_kda prefill need "
-                "SM100, ptx_kda SM100 or SM103)."
+                "KDA supports 'triton', 'helion', 'flashinfer', 'flashkda', "
+                "'aiter_flashkda', 'cutedsl', 'nvidia_kda', or 'ptx_kda' "
+                "(cutedsl/nvidia_kda prefill need SM100, ptx_kda SM100 or SM103, "
+                "aiter_flashkda ROCm gfx95x)."
             )
 
         self.supports_packed_decode = getattr(
