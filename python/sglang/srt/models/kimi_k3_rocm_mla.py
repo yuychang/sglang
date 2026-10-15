@@ -57,20 +57,25 @@ def try_fused_mla_q_cache(
     ):
         return None
 
-    # AITER's asm decode uses FP8 Q when the cache is FP8. Gluon keeps Q in
-    # BF16 while retaining the fused FP8 cache write; its h12/bh16 kernel is
-    # both faster and more accurate for K3's long-context decode regime.
+    # ASM decode consumes FP8 Q when the verify window fits the native
+    # 16-head kernel (qlen <= 4). Wider windows stay on Gluon, which keeps
+    # BF16 Q and still writes the FP8 cache.
     triton_decode = self.current_attention_backend in ("triton", "triton_mla")
     tokens, heads = q_nope_out.shape[0], q_nope_out.shape[1]
     from sglang.srt.layers.attention.aiter_mla_gluon import (
+        fp8_q_asm_mla_enabled,
         prefer_mla_gluon_decode,
     )
 
-    gluon_decode = not triton_decode and prefer_mla_gluon_decode(
-        head_pad_mode="zero",
-        num_head=heads,
-        kv_cache_dtype=kv_cache.dtype,
-        q_dtype=torch.bfloat16,
+    gluon_decode = (
+        not triton_decode
+        and not fp8_q_asm_mla_enabled()
+        and prefer_mla_gluon_decode(
+            head_pad_mode="zero",
+            num_head=heads,
+            kv_cache_dtype=kv_cache.dtype,
+            q_dtype=torch.bfloat16,
+        )
     )
     q_out_dtype = q_nope_out.dtype if triton_decode or gluon_decode else kv_cache.dtype
     if (
