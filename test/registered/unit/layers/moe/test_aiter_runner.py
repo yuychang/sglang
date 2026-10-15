@@ -6,6 +6,7 @@ import torch
 
 import sglang.srt.layers.moe.moe_runner.aiter as aiter_runner
 from sglang.srt.environ import envs
+from sglang.srt.layers import zero_copy_context
 from sglang.srt.layers.moe.moe_runner.aiter import (
     AiterMoeQuantInfo,
     AiterQuantType,
@@ -144,6 +145,32 @@ def test_aiter_runner_uses_epv2_output_when_kernel_supports_it(
         runner_input.output,
         torch.full_like(result, 3 if supports_output else 0),
     )
+
+
+@pytest.mark.parametrize("published_rows", [1, 2])
+def test_aiter_runner_writes_into_published_moe_output(monkeypatch, published_rows):
+    def fused_moe(hidden_states, output=None, **kwargs):
+        result = hidden_states + 2
+        if output is not None:
+            output.copy_(result)
+            return output
+        return result
+
+    _install_fake_aiter(monkeypatch, fused_moe)
+    monkeypatch.setattr(aiter_runner, "_aiter_fused_moe_supports_output", lambda: True)
+    runner_input = _runner_input()
+    runner_input.hidden_states.fill_(1)
+    # A destination that cannot stand in for the result (wrong row count) is ignored.
+    published = torch.zeros((published_rows, 4), dtype=torch.bfloat16)
+    runner = AiterRunnerCore(MoeRunnerConfig(activation="silu"))
+
+    with zero_copy_context.set_moe_output(published):
+        result = runner.run(runner_input, _quant_info(), running_state={}).hidden_states
+
+    torch.testing.assert_close(result, torch.full_like(result, 3))
+    fits = published_rows == runner_input.hidden_states.shape[0]
+    assert (result.data_ptr() == published.data_ptr()) == fits
+    torch.testing.assert_close(published, torch.full_like(published, 3 if fits else 0))
 
 
 @pytest.mark.parametrize(
