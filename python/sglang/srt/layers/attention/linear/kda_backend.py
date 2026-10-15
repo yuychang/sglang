@@ -57,6 +57,8 @@ from sglang.srt.runtime_context import (
     mamba_cache_chunk_size,
 )
 
+_is_hip = is_hip()
+
 
 def _host_fla_chunk_tables(
     *, extend_seq_lens: list[int], dtype: torch.dtype
@@ -564,6 +566,9 @@ class KDAAttnBackend(MambaAttnBackendBase):
 
             self._fused_chain_verify_fn = fused_kda_conv_gating_verify
             rank0_log("KDA fused chain-verify kernel enabled (topk==1 path).")
+        self._hip_replayssm_fused_verify = (
+            _is_hip and envs.SGLANG_OPT_HIP_KDA_REPLAYSSM_FUSED_VERIFY.get()
+        )
         # Per-request row index into the speculative `intermediate_ssm` scratch,
         # used by the MTP / target_verify path (mirrors GDNAttnBackend). Sized
         # past the pool for attn_tp-padded warmup/MLP-sync batches (see helper).
@@ -1583,7 +1588,12 @@ class KDAAttnBackend(MambaAttnBackendBase):
         seq_len, dim = mixed_qkv.shape
         batch_size = seq_len // draft_token_num
         if replayssm_on and (
-            batch_size != 1 or not (get_platform().is_sm90 or get_platform().is_sm100)
+            batch_size != 1
+            or not (
+                get_platform().is_sm90
+                or get_platform().is_sm100
+                or self._hip_replayssm_fused_verify
+            )
         ):
             # The runtime still uses BV=4, not the benchmark's best-BV sweep:
             # fused+ring wins at B=1 but regresses from B=4 (B=2 at T=8) on
@@ -1591,7 +1601,7 @@ class KDAAttnBackend(MambaAttnBackendBase):
             # other batch/architecture combinations are measured. The snapshot
             # path and the separate CuTe path are unchanged.
             return False
-        if is_hip() and not (
+        if _is_hip and not (
             is_gfx95_supported()
             and 1 <= batch_size <= 16
             and draft_token_num in (6, 8)

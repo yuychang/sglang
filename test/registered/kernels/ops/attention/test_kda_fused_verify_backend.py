@@ -104,7 +104,9 @@ class TestKDAFusedVerifyBackend(CustomTestCase):
         ]
         return layers, state, slots, batch, rounds
 
-    def _make_backend(self, template, slots, steps, *, fused, ring=True):
+    def _make_backend(
+        self, template, slots, steps, *, fused, ring=True, hip_ring_opt=False
+    ):
         state = MambaPool.SpeculativeState(
             conv=[template.conv[0].clone()],
             temporal=template.temporal.clone(),
@@ -160,6 +162,7 @@ class TestKDAFusedVerifyBackend(CustomTestCase):
         backend._fused_chain_verify_fn = (
             Mock(wraps=fused_kda_conv_gating_verify) if fused else None
         )
+        backend._hip_replayssm_fused_verify = hip_ring_opt
         hybrid = HybridLinearAttnBackend.__new__(HybridLinearAttnBackend)
         hybrid.linear_attn_backend = backend
         return backend, hybrid, state
@@ -174,14 +177,19 @@ class TestKDAFusedVerifyBackend(CustomTestCase):
     def test_verify_commit_verify(self):
         # B=1 exercises the enabled path. Platform override makes the dispatch
         # testable on any CUDA CI runner; it does not replace a GPU kernel.
-        for platform, (heads, v_heads, lower_bound), num_accept_tokens in (
-            ({"is_sm90": True}, (2, 2, None), 1),
-            ({"is_sm90": True}, (2, 2, None), 2),
-            ({"is_sm90": True}, (2, 2, None), 4),
-            ({"is_sm90": True}, (2, 4, -5.0), 1),
-            ({"is_sm90": True}, (2, 4, -5.0), 2),
-            ({"is_sm90": True}, (2, 4, -5.0), 4),
-            ({"is_sm90": False, "is_sm100": True}, (2, 4, -5.0), 2),
+        # The last row is the ROCm opt-in gate, which ignores the SM checks.
+        sm90 = {"is_sm90": True}
+        sm100 = {"is_sm90": False, "is_sm100": True}
+        other = {"is_sm90": False, "is_sm100": False}
+        for platform, (heads, v_heads, lower_bound), num_accept_tokens, hip_opt in (
+            (sm90, (2, 2, None), 1, False),
+            (sm90, (2, 2, None), 2, False),
+            (sm90, (2, 2, None), 4, False),
+            (sm90, (2, 4, -5.0), 1, False),
+            (sm90, (2, 4, -5.0), 2, False),
+            (sm90, (2, 4, -5.0), 4, False),
+            (sm100, (2, 4, -5.0), 2, False),
+            (other, (2, 4, -5.0), 2, True),
         ):
             with (
                 self.subTest(
@@ -190,6 +198,7 @@ class TestKDAFusedVerifyBackend(CustomTestCase):
                     v_heads=v_heads,
                     lower_bound=lower_bound,
                     num_accept_tokens=num_accept_tokens,
+                    hip_opt=hip_opt,
                 ),
                 override_platform(**platform),
             ):
@@ -197,7 +206,7 @@ class TestKDAFusedVerifyBackend(CustomTestCase):
                     heads=heads, v_heads=v_heads, lower_bound=lower_bound
                 )
                 fused, fused_hybrid, fused_state = self._make_backend(
-                    initial, slots, 4, fused=True
+                    initial, slots, 4, fused=True, hip_ring_opt=hip_opt
                 )
                 reference, ref_hybrid, ref_state = self._make_backend(
                     initial, slots, 4, fused=False
@@ -260,27 +269,31 @@ class TestKDAFusedVerifyBackend(CustomTestCase):
 
     def test_ring_dispatch_falls_back(self):
         # B=2 and the measured regression sizes on the enabled architectures,
-        # plus B=1 on an architecture without ring measurements.
+        # plus B=1 on an architecture without ring measurements. The ROCm
+        # opt-in still admits B=1 only.
         sm90 = {"is_sm90": True, "is_sm100": False}
         sm100 = {"is_sm90": False, "is_sm100": True}
         other = {"is_sm90": False, "is_sm100": False}
-        for platform, batch_size in (
-            (sm90, 2),
-            (sm90, 4),
-            (sm90, 16),
-            (sm90, 64),
-            (sm100, 2),
-            (sm100, 4),
-            (sm100, 16),
-            (other, 1),
-            (other, 4),
+        for platform, batch_size, hip_opt in (
+            (sm90, 2, False),
+            (sm90, 4, False),
+            (sm90, 16, False),
+            (sm90, 64, False),
+            (sm100, 2, False),
+            (sm100, 4, False),
+            (sm100, 16, False),
+            (other, 1, False),
+            (other, 4, False),
+            (other, 2, True),
         ):
             with (
-                self.subTest(platform=platform, batch_size=batch_size),
+                self.subTest(platform=platform, batch_size=batch_size, hip_opt=hip_opt),
                 override_platform(**platform),
             ):
                 layers, initial, slots, batch, rounds = self._make_case(batch_size)
-                backend, _, state = self._make_backend(initial, slots, 4, fused=True)
+                backend, _, state = self._make_backend(
+                    initial, slots, 4, fused=True, hip_ring_opt=hip_opt
+                )
                 reference, _, ref_state = self._make_backend(
                     initial, slots, 4, fused=False
                 )

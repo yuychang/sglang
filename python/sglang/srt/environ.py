@@ -961,6 +961,9 @@ class Envs:
     SGLANG_OPT_HIP_K3_MLA_Q_CACHE_FUSION = EnvBool(False)
     # Per-bank-depth num_warps / waves_per_eu for the ROCm attention-residual kernel.
     SGLANG_OPT_HIP_K3_ATTN_RES_TUNED_LAUNCH = EnvBool(False)
+    # Let ReplaySSM ring verify take the fused KDA verify kernel at batch size 1;
+    # needs SGLANG_OPT_FUSED_KDA_VERIFY. Not bit-identical to the unfused path.
+    SGLANG_OPT_HIP_KDA_REPLAYSSM_FUSED_VERIFY = EnvBool(False)
     # ROCm decode attention kernel: auto (aiter_sparse on gfx950, tilelang elsewhere) |
     # aiter_sparse | tilelang | triton | torch | comparison | unified_kv_triton
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("auto")
