@@ -1,9 +1,14 @@
+import itertools
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import torch
 
+from sglang.kernels.ops.attention.fla.index import (
+    prepare_chunk_indices,
+    prepare_chunk_offsets,
+)
 from sglang.srt.layers.attention.hybrid_linear_attn_backend import (
     MambaAttnBackendBase,
 )
@@ -13,6 +18,7 @@ from sglang.srt.layers.attention.linear.gdn_backend import (
     GDNKernelDispatcher,
 )
 from sglang.srt.layers.attention.linear.kda_backend import KDAAttnBackend
+from sglang.srt.layers.attention.linear.kda_prefill_graph import KDA_CHUNK_SIZE
 from sglang.srt.layers.attention.mamba.mamba2_metadata import ForwardMetadata
 from sglang.srt.model_executor.forward_batch_info import ForwardMode
 from sglang.test.ci.ci_register import register_cpu_ci
@@ -114,7 +120,9 @@ class TestTrackMambaStateDtype(CustomTestCase):
                 backend = object.__new__(backend_type)
                 starts = torch.tensor([0, 2, 4])
                 backend.forward_metadata = SimpleNamespace(
-                    query_start_loc=starts, conv_block_table=None
+                    query_start_loc=starts,
+                    conv_block_table=None,
+                    extend_has_initial_state=None,
                 )
                 with patch.object(
                     module, "causal_conv1d_fn", return_value=qkv.T
@@ -135,6 +143,59 @@ class TestTrackMambaStateDtype(CustomTestCase):
                 torch.testing.assert_close(
                     kwargs["has_initial_state"], torch.tensor([False, True])
                 )
+
+    def test_kda_per_forward_has_initial_state_matches_per_layer(self):
+        """The once-per-forward prefix mask must equal extend_prefix_lens > 0 and
+        stay unset for target verify, which has no prefill conv."""
+        layer = SimpleNamespace(conv_weights=object(), bias=None)
+        qkv = torch.arange(24).view(4, 6)
+        for mode, expected in (
+            (ForwardMode.EXTEND, [False, True, True]),
+            (ForwardMode.MIXED, [False, True, True]),
+            (ForwardMode.TARGET_VERIFY, None),
+        ):
+            with self.subTest(mode=mode):
+                batch = SimpleNamespace(
+                    forward_mode=mode,
+                    extend_prefix_lens=torch.tensor([0, 64, 1]),
+                    extend_seq_lens_cpu=[2, 1, 1],
+                )
+                backend = object.__new__(KDAAttnBackend)
+                backend._extend_uses_fla_chunks = False
+                backend.forward_metadata = ForwardMetadata(
+                    query_start_loc=torch.tensor([0, 2, 3, 4]),
+                    mamba_cache_indices=torch.tensor([6, 2, 1]),
+                )
+                backend._init_prefill_host_metadata(batch)
+                mask = backend.forward_metadata.extend_has_initial_state
+                if expected is None:
+                    self.assertIsNone(mask)
+                    continue
+                self.assertEqual(mask.tolist(), expected)
+                with patch.object(
+                    kda_backend, "causal_conv1d_fn", return_value=qkv.T
+                ) as conv:
+                    backend._convolve_prefill(layer, batch, qkv, None, None)
+                self.assertIs(conv.call_args.kwargs["has_initial_state"], mask)
+
+    def test_kda_host_chunk_tables_match_device_derivation(self):
+        """chunk_kda reads the host-built tables in place of prepare_chunk_indices /
+        prepare_chunk_offsets on query_start_loc; values and dtypes must match."""
+        for lens in ([1], [64], [65, 1, 128], [0, 3, 200], [4000, 63, 64, 1, 129]):
+            for dtype in (torch.int32, torch.int64):
+                with self.subTest(lens=lens, dtype=dtype):
+                    cu_seqlens = torch.tensor(
+                        [0, *itertools.accumulate(lens)], dtype=dtype
+                    )
+                    indices, offsets = kda_backend._host_fla_chunk_tables(
+                        extend_seq_lens=lens, dtype=dtype
+                    )
+                    for actual, expected in (
+                        (indices, prepare_chunk_indices(cu_seqlens, KDA_CHUNK_SIZE)),
+                        (offsets, prepare_chunk_offsets(cu_seqlens, KDA_CHUNK_SIZE)),
+                    ):
+                        self.assertEqual(actual.dtype, expected.dtype)
+                        self.assertTrue(torch.equal(actual, expected))
 
     def test_gdn_prefill_hooks_and_checkpoint_routing(self):
         layer = SimpleNamespace(

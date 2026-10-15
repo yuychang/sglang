@@ -4,6 +4,10 @@ from typing import Optional, Tuple, Union
 import torch
 
 from sglang.kernels.ops.attention import kda_fused_decode, kda_fused_decode_aiter_hip
+from sglang.kernels.ops.attention.fla.index import (
+    chunk_indices_from_lens,
+    chunk_offsets_from_lens,
+)
 from sglang.kernels.ops.mamba.causal_conv1d_triton import (
     causal_conv1d_fn,
     causal_conv1d_update,
@@ -11,6 +15,7 @@ from sglang.kernels.ops.mamba.causal_conv1d_triton import (
 from sglang.srt.environ import envs
 from sglang.srt.layers.attention.hybrid_linear_attn_backend import MambaAttnBackendBase
 from sglang.srt.layers.attention.linear.kda_prefill_graph import (
+    KDA_CHUNK_SIZE,
     KDAPrefillGraphMetadata,
     KDAPrefillTrackRows,
     build_track_rows,
@@ -26,7 +31,7 @@ from sglang.srt.layers.attention.linear.utils import (
     select_verify_intermediate_state_indices,
 )
 from sglang.srt.layers.radix_linear_attention import RadixLinearAttention
-from sglang.srt.utils import is_cpu, is_cuda, is_hip, is_npu
+from sglang.srt.utils import is_cpu, is_cuda, is_hip, is_npu, is_pin_memory_available
 from sglang.srt.utils.common import is_gfx95_supported, rank0_log
 
 # KDA always uses the triton causal_conv1d_fn (no CUDA override).
@@ -51,6 +56,16 @@ from sglang.srt.runtime_context import (
     get_spec,
     mamba_cache_chunk_size,
 )
+
+
+def _host_fla_chunk_tables(
+    *, extend_seq_lens: list[int], dtype: torch.dtype
+) -> tuple[torch.Tensor, torch.Tensor]:
+    # Same values and dtypes as prepare_chunk_indices / prepare_chunk_offsets on
+    # the matching cu_seqlens, without their device-to-host read of the lengths.
+    lens = torch.tensor(extend_seq_lens, dtype=dtype)
+    chunk_indices = chunk_indices_from_lens(lens, KDA_CHUNK_SIZE).to(dtype)
+    return chunk_indices, chunk_offsets_from_lens(lens, KDA_CHUNK_SIZE)
 
 
 def _validate_flashinfer_kda_prefill(
@@ -521,6 +536,10 @@ class KDAAttnBackend(MambaAttnBackendBase):
         self.kernel_dispatcher = KDAKernelDispatcher(
             decode_backend, prefill_backend, verify_backend
         )
+        # Only chunk_kda consumes host-built chunk_indices / chunk_offsets.
+        self._extend_uses_fla_chunks = isinstance(
+            self.kernel_dispatcher.extend_kernel, TritonKDAKernel
+        )
         if prefill_backend.is_flashinfer():
             _validate_flashinfer_kda_prefill(
                 chunk_size=self.mamba_chunk_size,
@@ -734,6 +753,7 @@ class KDAAttnBackend(MambaAttnBackendBase):
         # An eager forward never runs on a graph bucket's tables.
         self.prefill_graph_metadata = None
         super().init_forward_metadata(forward_batch)
+        self._init_prefill_host_metadata(forward_batch)
         if self.forward_metadata.has_mamba_track_mask:
             if self.forward_metadata.mamba_track_mask_indices is None:
                 self.forward_metadata.mamba_track_mask_indices = (
@@ -763,6 +783,46 @@ class KDAAttnBackend(MambaAttnBackendBase):
                     self.device,
                     self.mamba_chunk_size,
                 )
+
+    def _init_prefill_host_metadata(self, forward_batch: ForwardBatch):
+        mode = forward_batch.forward_mode
+        if not mode.is_extend() or mode.is_target_verify():
+            return
+        if forward_batch.extend_prefix_lens is not None:
+            self.forward_metadata.extend_has_initial_state = (
+                forward_batch.extend_prefix_lens > 0
+            )
+        if self._extend_uses_fla_chunks:
+            self._init_prefill_chunk_metadata(forward_batch)
+
+    def _init_prefill_chunk_metadata(self, forward_batch: ForwardBatch):
+        query_start_loc = self.forward_metadata.query_start_loc
+        extend_seq_lens_cpu = forward_batch.extend_seq_lens_cpu
+        # Same precondition under which the base metadata takes logical_num_tokens
+        # from extend_seq_lens_cpu, i.e. the lengths equal diff(query_start_loc).
+        if (
+            query_start_loc is None
+            or not query_start_loc.is_cuda
+            or not extend_seq_lens_cpu
+            or len(extend_seq_lens_cpu) != forward_batch.batch_size
+            or forward_batch.tbo_parent_token_range is not None
+            or torch.cuda.is_current_stream_capturing()
+        ):
+            return
+        chunk_indices, chunk_offsets = _host_fla_chunk_tables(
+            extend_seq_lens=extend_seq_lens_cpu, dtype=query_start_loc.dtype
+        )
+        pin = is_pin_memory_available(query_start_loc.device)
+        if pin:
+            chunk_indices = chunk_indices.pin_memory()
+            chunk_offsets = chunk_offsets.pin_memory()
+        device = query_start_loc.device
+        self.forward_metadata.prefill_chunk_indices = chunk_indices.to(
+            device, non_blocking=pin
+        )
+        self.forward_metadata.prefill_chunk_offsets = chunk_offsets.to(
+            device, non_blocking=pin
+        )
 
     def forward_decode(
         self,
@@ -1022,6 +1082,9 @@ class KDAAttnBackend(MambaAttnBackendBase):
         conv_states: torch.Tensor,
         cache_indices: torch.Tensor,
     ) -> torch.Tensor:
+        has_initial_state = self.forward_metadata.extend_has_initial_state
+        if has_initial_state is None:
+            has_initial_state = forward_batch.extend_prefix_lens > 0
         # Depthwise conv is channel-independent, so one packed call over the
         # full qkv width matches the decode path and saves two kernel launches.
         return causal_conv1d_fn(
@@ -1030,7 +1093,7 @@ class KDAAttnBackend(MambaAttnBackendBase):
             layer.bias,
             activation="silu",
             conv_states=conv_states,
-            has_initial_state=forward_batch.extend_prefix_lens > 0,
+            has_initial_state=has_initial_state,
             cache_indices=cache_indices,
             query_start_loc=self.forward_metadata.query_start_loc,
             seq_lens_cpu=forward_batch.extend_seq_lens_cpu,
@@ -1174,6 +1237,8 @@ class KDAAttnBackend(MambaAttnBackendBase):
             ),
             state_checkpoint_indices=self.forward_metadata.state_checkpoint_indices,
             track_ssm_h_batch_src=self.forward_metadata.track_ssm_h_batch_src,
+            chunk_indices=self.forward_metadata.prefill_chunk_indices,
+            chunk_offsets=self.forward_metadata.prefill_chunk_offsets,
         )
         if track_ssm:
             # Snapshot the SSM state at the last track-aligned chunk boundary

@@ -79,6 +79,8 @@ def _backend(conv_pool, ssm_pool):
         LinearAttnKernelBackend.TRITON,
         LinearAttnKernelBackend.TRITON,
     )
+    # The eager reference also takes the host-built chunk_kda tables.
+    backend._extend_uses_fla_chunks = True
     return backend
 
 
