@@ -420,6 +420,7 @@ class AiterAttnBackend(AttentionBackend):
                 "SGLANG_AITER_MLA_VERIFY_BACKEND must be 'gluon' or 'asm', "
                 f"got {self.mla_verify_backend!r}"
             )
+        self.use_mla_fp8_q_asm = False
         self._cprr_launch_logged = False
         # fast_mode / intra_batch_mode for the cp verify schedule. Not the
         # module defaults: those size reduce_partial_map at 65536 entries
@@ -740,6 +741,7 @@ class AiterAttnBackend(AttentionBackend):
                     verify_qlen=verify_qlen,
                     gfx95=is_gfx95_supported(),
                 ):
+                    self.use_mla_fp8_q_asm = True
                     _use_mla_ps_kernel = True
                     fast_mode = True
                     intra_batch_mode = False
@@ -764,8 +766,16 @@ class AiterAttnBackend(AttentionBackend):
 
             use_any_mla_persist = _use_mla_ps_kernel or self.use_mla_dcp_asm
             self.max_split_per_batch = 32 if use_any_mla_persist else None
+            if self.use_mla_fp8_q_asm:
+                # Leave the split count to AITER's sequence-length-aware
+                # scheduler instead of capping it at ceil(CU / batch).
+                self.max_split_per_batch = -1
 
-            if self.num_draft_tokens is None and use_any_mla_persist:
+            if (
+                self.num_draft_tokens is None
+                and use_any_mla_persist
+                and not self.use_mla_fp8_q_asm
+            ):
                 self.max_split_per_batch = 64
 
             # When the env var is on, aiter plans the KV splits. The default
@@ -985,7 +995,7 @@ class AiterAttnBackend(AttentionBackend):
             kv_last_page_len,
             nhead // nhead_kv,
             nhead_kv,
-            False,
+            getattr(self, "use_mla_fp8_q_asm", False),
             work_metadata,
             work_info_set,
             work_indptr,
@@ -1802,7 +1812,9 @@ class AiterAttnBackend(AttentionBackend):
         kernel takes None instead. mla.py re-decides persistent mode only on
         None. It would read -1 as a real count.
         """
-        if self.use_mla_auto_kv_splits:
+        if self.use_mla_auto_kv_splits or getattr(
+            self, "use_mla_fp8_q_asm", False
+        ):
             return None
         return self.forward_metadata.num_kv_splits
 
