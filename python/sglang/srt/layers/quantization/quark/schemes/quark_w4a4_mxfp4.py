@@ -2,12 +2,10 @@
 
 import logging
 import threading
-import warnings
 from typing import Any, Callable, Optional
 
 import torch
 
-from sglang.srt.environ import envs
 from sglang.srt.layers.parameter import (
     GroupQuantScaleParameter,
     ModelWeightParameter,
@@ -24,51 +22,16 @@ from sglang.srt.layers.quantization.fp8 import Fp8Config, Fp8LinearMethod
 from sglang.srt.layers.quantization.online_quantization import CopyNumelCounter
 from sglang.srt.layers.quantization.quark.schemes import QuarkLinearScheme
 from sglang.srt.layers.quantization.quark.utils import Nvfp4SourceConfig
-from sglang.srt.utils import get_bool_env_var, is_hip
+from sglang.srt.utils import is_hip
 from sglang.srt.utils.common import direct_register_custom_op, is_gfx95_supported
 
 NVFP4_BLOCK_SIZE = 16
 
 _is_hip = is_hip()
 
-# Activation precision for MXFP4 dense linears; see the env docs for the bf16
-# default. bf16 is also the only option on GPUs without the fp4-activation
-# WMMA scale instruction (e.g. gfx1250), which cannot run the a4w4 GEMM; those
-# set AITER_FORCE_A8W4=1, which overrides an explicit fp4 request.
-_MXFP4_LINEAR_ACTS = ("fp4", "bf16")
-
-
-def _resolve_dequant_linear_to_bf16(
-    act: str, is_hip: bool, force_a8w4: bool = False
-) -> bool:
-    """Whether MXFP4 dense linears dequantize to bf16 at load. Off ROCm the
-    answer is always False: both branches are HIP-only aiter kernels."""
-    if not is_hip:
-        if envs.SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT.is_set():
-            warnings.warn(
-                "SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT is a ROCm-only switch and "
-                "is ignored on this platform."
-            )
-        return False
-    if act not in _MXFP4_LINEAR_ACTS:
-        raise ValueError(
-            "SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT must be one of "
-            f"{', '.join(_MXFP4_LINEAR_ACTS)}; got {act!r}"
-        )
-    if force_a8w4 and act == "fp4":
-        warnings.warn(
-            "SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT=fp4 needs FP4 activation "
-            "support, which AITER_FORCE_A8W4=1 marks as missing; using bf16."
-        )
-        return True
-    return act == "bf16"
-
-
-_dequant_linear_to_bf16 = _resolve_dequant_linear_to_bf16(
-    envs.SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT.get(),
-    _is_hip,
-    force_a8w4=get_bool_env_var("AITER_FORCE_A8W4", "false"),
-)
+# On ROCm, MXFP4 dense linears dequantize to bf16 at load: K3 GSM8K scores
+# 0.947 vs 0.908 with fp4 activations. Off ROCm the packed weight is kept.
+_dequant_linear_to_bf16 = _is_hip
 
 # MXFP4 (OCP MX FP4 / e2m1) decode table, indexed by the 4-bit code.
 _MXFP4_VALUES = [

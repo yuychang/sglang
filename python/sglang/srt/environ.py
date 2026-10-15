@@ -967,11 +967,6 @@ class Envs:
     # default: tracked interior snapshots and speculative draft-extend stay on
     # Triton either way.
     SGLANG_AITER_KDA_FLASH_PREFILL = EnvBool(False)
-    # Activation precision for MXFP4-weight dense linears, independent of the
-    # MoE: "fp4" is the checkpoint's own W4A4, "bf16" dequantizes the weights
-    # at load. bf16 by default: K3 GSM8K scores 0.947 vs fp4's 0.908, for
-    # ~3% decode throughput. Ignored off ROCm (both paths are aiter kernels).
-    SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT = EnvStr("bf16")
     # ROCm decode attention kernel: auto (aiter_sparse on gfx950, tilelang elsewhere) |
     # aiter_sparse | tilelang | triton | torch | comparison | unified_kv_triton
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("auto")
@@ -1971,8 +1966,7 @@ class Envs:
     # BMMs run the AITER a8w8 kernel (~2.3% weight error vs dequant to bf16).
     SGLANG_ROCM_K3_MLA_ABSORB_FP8 = EnvBool(True)
     # Dequantize Quark MXFP4 shared experts before the MoE front merge so they
-    # join it. Needs SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT=bf16; shared down stays
-    # BF16 for accuracy.
+    # join it; shared down stays BF16 for accuracy.
     SGLANG_ROCM_K3_QUARK_SHARED_FULL_FRONT = EnvBool(True)
     # Master switch for the ROCm AITER K3 decode path: the MXFP4 SiTU MoE
     # runner, the fused MoE front and the AITER-backed attention projections.
@@ -2178,6 +2172,9 @@ _DEPRECATED_ENVS: Dict[str, _DeprecatedEnv] = {
     ),
     "SGLANG_TRITON_PREFILL_TRUNCATION_ALIGN_SIZE": _DeprecatedEnv(
         note="Deterministic inference on triton no longer aligns prefill chunks."
+    ),
+    "SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT": _DeprecatedEnv(
+        note="MXFP4 dense linears always dequantize to BF16 on ROCm."
     ),
     # Replaced by CLI flags.
     "SGLANG_SCHEDULER_DECREASE_PREFILL_IDLE": _DeprecatedEnv(

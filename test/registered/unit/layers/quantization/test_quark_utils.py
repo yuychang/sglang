@@ -5,15 +5,12 @@ from sglang.test.ci.ci_register import register_cpu_ci
 register_cpu_ci(est_time=10, suite="base-a-test-cpu")
 
 import unittest
-import warnings
 from types import SimpleNamespace
 
 import torch
 
-from sglang.srt.environ import envs
 from sglang.srt.layers.quantization.quark.schemes.quark_w4a4_mxfp4 import (
     QuarkW4A4MXFP4,
-    _resolve_dequant_linear_to_bf16,
 )
 from sglang.srt.layers.quantization.quark.utils import (
     e8m0_to_f32,
@@ -187,52 +184,6 @@ class TestMXFP4WeightMaterialization(CustomTestCase):
         scheme = object.__new__(QuarkW4A4MXFP4)
 
         self.assertIs(scheme.materialize_bf16_weight(layer), weight)
-
-
-class TestMXFP4LinearActResolution(CustomTestCase):
-    """The activation knob applies on ROCm and is inert everywhere else."""
-
-    def test_rocm_defaults_to_bf16(self):
-        self.assertTrue(_resolve_dequant_linear_to_bf16("bf16", is_hip=True))
-
-    def test_rocm_fp4_keeps_packed_weights(self):
-        self.assertFalse(_resolve_dequant_linear_to_bf16("fp4", is_hip=True))
-
-    def test_force_a8w4_overrides_fp4(self):
-        # gfx1250 cannot run the a4w4 GEMM; AITER_FORCE_A8W4 marks that arch.
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            self.assertTrue(
-                _resolve_dequant_linear_to_bf16("fp4", is_hip=True, force_a8w4=True)
-            )
-        self.assertEqual(len(caught), 1)
-        self.assertIn("AITER_FORCE_A8W4", str(caught[0].message))
-
-    def test_rocm_rejects_unknown_value(self):
-        with self.assertRaises(ValueError):
-            _resolve_dequant_linear_to_bf16("fp8", is_hip=True)
-
-    def test_non_rocm_ignores_every_value(self):
-        # Including values ROCm would reject.
-        for act in ("bf16", "fp4", "nonsense"):
-            with self.subTest(act=act):
-                self.assertFalse(_resolve_dequant_linear_to_bf16(act, is_hip=False))
-
-    def test_non_rocm_warns_only_when_explicitly_set(self):
-        # override() restores whatever was set once the unset check is done.
-        with envs.SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT.override("bf16"):
-            envs.SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT.clear()
-            with warnings.catch_warnings(record=True) as caught:
-                warnings.simplefilter("always")
-                _resolve_dequant_linear_to_bf16("bf16", is_hip=False)
-            self.assertEqual(list(caught), [])
-
-        with envs.SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT.override("fp4"):
-            with warnings.catch_warnings(record=True) as caught:
-                warnings.simplefilter("always")
-                _resolve_dequant_linear_to_bf16("fp4", is_hip=False)
-        self.assertEqual(len(caught), 1)
-        self.assertIn("ROCm-only", str(caught[0].message))
 
 
 if __name__ == "__main__":

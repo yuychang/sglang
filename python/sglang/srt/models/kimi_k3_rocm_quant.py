@@ -358,9 +358,9 @@ def k3_run_front_down_fp8(
 def _k3_densify_quark_shared_experts(mlp: nn.Module) -> None:
     """Dequantize Quark MXFP4 shared experts to BF16 before the MoE front merge.
 
-    With the default bf16 SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT, Quark dequantizes
-    them anyway, but only after load_weights has merged the front. Doing it
-    here lets them join the fused front; the later loader pass is a no-op.
+    Quark dequantizes them anyway, but only after load_weights has merged the
+    front. Doing it here lets them join the fused front; the later loader pass
+    is a no-op.
     """
     from sglang.srt.layers.quantization.quark.schemes import quark_w4a4_mxfp4
 
