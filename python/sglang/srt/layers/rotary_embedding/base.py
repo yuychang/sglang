@@ -507,17 +507,19 @@ class RotaryEmbedding(BaseFusedOp):
                     "save kv cache is not supported for fallback_rotary_embedding."
                 )
                 if _is_hip:
-                    self.cos_sin_cache = self.cos_sin_cache.to(query.device)
+                    self._match_cos_sin_cache_dtype(query)
+                    cos_sin_cache = self.cos_sin_cache_as(query.dtype)
                 else:
                     self.cos_sin_cache = self.cos_sin_cache.to(
                         query.device, dtype=query.dtype
                     )
+                    cos_sin_cache = self.cos_sin_cache
                 self.fallback_rotary_embedding(
                     positions,
                     query,
                     key,
                     self.head_size,
-                    self.cos_sin_cache,
+                    cos_sin_cache,
                     self.is_neox_style,
                 )
         return query, key
