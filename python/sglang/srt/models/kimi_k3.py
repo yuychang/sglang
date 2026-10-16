@@ -164,7 +164,11 @@ _aiter_k3_opt = _is_hip and envs.SGLANG_ROCM_K3_AITER_OPT.get()
 _aiter_mla_gate = _is_hip and envs.SGLANG_ROCM_K3_AITER_MLA_GATE.get()
 if _is_hip:
     from sglang.srt.layers.communication import hip_ar_residual
-    from sglang.srt.models.kimi_k3_rocm_fusion import attn_bank_read_quant_format
+    from sglang.srt.models.kimi_k3_rocm_fusion import (
+        _k3_hidden_num_tokens,
+        _k3_hidden_rows,
+        attn_bank_read_quant_format,
+    )
 
 
 def _cdiv(a: int, b: int) -> int:
@@ -2653,7 +2657,10 @@ class KimiK3DecoderLayer(nn.Module):
 
         # MLP synchronization pads extend batches, while attention metadata
         # describes only the real rows. Keep padded rows out of KV writes.
-        num_padded = hidden_states.shape[0]
+        # A ROCm fused in-proj quant hands over (fp8, scale).
+        num_padded = (
+            _k3_hidden_num_tokens(hidden_states) if _is_hip else hidden_states.shape[0]
+        )
         num_real = num_padded
         if require_mlp_sync() and forward_batch.forward_mode.is_extend():
             extend_lens = forward_batch.extend_seq_lens_cpu
@@ -2662,7 +2669,11 @@ class KimiK3DecoderLayer(nn.Module):
         if num_real != num_padded:
             with k3_sp_collective.o_proj_output_rows(num_padded):
                 attn_out = self._run_self_attn_inner(
-                    hidden_states[:num_real],
+                    (
+                        _k3_hidden_rows(hidden_states, num_real)
+                        if _is_hip
+                        else hidden_states[:num_real]
+                    ),
                     positions[:num_real],
                     forward_batch,
                     zero_allocator,
@@ -2670,7 +2681,7 @@ class KimiK3DecoderLayer(nn.Module):
             padded = k3_sp_collective.finish_padded_o_proj_output(attn_out, num_padded)
             if padded is not None:
                 return padded
-            out = hidden_states.new_zeros(num_padded, attn_out.shape[-1])
+            out = attn_out.new_zeros(num_padded, attn_out.shape[-1])
             out[:num_real] = attn_out
             return out
         return self._run_self_attn_inner(

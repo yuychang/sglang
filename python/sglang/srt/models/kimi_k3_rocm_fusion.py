@@ -122,6 +122,13 @@ def _k3_hidden_num_tokens(hidden_states) -> int:
     return _k3_hidden_tensor(hidden_states).shape[0]
 
 
+def _k3_hidden_rows(hidden_states, num_rows: int):
+    """Leading ``num_rows`` tokens, preserving the tuple form."""
+    if isinstance(hidden_states, tuple):
+        return tuple(t[:num_rows] if torch.is_tensor(t) else t for t in hidden_states)
+    return hidden_states[:num_rows]
+
+
 def _k3_fuse_kda_o_norm_ptpc(
     core_attn_out: torch.Tensor,
     *,
