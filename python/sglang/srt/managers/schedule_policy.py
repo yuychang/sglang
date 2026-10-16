@@ -600,11 +600,8 @@ class PrefillAdder:
         prefill_tile_block_m: int = 64,
     ):
         self.page_size = page_size
-        # A mamba checkpoint may only be donated at a depth that is both on the
-        # radix page and a whole number of kernel chunks from the extend start,
-        # and those two grids meet only where the prefix itself is chunk
-        # aligned. A chunk that stops anywhere else therefore costs the request
-        # every later donation, not just this one, so keep the cut on the grid.
+        # Mamba checkpoints are donated only where the prefix is chunk aligned,
+        # so an off-grid cut loses every later donation of the request.
         self.mamba_chunk_grid = (
             mamba_cache_chunk_size()
             if get_exec().mamba.enable_mamba_extra_buffer
@@ -840,12 +837,7 @@ class PrefillAdder:
         return -(-tokens // self.page_size) * self.page_size
 
     def floor_chunked_tokens(self, trunc_len: int, remaining: int) -> int:
-        """Round a *truncated* chunk down to the mamba kernel chunk grid.
-
-        The chunk that finishes a request may stop anywhere, so only shorten
-        when `trunc_len` really is a cut. Leave the cut alone when rounding
-        would empty it: making no progress is worse than losing a donation.
-        """
+        """Round a truncated chunk down to the mamba chunk grid, unless that would empty it."""
         if self.mamba_chunk_grid <= 1 or trunc_len >= remaining:
             return trunc_len
         return trunc_len // self.mamba_chunk_grid * self.mamba_chunk_grid or trunc_len

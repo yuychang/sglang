@@ -301,8 +301,13 @@ class AiterRunnerCore(MoeRunnerCore):
 
         # Let aiter write the top-k sum into the published buffer. It returns a
         # fresh tensor when it declines, so the publisher still compares before
-        # copying. no_combine output has an extra top-k dim and cannot fit.
-        if not self.config.no_combine and _aiter_fused_moe_supports_output():
+        # copying. no_combine output has an extra top-k dim and cannot fit, and
+        # a MORI EPv2 staging view set above takes precedence.
+        if (
+            not self.config.no_combine
+            and "output" not in extra
+            and _aiter_fused_moe_supports_output()
+        ):
             zero_copy_out = zero_copy_context.get_moe_output_spec(
                 torch.Size(
                     (runner_input.hidden_states.shape[0], quant_info.w2_weight.shape[1])

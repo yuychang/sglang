@@ -52,11 +52,6 @@ logger = logging.getLogger(__name__)
 
 _is_hip = is_hip()
 
-# The three switches -- SGLANG_ROCM_K3_ONLINE_FP8_ATTN, _KDA_INPROJ and
-# _SHARED_EXPERTS -- are registered and documented in ``srt/environ.py``. They
-# are read per call rather than cached at import so ``.override()`` reaches
-# them.
-
 # Rows per quantization chunk. A KDA input projection is [6144, 7168] at TP=8;
 # promoting all of it to fp32 at once costs 176 MiB of transient VRAM right
 # where the loader's own peak sits, and the amax is row-independent anyway.
@@ -73,18 +68,9 @@ _SKIP_SUFFIXES = ("f_b_proj",)
 # the slower unfused path.
 _KDA_INPROJ_SUFFIXES = ("fused_qkvg_proj", "f_a_proj", "b_proj")
 
-# The shared-expert down projection is the one weight K3 consumes as a raw
-# dense tensor rather than through ``quant_method``:
-#
-# * ``_run_shared_down`` falls back to ``_k3_bf16_gemm(x, down_proj.weight)``,
-#   which reads ``[out, in]``. The loader transposes a quantized weight to
-#   ``[in, out]``, so converting it turns that fallback into a shape error.
-# * ``_eligible_for_fused_front`` requires ``down_proj.weight.dtype`` to be
-#   bf16/fp16, so converting it silently drops the fused-front collective.
-#
-# FP8 for this weight is already available, and done correctly, via
-# ``SGLANG_ROCM_K3_PTPC_FP8_SHARED_DOWN``: it packs a *separate* FP8 copy into
-# ``_shared_down_fp8_w`` and leaves the BF16 weight live for both paths above.
+# The shared down_proj is read raw as [out, in] by _run_shared_down's BF16
+# fallback and dtype-checked by _eligible_for_fused_front, so it stays BF16;
+# SGLANG_ROCM_K3_PTPC_FP8_SHARED_DOWN packs a separate FP8 copy instead.
 _SHARED_SKIP_SUFFIXES = ("down_proj",)
 
 
@@ -109,7 +95,7 @@ class _K3OnlineFp8LinearMethod(LinearMethodBase):
         # Loaders invoke this once, but the capture-overlap path runs the whole
         # post-load sequence twice (sentinel weights, then real ones) and the
         # scheme transposes in place, so make the second call a no-op.
-        if getattr(layer, "_k3_online_fp8_processed", False):
+        if layer._k3_online_fp8_processed:
             return
         layer.scheme.process_weights_after_loading(layer)
         layer._k3_online_fp8_processed = True
@@ -179,6 +165,7 @@ def _is_convertible(module: nn.Module) -> bool:
 
 
 def _selected_modules(model: nn.Module) -> Iterator[tuple[str, nn.Module]]:
+    # Read per call, not at import, so .override() reaches them.
     do_attn = envs.SGLANG_ROCM_K3_ONLINE_FP8_ATTN.get()
     do_kda_inproj = envs.SGLANG_ROCM_K3_ONLINE_FP8_KDA_INPROJ.get()
     do_shared = envs.SGLANG_ROCM_K3_ONLINE_FP8_SHARED_EXPERTS.get()

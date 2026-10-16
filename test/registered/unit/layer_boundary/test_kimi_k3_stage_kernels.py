@@ -137,7 +137,13 @@ class TestKimiK3StageKernels(CustomTestCase):
             self.ffn_path(bank=True, sp_moe=False, all_reduce_fusion=True)
         )
         self.assertIs(entry, comm_ops._reduce_update_read)
-        self.assertEqual(fusions, (kimi_k3._k3_all_reduce_add,))
+        # ROCm completes the sum in AITER's custom all-reduce instead.
+        expected = (
+            kimi_k3._k3_hip_all_reduce_add
+            if kimi_k3._is_hip
+            else kimi_k3._k3_all_reduce_add
+        )
+        self.assertEqual(fusions, (expected,))
         self.assertIsNone(gather)
 
 

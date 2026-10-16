@@ -265,10 +265,7 @@ def _launch(kernel, grid, args, constexprs, device_index, specialization):
     compiled = _compiled.get(key)
     if compiled is None:
         compiled = kernel[grid](*args, *constexprs, num_warps=_NUM_WARPS)
-        if _DIRECT_LAUNCH and all(
-            hasattr(compiled, attr)
-            for attr in ("run", "function", "packed_metadata", "launch_metadata")
-        ):
+        if _DIRECT_LAUNCH:
             _compiled[key] = compiled
         return
     args = (*args, *constexprs)

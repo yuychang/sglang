@@ -13,11 +13,12 @@
 # ==============================================================================
 """ROCm KDA input-projection and fused-decode paths for Kimi-K3.
 
-Shared ``kimi_k3.py`` keeps an ``_is_hip`` call. These functions still
-take the attention module as ``self``.
+Shared ``kimi_k3.py`` keeps an ``_is_hip`` call. These functions take the
+attention module as ``self``.
 """
 
 from types import SimpleNamespace
+from typing import Optional
 
 import torch
 
@@ -57,9 +58,7 @@ def use_qkvgbfa_ptpc_fp8(self, hidden_states) -> bool:
     )
 
     x = _k3_hidden_tensor(hidden_states)
-    if getattr(self, "_qkvgbfa_fp8_w", None) is None or not _k3_ptpc_fp8_batch_ok(
-        x.shape[0]
-    ):
+    if self._qkvgbfa_fp8_w is None or not _k3_ptpc_fp8_batch_ok(x.shape[0]):
         return False
     from sglang.kernels.ops.gemm import ptpc_fp8_aiter_hip
 
@@ -76,7 +75,7 @@ def prepare_qkvgbfa_ptpc_fp8(self) -> None:
         _k3_ptpc_fp8,
     )
 
-    layer = getattr(self, "_qkvgbfa_layer", None)
+    layer = self._qkvgbfa_layer
     if not _k3_ptpc_fp8 or layer is None:
         return
     from sglang.kernels.ops.gemm import ptpc_fp8_aiter_hip
@@ -162,7 +161,7 @@ def prepare_fused_decode_hip(self) -> None:
     f_b_weight = self.f_b_proj.weight
     # Quark ships f_b as PTPC FP8; _merge_bfa_weights already
     # dequantized it into the BF16 tiny-GEMM buffer.
-    f_b_dense = getattr(self, "_bfa_f_b_w", None)
+    f_b_dense = self._bfa_f_b_w
     if f_b_weight.dtype != torch.bfloat16 and f_b_dense is not None:
         f_b_weight = f_b_dense
     backend = envs.SGLANG_ROCM_K3_KDA_FUSED_BACKEND.get().lower()
@@ -240,6 +239,13 @@ def init_kda_rocm_state(self) -> None:
     self._qkvgbfa_fp8_n = 0
     self._kda_group64_weight = None
     self._kda_group64_scale = None
+    # merge_kda_inproj_weights_hip() may merge the whole [q,k,v,g | f_a | b]
+    # in-proj, making _bfa_w a tail view of that buffer; _qkvgbfa_sizes is its
+    # split and stays None when the fusion does not apply. Quark FP8 merges into
+    # a separate copy and leaves _bfa_w None.
+    self._qkvgbfa_layer: Optional[SimpleNamespace] = None
+    self._qkvgbfa_sizes: Optional[list[int]] = None
+    self._qkvgbfa_bs_limit = envs.SGLANG_ROCM_K3_FUSE_KDA_INPROJ_MAX_TOKENS.get()
 
 
 def merge_bfa_weights_hip(self) -> bool:

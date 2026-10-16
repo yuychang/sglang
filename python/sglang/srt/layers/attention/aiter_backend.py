@@ -401,6 +401,9 @@ class AiterAttnBackend(AttentionBackend):
         self.kv_index_translator = model_runner.kv_index_translator
 
         self.use_mla = model_runner.model_config.attention_arch == AttentionArch.MLA
+        # MLA overwrites both. MHA prefill still reads them.
+        self.head_pad_mode = "none"
+        self.num_head_padded = self.num_head
 
         self.dcp_world_size = get_parallel().attn_dcp_size
         self.mla_decode_backend = envs.SGLANG_AITER_MLA_DECODE_BACKEND.get().lower()
@@ -478,64 +481,7 @@ class AiterAttnBackend(AttentionBackend):
                 f"{self.num_head}-head instantiation at head_dim {self.v_head_dim}."
             )
 
-        # Kimi-K3 TP8 is 12 heads, QK 192, V 128. That shape is outside
-        # mla_reduce_v1, and the 12->16 PS-ASM pad memory-faults. FlyDSL FP8
-        # FMHA serves it directly.
-        self.use_mla_flydsl_fp8_prefill = False
-        self.require_mla_flydsl_fp8_prefill = (
-            self.use_mla and envs.SGLANG_AITER_MLA_FLYDSL_FP8_PREFILL_REQUIRED.get()
-        )
-        self.use_mla_flydsl_fused_kv_proj = (
-            self.use_mla and envs.SGLANG_AITER_MLA_FLYDSL_FUSED_KV_PROJ.get()
-        )
-        self._mla_prefill_fused_fp8_quant = None
-        if (
-            self.use_mla
-            and fp8_dtype == torch.float8_e4m3fn
-            and envs.SGLANG_ROCM_K3_MLA_PREFILL_FUSED_FP8_QUANT.get()
-        ):
-            from sglang.kernels.ops.quantization.mla_prefill_fp8_quant import (
-                mla_prefill_fp8_quant,
-            )
-
-            self._mla_prefill_fused_fp8_quant = mla_prefill_fp8_quant
-        self._mla_flydsl_unit_descale = None
-        self._mla_flydsl_fused_kv_logged = False
-        self._mla_flydsl_fp8_fallback_logged = False
-        if (
-            self.use_mla
-            and envs.SGLANG_AITER_MLA_FLYDSL_FP8_PREFILL.get()
-            and is_gfx95_supported()
-        ):
-            try:
-                from aiter.ops.flydsl.kernels.flash_attn_func_fp8_gfx950 import (
-                    flydsl_flash_attn_fp8_supported,
-                )
-
-                self.use_mla_flydsl_fp8_prefill = flydsl_flash_attn_fp8_supported(
-                    torch.device(self.device),
-                    self.num_head,
-                    self.num_kv_head,
-                    self.qk_head_dim,
-                    self.v_head_dim,
-                )
-            except Exception:
-                logger.exception("MLA FlyDSL FP8 prefill support check failed")
-                self.use_mla_flydsl_fp8_prefill = False
-            if self.use_mla_flydsl_fp8_prefill:
-                logger.info(
-                    "MLA prefill uses gfx950 FlyDSL FP8 FMHA "
-                    "(heads=%s kv_heads=%s qk=%s v=%s)",
-                    self.num_head,
-                    self.num_kv_head,
-                    self.qk_head_dim,
-                    self.v_head_dim,
-                )
-        if self.require_mla_flydsl_fp8_prefill and not self.use_mla_flydsl_fp8_prefill:
-            raise RuntimeError(
-                "SGLANG_AITER_MLA_FLYDSL_FP8_PREFILL_REQUIRED=1, but gfx950 "
-                "FlyDSL FP8 FMHA does not support this MLA configuration"
-            )
+        self._init_mla_flydsl_fp8_prefill()
 
         # Parse constants
         self.max_context_len = model_runner.model_config.context_len
@@ -1616,18 +1562,74 @@ class AiterAttnBackend(AttentionBackend):
         mla_decode_fwd(q, k_buffer_flat, o, **kwargs)
         return o
 
-    def _fp8_prefill_asm_enabled(self) -> bool:
-        """PS-ASM fp8 prefill. 12-head zero-pad stays off unless opted in.
+    def _init_mla_flydsl_fp8_prefill(self) -> None:
+        # Kimi-K3 TP8 is 12 heads, QK 192, V 128. That shape is outside
+        # mla_reduce_v1, and the 12->16 PS-ASM pad memory-faults. FlyDSL FP8
+        # FMHA serves it directly.
+        self.use_mla_flydsl_fp8_prefill = False
+        self.require_mla_flydsl_fp8_prefill = (
+            self.use_mla and envs.SGLANG_AITER_MLA_FLYDSL_FP8_PREFILL_REQUIRED.get()
+        )
+        self.use_mla_flydsl_fused_kv_proj = (
+            self.use_mla and envs.SGLANG_AITER_MLA_FLYDSL_FUSED_KV_PROJ.get()
+        )
+        self._mla_prefill_fused_fp8_quant = None
+        if (
+            self.use_mla
+            and fp8_dtype == torch.float8_e4m3fn
+            and envs.SGLANG_ROCM_K3_MLA_PREFILL_FUSED_FP8_QUANT.get()
+        ):
+            from sglang.kernels.ops.quantization.mla_prefill_fp8_quant import (
+                mla_prefill_fp8_quant,
+            )
 
-        That shape memory-faults on gfx950; SGLANG_AITER_MLA_ZERO_PAD_FP8_PREFILL
-        selects the 12->16 padded launch anyway. FlyDSL FP8 prefill, when the
-        head shape can use it, replaces this path.
-        """
+            self._mla_prefill_fused_fp8_quant = mla_prefill_fp8_quant
+        self._mla_flydsl_unit_descale = None
+        self._mla_flydsl_fused_kv_logged = False
+        self._mla_flydsl_fp8_fallback_logged = False
+        if (
+            self.use_mla
+            and envs.SGLANG_AITER_MLA_FLYDSL_FP8_PREFILL.get()
+            and is_gfx95_supported()
+        ):
+            try:
+                from aiter.ops.flydsl.kernels.flash_attn_func_fp8_gfx950 import (
+                    flydsl_flash_attn_fp8_supported,
+                )
+
+                self.use_mla_flydsl_fp8_prefill = flydsl_flash_attn_fp8_supported(
+                    torch.device(self.device),
+                    self.num_head,
+                    self.num_kv_head,
+                    self.qk_head_dim,
+                    self.v_head_dim,
+                )
+            except Exception:
+                logger.exception("MLA FlyDSL FP8 prefill support check failed")
+                self.use_mla_flydsl_fp8_prefill = False
+            if self.use_mla_flydsl_fp8_prefill:
+                logger.info(
+                    "MLA prefill uses gfx950 FlyDSL FP8 FMHA "
+                    "(heads=%s kv_heads=%s qk=%s v=%s)",
+                    self.num_head,
+                    self.num_kv_head,
+                    self.qk_head_dim,
+                    self.v_head_dim,
+                )
+        if self.require_mla_flydsl_fp8_prefill and not self.use_mla_flydsl_fp8_prefill:
+            raise RuntimeError(
+                "SGLANG_AITER_MLA_FLYDSL_FP8_PREFILL_REQUIRED=1, but gfx950 "
+                "FlyDSL FP8 FMHA does not support this MLA configuration"
+            )
+
+    def _fp8_prefill_asm_enabled(self) -> bool:
+        """PS-ASM fp8 prefill; the 12-head zero-pad memory-faults on gfx950
+        unless SGLANG_AITER_MLA_ZERO_PAD_FP8_PREFILL opts in."""
         if self.use_mla_flydsl_fp8_prefill:
             return False
         if not self.use_fp8_prefill_attn:
             return False
-        if getattr(self, "head_pad_mode", "none") != "zero":
+        if self.head_pad_mode != "zero":
             return True
         return envs.SGLANG_AITER_MLA_ZERO_PAD_FP8_PREFILL.get()
 
@@ -1635,14 +1637,10 @@ class AiterAttnBackend(AttentionBackend):
     def _quantize_mla_prefill_fp8(
         x: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Per-tensor e4m3fn quant. The returned scale is amax/fp8_max, the descale.
+        """Per-tensor e4m3fn quant; returns (fp8, descale = amax / fp8_max).
 
-        AITER's dynamic per-tensor quant launches one block per row and has
-        every block atomicMax the same float. Q/K/V rows are a single head
-        (128 or 192 elements), so a 100K-token prefix is 1.2M blocks contending
-        on one address: about 13 ms per tensor per layer. One reduction for the
-        amax, then the static-scale kernel over token-wide rows, reads the same
-        data without the contention.
+        One amax reduction plus the static-scale kernel avoids AITER's dynamic
+        quant, whose per-row blocks all atomicMax one float.
         """
         packed = x if x.is_contiguous() else x.contiguous()
         flat = (
@@ -4947,7 +4945,7 @@ class AiterAttnBackend(AttentionBackend):
         q_pre_padded = (
             self.use_mla
             and q.ndim == 3
-            and q.shape[1] == getattr(self, "num_head_padded", -1)
+            and q.shape[1] == self.num_head_padded
             and q.shape[-1] == layer.qk_head_dim
         )
         if not q_pre_padded:

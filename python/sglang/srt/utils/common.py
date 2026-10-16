@@ -684,8 +684,7 @@ def _amdgpu_memory_mib_from_torch() -> float:
 
 def get_amdgpu_memory_capacity():
     try:
-        # Run rocminfo and capture the output. The command name in older logs
-        # said rocm-smi; the pipeline still reads rocminfo pool sizes.
+        # Read per-GPU pool sizes from rocminfo.
         result = subprocess.run(
             [
                 "rocminfo | grep 'gfx' -A 100 | grep 'Pool 1' -A 5 | grep 'Size:' | awk '{print $2}'"

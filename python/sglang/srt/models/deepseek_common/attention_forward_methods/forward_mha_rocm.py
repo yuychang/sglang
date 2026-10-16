@@ -37,7 +37,7 @@ from sglang.srt.models.deepseek_common.utils import (
     _use_aiter_gfx95,
 )
 from sglang.srt.runtime_context import get_exec
-from sglang.srt.utils import BumpAllocator, get_bool_env_var
+from sglang.srt.utils import BumpAllocator, get_bool_env_var, print_info_once
 
 if TYPE_CHECKING:
     from sglang.srt.models.deepseek_v2 import DeepseekV2AttentionMLA
@@ -390,9 +390,7 @@ def project_prefix_kv_fp8(self, kv_a: torch.Tensor, k_pe: torch.Tensor):
         k_pe = k_pe.unsqueeze(1)
     if k_pe.shape[1] != self.num_local_heads:
         k_pe = k_pe.expand(-1, self.num_local_heads, -1)
-    if not getattr(self, "_prefix_kv_fp8_logged", False):
-        logger.info("MLA prefix chunks project K/V directly to unit-scale FP8")
-        self._prefix_kv_fp8_logged = True
+    print_info_once("MLA prefix chunks project K/V directly to unit-scale FP8")
     from sglang.kernels.ops.quantization.fp8_kernel import fp8_dtype
 
     return self.kv_b_proj(

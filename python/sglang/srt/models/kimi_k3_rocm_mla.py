@@ -13,8 +13,8 @@
 # ==============================================================================
 """ROCm fused MLA Q/cache path for Kimi-K3.
 
-Shared ``kimi_k3.py`` keeps an ``_is_hip`` call. These functions still
-take the attention module as ``self``.
+Shared ``kimi_k3.py`` keeps an ``_is_hip`` call. These functions take the
+attention module as ``self``.
 """
 
 from typing import Optional, Tuple
@@ -38,28 +38,32 @@ def try_fused_mla_q_cache(
     if not self._k3_mla_q_cache_fusion:
         return None
 
-    from sglang.srt.layers.rocm_linear_utils import (
-        fused_qk_rope_cat_and_cache_mla,
-    )
     from sglang.srt.model_executor.forward_context import get_token_to_kv_pool
 
     kv_cache = get_token_to_kv_pool().get_key_buffer(self.attn_mqa.layer_id)
     scale = self.attn_mqa.k_scale
     if scale is None:
         scale = self._k3_mla_q_cache_scale
-    cos_cache = self._k3_identity_rope_cos
-    sin_cache = self._k3_identity_rope_sin
     if (
         not isinstance(scale, torch.Tensor)
         or not isinstance(self._k3_mla_q_cache_scale, torch.Tensor)
-        or cos_cache is None
-        or sin_cache is None
+        or self._k3_identity_rope_cos is None
+        or self._k3_identity_rope_sin is None
+        or not _mla_q_cache_shapes_ok(
+            self,
+            q_nope_out=q_nope_out,
+            q_pe=q_pe,
+            k_nope=k_nope,
+            k_pe=k_pe,
+            positions=positions,
+            out_cache_loc=out_cache_loc,
+        )
     ):
         return None
 
-    # ASM decode consumes FP8 Q when the verify window fits the native
-    # 16-head kernel (qlen <= 4). Wider windows stay on Gluon, which keeps
-    # BF16 Q and still writes the FP8 cache.
+    # AITER's asm decode uses FP8 Q when the cache is FP8. Gluon keeps Q in
+    # BF16 while retaining the fused FP8 cache write; its h12/bh16 kernel is
+    # both faster and more accurate for K3's long-context decode regime.
     triton_decode = self.current_attention_backend in ("triton", "triton_mla")
     tokens, heads = q_nope_out.shape[0], q_nope_out.shape[1]
     from sglang.srt.layers.attention.aiter_mla_gluon import (
@@ -78,21 +82,8 @@ def try_fused_mla_q_cache(
         )
     )
     q_out_dtype = q_nope_out.dtype if triton_decode or gluon_decode else kv_cache.dtype
-    if (
-        q_nope_out.shape != (tokens, heads, self.kv_lora_rank)
-        or q_pe.shape != (tokens, heads, self.qk_rope_head_dim)
-        or k_nope.shape != (tokens, 1, self.kv_lora_rank)
-        or k_pe.shape != (tokens, 1, self.qk_rope_head_dim)
-        or out_cache_loc.shape != (tokens,)
-        or positions.shape != (tokens,)
-    ):
-        return None
-    # AITER's qh16 decode kernel needs 16 Q heads. K3 TP8 has 12; the
-    # previous producer emitted 12 and the backend `F.pad`ed, which is a
-    # FillFunctor per MLA layer. Write the 12 real heads into a persistent
-    # zeroed 16-head buffer instead so decode can skip that launch.
-    # Do not use uninitialized pad heads: that is the fill-elim that
-    # already failed GSM8K.
+    # AITER's qh16 decode kernel needs 16 Q heads (K3 TP8 has 12); writing into
+    # a persistent 16-head buffer skips a per-layer pad. Pad heads must stay zeroed.
     aiter_pad_heads = (
         heads if gluon_decode else (16 if (heads < 16 and 16 % heads != 0) else heads)
     )
@@ -105,8 +96,64 @@ def try_fused_mla_q_cache(
         q_nope_out.device,
         zero_init=aiter_pad_heads > heads,
     )
+    q = _run_mla_q_cache(
+        self,
+        q_nope_out=q_nope_out,
+        q_pe=q_pe,
+        k_nope=k_nope,
+        k_pe=k_pe,
+        kv_cache=kv_cache,
+        positions=positions,
+        out_cache_loc=out_cache_loc,
+        k_scale=scale,
+        q_out=q_out,
+    )
+    k_placeholder = mla_k_placeholder(
+        self, k_nope.shape[0], k_nope.dtype, k_nope.device
+    )
+    return q, k_placeholder
+
+
+def _mla_q_cache_shapes_ok(
+    self,
+    *,
+    q_nope_out: torch.Tensor,
+    q_pe: torch.Tensor,
+    k_nope: torch.Tensor,
+    k_pe: torch.Tensor,
+    positions: torch.Tensor,
+    out_cache_loc: torch.Tensor,
+) -> bool:
+    tokens, heads = q_nope_out.shape[0], q_nope_out.shape[1]
+    return (
+        q_nope_out.shape == (tokens, heads, self.kv_lora_rank)
+        and q_pe.shape == (tokens, heads, self.qk_rope_head_dim)
+        and k_nope.shape == (tokens, 1, self.kv_lora_rank)
+        and k_pe.shape == (tokens, 1, self.qk_rope_head_dim)
+        and out_cache_loc.shape == (tokens,)
+        and positions.shape == (tokens,)
+    )
+
+
+def _run_mla_q_cache(
+    self,
+    *,
+    q_nope_out: torch.Tensor,
+    q_pe: torch.Tensor,
+    k_nope: torch.Tensor,
+    k_pe: torch.Tensor,
+    kv_cache: torch.Tensor,
+    positions: torch.Tensor,
+    out_cache_loc: torch.Tensor,
+    k_scale: torch.Tensor,
+    q_out: torch.Tensor,
+) -> torch.Tensor:
+    """Write the KV cache and the absorbed Q into ``q_out``: the AITER HIP
+    kernel where it covers the shapes, else the Triton fused rope/cat/cache."""
     from sglang.kernels.ops.attention import mla_q_cache_aiter_hip
 
+    cos_cache = self._k3_identity_rope_cos
+    sin_cache = self._k3_identity_rope_sin
     if mla_q_cache_aiter_hip.covered(
         q_nope_out,
         q_pe,
@@ -115,13 +162,13 @@ def try_fused_mla_q_cache(
         kv_cache,
         out_cache_loc,
         positions,
-        scale,
+        k_scale,
         cos_cache,
         sin_cache,
         q_out,
         q_scale=self._k3_mla_q_cache_scale,
     ):
-        q = mla_q_cache_aiter_hip.run(
+        return mla_q_cache_aiter_hip.run(
             q_nope=q_nope_out,
             q_pe=q_pe,
             k_nope=k_nope,
@@ -129,34 +176,34 @@ def try_fused_mla_q_cache(
             kv_cache=kv_cache,
             slot_mapping=out_cache_loc,
             positions=positions,
-            k_scale=scale,
+            k_scale=k_scale,
             cos_cache=cos_cache,
             sin_cache=sin_cache,
             out=q_out,
             q_scale=self._k3_mla_q_cache_scale,
         )
-    else:
-        q, _, _, _ = fused_qk_rope_cat_and_cache_mla(
-            q_nope_out,
-            q_pe,
-            k_nope,
-            k_pe,
-            kv_cache,
-            out_cache_loc,
-            positions,
-            cos_cache,
-            sin_cache,
-            scale,
-            True,
-            q_scale=self._k3_mla_q_cache_scale,
-            q_out_dtype=q_out_dtype,
-            compute_all_q_rope=False,
-            identity_rope=True,
-        )
-    k_placeholder = mla_k_placeholder(
-        self, k_nope.shape[0], k_nope.dtype, k_nope.device
+    from sglang.srt.layers.rocm_linear_utils import (
+        fused_qk_rope_cat_and_cache_mla,
     )
-    return q, k_placeholder
+
+    q, _, _, _ = fused_qk_rope_cat_and_cache_mla(
+        q_nope_out,
+        q_pe,
+        k_nope,
+        k_pe,
+        kv_cache,
+        out_cache_loc,
+        positions,
+        cos_cache,
+        sin_cache,
+        k_scale,
+        True,
+        q_scale=self._k3_mla_q_cache_scale,
+        q_out_dtype=q_out.dtype,
+        compute_all_q_rope=False,
+        identity_rope=True,
+    )
+    return q
 
 
 def mla_q_out_buffer(
@@ -169,9 +216,9 @@ def mla_q_out_buffer(
     zero_init: bool = False,
 ) -> torch.Tensor:
     """Persistent fused-Q workspace, including optional MLA pad heads."""
-    buf = getattr(self, "_k3_mla_q_out", None)
+    buf = self._k3_mla_q_out
     if (
-        not isinstance(buf, torch.Tensor)
+        buf is None
         or buf.dtype != dtype
         or buf.device != device
         or buf.shape[1] != heads
@@ -189,9 +236,9 @@ def mla_k_placeholder(
     self, tokens: int, dtype: torch.dtype, device: torch.device
 ) -> torch.Tensor:
     width = self.kv_lora_rank + self.qk_rope_head_dim
-    buf = getattr(self, "_k3_mla_k_placeholder", None)
+    buf = self._k3_mla_k_placeholder
     if (
-        not isinstance(buf, torch.Tensor)
+        buf is None
         or buf.dtype != dtype
         or buf.device != device
         or buf.shape[1] != 1
@@ -205,6 +252,8 @@ def mla_k_placeholder(
 
 def init_mla_rocm_state(self) -> None:
     self._k3_mla_q_cache_fusion = envs.SGLANG_ROCM_K3_AITER_MLA_Q_CACHE_FUSION.get()
+    self._k3_mla_q_out: Optional[torch.Tensor] = None
+    self._k3_mla_k_placeholder: Optional[torch.Tensor] = None
     if self._k3_mla_q_cache_fusion:
         self.register_buffer(
             "_k3_identity_rope_cos",

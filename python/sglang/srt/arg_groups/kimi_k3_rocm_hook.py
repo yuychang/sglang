@@ -5,7 +5,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from sglang.srt.arg_groups.overrides import declare_resolution, resolving_view
+from sglang.srt.arg_groups.overrides import (
+    declare_resolution,
+    model_config_of,
+    resolving_view,
+)
 from sglang.srt.runtime_context import get_platform
 
 if TYPE_CHECKING:
@@ -18,13 +22,9 @@ def disable_kimi_k3_rocm_symm_mem(server_args: ServerArgs) -> None:
     """Turn `--enable-symm-mem` back off unless every phase runs eager.
 
     Symm-mem allocations are per-forward, so an address captured into a graph is
-    neither reserved for its lifetime nor at the same offset on every rank. Under
-    capture that corrupts spec decode: accept collapses to 1.000, or the server
-    silently emits garbage with accept pinned at the ceiling. Prefill counts too --
-    the same allocation sits in any captured RowParallelLinear.
-
-    Gates on the arch itself: this runs from cuda-graph resolution, which is earlier
-    than the model-specific hook block.
+    not stable across replays or ranks; captured prefill and spec decode both
+    corrupt. Gates on the arch itself because it runs before the model-specific
+    hook block.
     """
     if not get_platform().is_hip:
         return
@@ -37,7 +37,7 @@ def disable_kimi_k3_rocm_symm_mem(server_args: ServerArgs) -> None:
         return
     if parse_connector_type(cfg.model_path) == ConnectorType.INSTANCE:
         return
-    if server_args.get_model_config().hf_config.architectures[0] not in (
+    if model_config_of(server_args).hf_config.architectures[0] not in (
         "KimiLinearForCausalLM",
         "KimiK3ForConditionalGeneration",
     ):

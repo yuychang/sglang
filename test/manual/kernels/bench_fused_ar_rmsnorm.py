@@ -53,6 +53,8 @@ def _init():
 
 
 def _time_graph(graph: torch.cuda.CUDAGraph) -> float:
+    # Hot L2 is the serving pattern here: a decode-sized AR input is the output
+    # of the GEMM that ran just before it.
     stream = torch.cuda.current_stream()
     for _ in range(WARMUP):
         graph.replay()

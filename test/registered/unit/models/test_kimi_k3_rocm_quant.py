@@ -224,6 +224,7 @@ class TestDensifyQuarkSharedExperts(CustomTestCase):
                 weight=torch.full((2, 16), 0x21, dtype=torch.uint8),
                 weight_scale=torch.full((2, 1), 127, dtype=torch.uint8),
                 scheme=scheme,
+                dequantized_bf16=False,
             )
 
         return SimpleNamespace(
@@ -250,7 +251,7 @@ class TestDensifyQuarkSharedExperts(CustomTestCase):
             mlp.shared_experts.gate_up_proj.weight.data_ptr(), weight.data_ptr()
         )
 
-    def test_fp4_activation_keeps_packed_weights(self):
+    def test_non_rocm_keeps_packed_weights(self):
         mlp = self._mlp()
         path = (
             "sglang.srt.layers.quantization.quark.schemes."

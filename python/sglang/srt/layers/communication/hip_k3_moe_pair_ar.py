@@ -5,8 +5,7 @@ into one buffer so a single collective can cover both. At 16K chunked prefill
 that concat is ~336 MiB, which is above the mxmoe recipe's
 ``ROCM_QUICK_REDUCE_MAX_SIZE_BYTES_MB=256`` cap (the cap exists so QR does not
 allocate a second 336 MiB IPC buffer on top of 16K scratch). HIP custom-AR is
-only 16 MiB, so the concat falls through to NCCL Generic (~1.66 ms in the
-Quark 8k/1k traces, ~19% of prefill GPU).
+only 16 MiB, so the concat falls through to NCCL Generic.
 
 Each slice fits the existing QR workspace: latent ~112 MiB, shared ~224 MiB.
 Splitting keeps the 256 MiB cap and moves the oversized pair onto INT4
@@ -28,14 +27,10 @@ MOE_SHARED_WIDTH = 7168
 
 
 def qr_max_size_bytes() -> Optional[int]:
-    group = get_tp_group()
-    qr = getattr(group, "qr_comm", None)
-    if qr is None or getattr(qr, "disabled", True):
+    qr = get_tp_group().qr_comm
+    if qr is None or qr.disabled or qr.qr_max_size <= 0:
         return None
-    max_size = getattr(qr, "qr_max_size", None)
-    if max_size is None or int(max_size) <= 0:
-        return None
-    return int(max_size)
+    return int(qr.qr_max_size)
 
 
 def should_split_oversized_moe_pair(

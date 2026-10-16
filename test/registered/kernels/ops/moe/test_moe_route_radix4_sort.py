@@ -80,9 +80,7 @@ def test_fused_sort_matches_route_and_layout(m):
     )
     moe_buf = torch.ones((m, MODEL_DIM), dtype=torch.bfloat16, device="cuda")
 
-    ref_w, ref_ids = moe_route_radix4.route_radix4(
-        scores, bias, TOPK, True, 2.5, fuse_sort=False
-    )
+    ref_w, ref_ids = moe_route_radix4.route_radix4(scores, bias, TOPK, True, 2.5)
     w, ids, aux = moe_route_radix4.route_radix4_with_sort(
         scores, bias, TOPK, True, 2.5, moe_buf=moe_buf
     )

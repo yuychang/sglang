@@ -24,7 +24,7 @@ from sglang.srt.environ import envs
 # limit with H=7168 (one masked tile of 8192) and nvb <= 8.
 MAX_REGISTER_TILE: int = 8 * 8192
 # (num_warps, waves_per_eu) by the compile-time padded bank depth. Tuned at
-# T=2 under graph replay; every winner is bit-identical to the original 4/0.
+# T=2 under graph replay; every entry is bit-identical to (4, 0).
 _LAUNCH_TUNING = {
     1: (4, 3),
     2: (4, 3),

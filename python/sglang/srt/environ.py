@@ -950,15 +950,12 @@ class Envs:
     # stay on split AR + RMSNorm.
     SGLANG_ROCM_FUSED_AR_RMSNORM = EnvBool(True)
     # Upper token bound for the fused AR+RMSNorm above; 0 disables the cap.
-    # Measured on MI355X TP8 Kimi-K3 (bench_fused_ar_rmsnorm.py): fused wins by
-    # 5.3% at 8 tokens, 2.5% at 24, then loses 2.8% at 32 and 13% at 96.
+    # Measured on MI355X TP8 Kimi-K3 (bench_fused_ar_rmsnorm.py); re-tune when
+    # the kernel changes.
     SGLANG_ROCM_FUSED_AR_RMSNORM_MAX_TOKENS = EnvInt(24)
     # Fold a pending residual add into AITER custom all-reduce. M in {1,2,4}
     # uses 1-stage; M=8 uses a 2-stage residual epilogue that folds the add
     # into all-gather. Set MAX_TOKENS=4 to keep it on 1-stage sizes only.
-    # Off by default: Kimi-K3 already folds the add into attn_res_hip, so the
-    # baseline is plain AR. MI355X TP8 decode TPOT is 1.1% worse at c1, 0.7%
-    # at c2, and unchanged at c4/c8 with it on.
     SGLANG_ROCM_AR_RESIDUAL = EnvBool(False)
     SGLANG_ROCM_AR_RESIDUAL_MAX_TOKENS = EnvInt(8)
     # Fold the Kimi-K3 KDA [f_a|b] tail into the wide [q,k,v,g] projection.
@@ -966,25 +963,10 @@ class Envs:
     # is bandwidth bound; larger batches keep the tuned N=6144 split path.
     SGLANG_ROCM_K3_FUSE_KDA_INPROJ = EnvBool(True)
     SGLANG_ROCM_K3_FUSE_KDA_INPROJ_MAX_TOKENS = EnvInt(256)
-    # Fused AITER KDA decode. Empty keeps the unfused chain; "aiter" selects
-    # the gfx950 FlyDSL kernel.
-    SGLANG_ROCM_K3_KDA_FUSED_BACKEND = EnvStr("")
-    # Requantize Quark per-channel FP8 kv_b to per-tensor FP8 so the MLA absorb
-    # BMMs run the AITER a8w8 kernel (~2.3% weight error vs dequant to bf16).
-    SGLANG_ROCM_K3_MLA_ABSORB_FP8 = EnvBool(True)
-    # gfx95 KDA extend via AITER FlashKDA. The model keeps beta as logits and
-    # the kernel sigmoids them. Off by default: tracked interior snapshots and
-    # speculative draft-extend stay on Triton either way.
+    # gfx95 KDA extend via AITER FlashKDA, which takes beta as logits. Off by
+    # default: tracked interior snapshots and speculative draft-extend stay on
+    # Triton either way.
     SGLANG_AITER_KDA_FLASH_PREFILL = EnvBool(False)
-    # Activation precision for MXFP4-weight dense linears, independent of the
-    # MoE: "fp4" is the checkpoint's own W4A4, "bf16" dequantizes the weights
-    # at load. bf16 by default: K3 GSM8K scores 0.947 vs fp4's 0.908, for
-    # ~3% decode throughput. Ignored off ROCm (both paths are aiter kernels).
-    SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT = EnvStr("bf16")
-    # Dequantize Quark MXFP4 shared experts before the MoE front merge so they
-    # join it. Needs SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT=bf16. Shared down stays
-    # BF16: PTPC on that dequantized weight scored GSM8K 0.937.
-    SGLANG_ROCM_K3_QUARK_SHARED_FULL_FRONT = EnvBool(True)
     # ROCm decode attention kernel: auto (aiter_sparse on gfx950, tilelang elsewhere) |
     # aiter_sparse | tilelang | triton | torch | comparison | unified_kv_triton
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("auto")
@@ -1031,6 +1013,8 @@ class Envs:
     # unit-scale FP8 K/V tensors directly instead of materializing BF16 K/V
     # and scanning both tensors again for dynamic per-tensor quantization.
     SGLANG_AITER_MLA_FLYDSL_FUSED_KV_PROJ = EnvBool(False)
+    # Run gfx942 block-FP8 linears with the AITER CK blockscale GEMM instead of Triton.
+    SGLANG_AITER_GFX942_BLOCKSCALE_USE_CK = EnvBool(False)
 
     # DSV4 Aiter flags
     SGLANG_OPT_USE_AITER_SILU_MUL = EnvBool(False)
@@ -1931,7 +1915,7 @@ class Envs:
     # device->host reads that block on the overlapped previous step.
     SGLANG_ROCM_K3_PREFILL_HOST_METADATA = EnvBool(True)
     # DCP prefix KV all-gather: plan the per-request padding with host ints
-    # and drop the intermediate full-prefix copies. 0 restores the original.
+    # and drop the intermediate full-prefix copies. 0 uses the per-request path.
     SGLANG_ROCM_K3_DCP_FAST_KV_GATHER = EnvBool(True)
     # Fold the BM=16 MoE sort into the radix-4 launch for decode-sized M.
     SGLANG_ROCM_K3_RADIX4_FUSE_SORT = EnvBool(True)
@@ -1944,13 +1928,8 @@ class Envs:
     # them only for large token batches. BF16 weights remain live as fallback.
     SGLANG_ROCM_K3_MOE_LATENT_MXFP4 = EnvBool(False)
     SGLANG_ROCM_K3_MOE_LATENT_MXFP4_MIN_TOKENS = EnvInt(2048)
-    # The same structural split as MOE_LATENT_MXFP4 -- run the fused front's
-    # router head as its own small BF16 GEMM so the 3584x7168 latent
-    # down-projection beside it can be quantized -- but in PTPC FP8 rather than
-    # MXFP4, and from decode-sized batches rather than only from 2048 tokens.
-    # MXFP4 is a quarter of the bytes but costs GSM8K 0.951 -> 0.923 on these
-    # two projections; e4m3 keeps a per-channel scale over 7168 values where
-    # MXFP4 keeps 4 bits and a shared exponent per 32.
+    # PTPC FP8 copy of the router-split latent down/up projections (the
+    # MOE_LATENT_MXFP4 split), from decode-sized batches; MXFP4 costs more accuracy.
     SGLANG_ROCM_K3_MOE_LATENT_FP8 = EnvBool(False)
     # Defaults to the PTPC FP8 batch floor below, which is where the
     # activation-quant launch starts paying for itself.
@@ -1962,9 +1941,7 @@ class Envs:
     SGLANG_ROCM_K3_PTPC_FP8 = EnvBool(False)
     SGLANG_ROCM_K3_PTPC_FP8_MAX_TOKENS = EnvInt(256)
     # Also take the PTPC FP8 latent-up / shared-down GEMMs from this many tokens
-    # up (0 = never). Between the decode cap and ~4K tokens BF16 hipBLASLt is
-    # faster; at an 8192-token prefill chunk FP8 is 1.8x on latent up
-    # [3584 -> 7168] and 1.4x on shared down [768 -> 7168] on MI355X.
+    # up (0 = never). Measured on MI355X: BF16 hipBLASLt wins below ~4K tokens.
     SGLANG_ROCM_K3_PTPC_FP8_PREFILL_MIN_TOKENS = EnvInt(0)
     SGLANG_ROCM_K3_PTPC_FP8_SHARED_DOWN = EnvBool(False)
     # Below this batch the projections are launch-latency bound, so the extra
@@ -1976,17 +1953,21 @@ class Envs:
     # The attention block minus the KDA input projection: both o_projs, the MLA
     # gate and the MLA q/kv projections.
     SGLANG_ROCM_K3_ONLINE_FP8_ATTN = EnvBool(False)
-    # The KDA input projection, the largest dense block in the model, but one
-    # decode already reads through the group-64 AITER pack
-    # (SGLANG_ROCM_K3_AITER_KDA_GROUP64) while it is BF16. Quantizing it trades
-    # that kernel for an FP8 prefill GEMM plus the merged PTPC decode GEMM, so
-    # it is gated separately.
+    # The KDA input projection; gated separately because quantizing it gives up
+    # the BF16 group-64 decode pack (SGLANG_ROCM_K3_AITER_KDA_GROUP64).
     SGLANG_ROCM_K3_ONLINE_FP8_KDA_INPROJ = EnvBool(False)
-    # The shared-expert gate/up projections. The shared-expert down projection
-    # is never converted here -- K3 consumes it as a raw dense [out, in] tensor
-    # outside quant_method -- use SGLANG_ROCM_K3_PTPC_FP8_SHARED_DOWN instead,
-    # which packs a separate FP8 copy and leaves the BF16 weight live.
+    # The shared-expert gate/up projections; for the shared down projection use
+    # SGLANG_ROCM_K3_PTPC_FP8_SHARED_DOWN.
     SGLANG_ROCM_K3_ONLINE_FP8_SHARED_EXPERTS = EnvBool(False)
+    # Fused AITER KDA decode. Empty keeps the unfused chain; "aiter" selects
+    # the gfx950 FlyDSL kernel.
+    SGLANG_ROCM_K3_KDA_FUSED_BACKEND = EnvStr("")
+    # Requantize Quark per-channel FP8 kv_b to per-tensor FP8 so the MLA absorb
+    # BMMs run the AITER a8w8 kernel (~2.3% weight error vs dequant to bf16).
+    SGLANG_ROCM_K3_MLA_ABSORB_FP8 = EnvBool(True)
+    # Dequantize Quark MXFP4 shared experts before the MoE front merge so they
+    # join it; shared down stays BF16 for accuracy.
+    SGLANG_ROCM_K3_QUARK_SHARED_FULL_FRONT = EnvBool(True)
     # Master switch for the ROCm AITER K3 decode path: the MXFP4 SiTU MoE
     # runner, the fused MoE front and the AITER-backed attention projections.
     SGLANG_ROCM_K3_AITER_OPT = EnvBoolWithAlias(
@@ -2008,6 +1989,8 @@ class Envs:
     SGLANG_ROCM_K3_AITER_B2_FUSIONS = EnvBool(False)
     # Route two- and four-token MoE decode through the cooperative FlyDSL
     # tri-projection, which returns the shared expert already SiTU-activated.
+    # No effect unless SGLANG_ROCM_K3_AITER_MOE_PREROUTE_FP8 is also on and
+    # SGLANG_ROCM_K3_FLYDSL_SOURCE is not "aiter".
     SGLANG_ROCM_K3_PREROUTE_PREACTIVATED_SHARED = EnvBool(False)
     # Launch geometry for that cooperative kernel: compute units, waves per
     # block, waves per execution unit, and the weight-load cache modifier.
@@ -2189,6 +2172,9 @@ _DEPRECATED_ENVS: Dict[str, _DeprecatedEnv] = {
     ),
     "SGLANG_TRITON_PREFILL_TRUNCATION_ALIGN_SIZE": _DeprecatedEnv(
         note="Deterministic inference on triton no longer aligns prefill chunks."
+    ),
+    "SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT": _DeprecatedEnv(
+        note="MXFP4 dense linears always dequantize to BF16 on ROCm."
     ),
     # Replaced by CLI flags.
     "SGLANG_SCHEDULER_DECREASE_PREFILL_IDLE": _DeprecatedEnv(

@@ -1,14 +1,8 @@
 """Fail-closed PTPC FP8 adapter for Kimi-K3's BF16 decode projections.
 
-The checkpoint keeps `self_attn.*`, `shared_experts.*` and the latent
-projections in BF16, and at decode those GEMMs are HBM-bound on weight bytes
-(measured ~4 TB/s on MI355X, which is where the machine tops out). Quantizing
-the weight to FP8 per output channel and the activation per token halves the
-bytes the GEMM has to stream, which is the only lever that helps once the
-kernel is already bandwidth-saturated.
-
-Routing is deliberately out of scope: FP8 router logits move the top-k
-selection (measured ~15.3/16 agreement), so callers must keep the gate BF16.
+Per-output-channel FP8 weights and per-token FP8 activations halve the weight
+bytes of these HBM-bound decode GEMMs. Not for the router gate: FP8 logits
+change the top-k selection.
 """
 
 from __future__ import annotations

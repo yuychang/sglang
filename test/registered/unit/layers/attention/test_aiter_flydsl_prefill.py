@@ -13,11 +13,12 @@ from sglang.srt.models.deepseek_common.attention_forward_methods.forward_mha_roc
     project_prefix_kv_fp8,
 )
 from sglang.test.ci.ci_register import register_cpu_ci
+from sglang.test.test_utils import CustomTestCase
 
 register_cpu_ci(est_time=5, suite="base-a-test-cpu")
 
 
-class TestAiterFlyDSLPrefill(unittest.TestCase):
+class TestAiterFlyDSLPrefill(CustomTestCase):
     def setUp(self):
         self.backend = AiterAttnBackend.__new__(AiterAttnBackend)
         self.backend.use_mla_flydsl_fp8_prefill = True
@@ -51,7 +52,7 @@ class _PrefixProj:
         return (k, v), None
 
 
-class TestPrefixKvFp8Projection(unittest.TestCase):
+class TestPrefixKvFp8Projection(CustomTestCase):
     def _module(self, dtype):
         module = DeepseekMHAForwardMixin()
         module.kv_b_proj = _PrefixProj(dtype)
@@ -77,10 +78,11 @@ class TestPrefixKvFp8Projection(unittest.TestCase):
         with envs.SGLANG_AITER_MLA_FLYDSL_FUSED_KV_PROJ.override(True):
             projected = project_prefix_kv_fp8(module, kv_a, k_pe)
         self.assertIsNotNone(projected)
-        k, v = projected
-        self.assertEqual(k.shape, (4, 12, 192))
-        self.assertEqual(v.shape, (4, 12, 128))
-        self.assertEqual(len(module.kv_b_proj.calls), 1)
+        (args,) = module.kv_b_proj.calls
+        # kv_a flattened to 2-D, k_pe broadcast over the local heads.
+        self.assertEqual(args[0].shape, (4, 512))
+        self.assertEqual(args[1].shape, (4, 12, 64))
+        self.assertEqual(args[2:], (128, 128, fp8_dtype))
 
 
 if __name__ == "__main__":

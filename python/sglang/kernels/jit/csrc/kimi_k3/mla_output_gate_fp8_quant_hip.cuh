@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Kimi-K3 MLA output gate fused with per-token FP8 quant.
 //
-// Split out of mla_output_gate.cuh so the plain bf16 gate kernel -- the only
-// variant CUDA builds -- keeps its JIT module and does not recompile for a
-// consumer that only the ROCm PTPC o_proj path takes.
+// Separate TU: only the ROCm PTPC o_proj path uses it, so CUDA builds of
+// mla_output_gate.cuh stay unchanged.
 #pragma once
 
 #include <sgl_kernel/tensor.h>  // For TensorMatcher, SymbolicSize, SymbolicDevice

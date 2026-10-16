@@ -11,7 +11,6 @@ import re
 from array import array
 from collections.abc import Iterable
 from functools import cached_property
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import torch
@@ -105,7 +104,11 @@ from sglang.srt.managers.schedule_batch import (
     MultimodalDataItem,
     MultimodalInputs,
 )
-from sglang.srt.model_executor.forward_batch_info import ForwardBatch, PPProxyTensors
+from sglang.srt.model_executor.forward_batch_info import (
+    ForwardBatch,
+    ForwardMode,
+    PPProxyTensors,
+)
 from sglang.srt.model_executor.runner import get_is_capture_mode
 from sglang.srt.model_executor.runner_backend_utils.breakable_cuda_graph.context import (
     is_in_breakable_cuda_graph,
@@ -161,6 +164,7 @@ _aiter_k3_opt = _is_hip and envs.SGLANG_ROCM_K3_AITER_OPT.get()
 _aiter_mla_gate = _is_hip and envs.SGLANG_ROCM_K3_AITER_MLA_GATE.get()
 if _is_hip:
     from sglang.srt.layers.communication import hip_ar_residual
+    from sglang.srt.models.kimi_k3_rocm_fusion import attn_bank_read_quant_format
 
 
 def _cdiv(a: int, b: int) -> int:
@@ -393,6 +397,12 @@ def _k3_all_reduce_add(hidden_states, residual, forward_batch):
     if k3_ar_fusion.find_mc_ptr(hidden_states) is None:
         return None
     return k3_ar_fusion.all_reduce(hidden_states, residual)
+
+
+def _k3_hip_all_reduce_add(hidden_states, residual, forward_batch):
+    """o_proj's attention-TP sum with the pending residual add in one AITER
+    custom all-reduce, for the decode batch sizes it covers."""
+    return hip_ar_residual.try_all_reduce_add(hidden_states, residual)
 
 
 def _k3_reduce_scatter_add(hidden_states, residual, forward_batch):
@@ -1515,15 +1525,13 @@ class KimiK3MoE(nn.Module):
         hidden_states: torch.Tensor,
         *,
         prefix_sum: Optional[torch.Tensor] = None,
-        forward_batch: Optional[ForwardBatch] = None,
+        forward_mode: Optional[ForwardMode] = None,
     ) -> torch.Tensor:
         """A latent MoE, which writes the next stream itself, takes the pending
         prefix_sum: folded into the 3-way JIT tail add when covered, plain adds
         otherwise (bit-identical either way). A non-latent MoE leaves the
-        residual add to its stage boundary and takes none.
-
-        DP attention gather stays in the stage boundary. ``forward_batch`` is
-        only the ROCm latent-tail hint."""
+        residual add to its stage boundary and takes none. ``forward_mode``
+        selects the ROCm fused latent tail."""
         num_tokens, hidden_size = hidden_states.shape
         hidden_states = hidden_states.view(-1, hidden_size)
         if (
@@ -1534,7 +1542,7 @@ class KimiK3MoE(nn.Module):
             from sglang.srt.models.kimi_k3_rocm_moe import forward_fused_rocm
 
             out = forward_fused_rocm(
-                self, hidden_states, prefix_sum=prefix_sum, forward_batch=forward_batch
+                self, hidden_states, prefix_sum=prefix_sum, forward_mode=forward_mode
             )
         elif hidden_states.shape[0] > 0 and self._eligible_for_fused_front:
             out = self._forward_fused(hidden_states, prefix_sum=prefix_sum)
@@ -1605,12 +1613,16 @@ class KimiK3DeltaAttention(nn.Module):
         # non-None quant_config is fine for the merged projection.
         self.do_fuse_qkvbfg = quant_config is None and self.attn_tp_size == self.tp_size
 
+        # Merged [f_a | b] weight, built after weight loading by
+        # _merge_bfa_weights() for the full-rank gate.
+        self._bfa_w: Optional[torch.Tensor] = None
+        self._bfa_f_b_w: Optional[torch.Tensor] = None
         if self.use_full_rank_gate:
             # Fuse only the wide projections [q, k, v, g]: folding b (12/rank)
             # and f_a (128, replicated) in skews the output dim and degrades
             # GEMM kernel selection; they stay as separate tiny GEMVs. ROCm
             # reverses this below the token threshold
-            # (_merge_kda_inproj_weights_hip).
+            # (kimi_k3_rocm_kda.merge_kda_inproj_weights_hip).
             self.fused_qkvg_proj = MergedColumnParallelLinear(
                 self.hidden_size,
                 [
@@ -1653,22 +1665,6 @@ class KimiK3DeltaAttention(nn.Module):
                 parallel_group="attn_tp",
                 prefix=f"{prefix}.f_b_proj",
             )
-            # Merged [f_a | b] weight, built after weight loading by
-            # _merge_bfa_weights().
-            self._bfa_w: Optional[torch.Tensor] = None
-            self._bfa_f_b_w: Optional[torch.Tensor] = None
-            if _is_hip:
-                # ROCm only: _merge_kda_inproj_weights_hip() may merge the
-                # whole [q,k,v,g | f_a | b] in-proj instead, making _bfa_w a
-                # tail view of that buffer. _qkvgbfa_sizes is the split of the
-                # buffer, and stays None when the fusion does not apply. Quark
-                # FP8 merges into a separate copy and leaves _bfa_w None. These
-                # attributes exist on ROCm only; every reader is _is_hip-gated.
-                self._qkvgbfa_layer: Optional[SimpleNamespace] = None
-                self._qkvgbfa_sizes: Optional[list[int]] = None
-                self._qkvgbfa_bs_limit = (
-                    envs.SGLANG_ROCM_K3_FUSE_KDA_INPROJ_MAX_TOKENS.get()
-                )
         elif self.do_fuse_qkvbfg:
             self.qkvb_sizes = [
                 projection_size,
@@ -2217,7 +2213,7 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
                 )
 
             self.o_proj.forward = _symm_o_proj_forward
-        else:
+        elif not self.all_reduce_fusion:
             # Allocate o_proj's output in the attention-TP group's symmetric
             # memory, where the stage boundary sums it.
             self.o_proj.use_dp_attention_reduce = True
@@ -2304,7 +2300,6 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
         positions: torch.Tensor,
         out_cache_loc: torch.Tensor,
     ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
-        # Looked up by forward_mla_rocm.
         if not _is_hip:
             return None
         from sglang.srt.models.kimi_k3_rocm_mla import try_fused_mla_q_cache
@@ -2347,11 +2342,12 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
         **kwargs,
     ):
         if self.use_output_gate:
-            # A ROCm fused in-proj quant hands over (fp8, scale) and has
-            # already stashed the BF16 gate input.
-            if not isinstance(hidden_states, tuple):
-                self._gate_hidden_states = hidden_states
-            self._fork_output_gate(self._gate_hidden_states)
+            # g_proj shares the in-proj's input; a ROCm quantized read hands
+            # both the (fp8, scale) tuple.
+            self._gate_hidden_states = hidden_states
+            self._fork_output_gate(
+                hidden_states[0] if isinstance(hidden_states, tuple) else hidden_states
+            )
         return super().forward(
             positions, hidden_states, forward_batch, zero_allocator, **kwargs
         )
@@ -2590,6 +2586,13 @@ class KimiK3DecoderLayer(nn.Module):
             )
 
         self._ffn_writes_stream = _latent_moe_writes_stream(config, layer_idx)
+        # ROCm reads the bank's attention input already quantized for the
+        # in-proj, on every row; SP-MoE reads it on a slice and gathers it.
+        self._attn_bank = (
+            attn_bank
+            if _is_hip and self.use_attn_residuals and not _shards_moe_rows()
+            else None
+        )
         self._declare_stages(config, layer_idx, attn_bank)
 
     def _declare_stages(self, config, layer_idx, attn_bank):
@@ -2625,6 +2628,8 @@ class KimiK3DecoderLayer(nn.Module):
         pending residual add ahead of the bank's FFN read: the fused
         all-reduce on every row, or the tuned reduce-scatter onto this rank's
         attention-TP shard (SP-MoE)."""
+        if self.all_reduce_fusion and _is_hip:
+            return (ReadoutFusion(SumGroup.ATTN_TP, _k3_hip_all_reduce_add),)
         if self.all_reduce_fusion:
             return (ReadoutFusion(SumGroup.ATTN_TP, _k3_all_reduce_add),)
         if self._sp_moe and k3_sp_collective.enabled():
@@ -2708,23 +2713,38 @@ class KimiK3DecoderLayer(nn.Module):
         capture_gathered: Optional[AuxHiddenStateAccumulator] = None,
     ) -> torch.Tensor:
         hidden_states = self.attn_boundary.prepare(
-            hidden_states, forward_batch, capture_gathered=capture_gathered
+            hidden_states,
+            forward_batch,
+            capture_gathered=capture_gathered,
+            quant_format=self._attn_input_quant_format(
+                num_tokens=positions.shape[0], forward_mode=forward_batch.forward_mode
+            ),
         )
         hidden_states = self._run_self_attn(
             hidden_states, positions, forward_batch, zero_allocator
         )
         hidden_states = self.attn_boundary.finish(hidden_states, forward_batch)
         hidden_states = self.ffn_boundary.prepare(hidden_states, forward_batch)
-        moe_batch = {"forward_batch": forward_batch} if self._is_moe_layer else {}
+        mlp_kwargs = {}
+        if self._is_moe_layer:
+            mlp_kwargs["forward_mode"] = forward_batch.forward_mode
         if self._ffn_writes_stream:
-            hidden_states = self.mlp(
-                hidden_states,
-                prefix_sum=residual_batch.written_residual(forward_batch),
-                **moe_batch,
-            )
-        else:
-            hidden_states = self.mlp(hidden_states, **moe_batch)
+            mlp_kwargs["prefix_sum"] = residual_batch.written_residual(forward_batch)
+        hidden_states = self.mlp(hidden_states, **mlp_kwargs)
         return self.ffn_boundary.finish(hidden_states, forward_batch)
+
+    def _attn_input_quant_format(
+        self, *, num_tokens: int, forward_mode: ForwardMode
+    ) -> str:
+        if self._attn_bank is None:
+            return ""
+        return attn_bank_read_quant_format(
+            self.self_attn,
+            hidden_size=self.hidden_size,
+            num_valid_blocks=self._attn_bank.require().num_valid_blocks,
+            num_tokens=num_tokens,
+            forward_mode=forward_mode,
+        )
 
 
 class KimiK3LinearModel(nn.Module):
@@ -3361,28 +3381,14 @@ class KimiK3LinearForCausalLM(nn.Module):
             kv_b_weight = _get_k3_dense_weight(self_attn.kv_b_proj)
             scale_folded_into_weight = False
             kv_b_tensor_scale = None
-            if _is_hip and kv_b_weight.dtype in (
-                torch.float8_e4m3fn,
-                torch.float8_e4m3fnuz,
-            ):
-                scale = getattr(self_attn.kv_b_proj, "weight_scale", None)
-                if isinstance(scale, torch.Tensor) and scale.numel() > 1:
-                    from sglang.srt.models.kimi_k3_rocm_quant import (
-                        _k3_channel_fp8_to_bf16,
-                        _k3_channel_fp8_to_tensor_fp8,
-                    )
+            if _is_hip:
+                from sglang.srt.models.kimi_k3_rocm_quant import (
+                    k3_fold_kv_b_channel_scale,
+                )
 
-                    # Fold the per-channel scale while dim 0 is still the
-                    # channel axis it indexes, i.e. before the head split.
-                    if envs.SGLANG_ROCM_K3_MLA_ABSORB_FP8.get():
-                        kv_b_weight, kv_b_tensor_scale = _k3_channel_fp8_to_tensor_fp8(
-                            self_attn.kv_b_proj, kv_b_weight
-                        )
-                    else:
-                        kv_b_weight = _k3_channel_fp8_to_bf16(
-                            self_attn.kv_b_proj, kv_b_weight
-                        )
-                        scale_folded_into_weight = True
+                kv_b_weight, kv_b_tensor_scale, scale_folded_into_weight = (
+                    k3_fold_kv_b_channel_scale(self_attn.kv_b_proj, kv_b_weight)
+                )
             w_kc, w_vc = kv_b_weight.unflatten(
                 0, (-1, self_attn.qk_nope_head_dim + self_attn.v_head_dim)
             ).split([self_attn.qk_nope_head_dim, self_attn.v_head_dim], dim=1)

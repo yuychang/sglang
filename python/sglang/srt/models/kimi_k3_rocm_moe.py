@@ -29,7 +29,7 @@ from sglang.srt.layers.communication.hip_k3_moe_pair_ar import (
     all_reduce_moe_latent_shared,
 )
 from sglang.srt.layers.dp_attention import is_allocation_symmetric
-from sglang.srt.model_executor.forward_batch_info import ForwardBatch
+from sglang.srt.model_executor.forward_batch_info import ForwardMode
 from sglang.srt.runtime_context import get_parallel
 
 _use_aiter = envs.SGLANG_USE_AITER.get()
@@ -570,7 +570,7 @@ def _mxfp4_apply_into(
 
     scheme = getattr(linear, "scheme", None)
     if not isinstance(scheme, QuarkW4A4MXFP4):
-        apply_into = getattr(getattr(linear, "quant_method", None), "apply_into", None)
+        apply_into = getattr(linear.quant_method, "apply_into", None)
         if apply_into is None:
             return False
         apply_into(linear, x, output)
@@ -706,7 +706,7 @@ def forward_fused_rocm(
     hidden_states: torch.Tensor,
     *,
     prefix_sum: Optional[torch.Tensor],
-    forward_batch: Optional[ForwardBatch],
+    forward_mode: Optional[ForwardMode],
 ) -> torch.Tensor:
     """ROCm counterpart of KimiK3MoE._forward_fused.
 
@@ -741,14 +741,12 @@ def forward_fused_rocm(
         )
     self._forward_routed(hidden_states, router_logits, routed_input, latent)
 
-    # One runtime-M kernel covers decode and speculative verify. The measured
-    # crossover remains configurable so larger batches can keep the unfused
-    # RMSNorm + PTPC GEMM + add path.
-    mode = forward_batch.forward_mode if forward_batch is not None else None
+    # One runtime-M kernel covers decode and target verify, up to
+    # SGLANG_ROCM_K3_LATENT_TAIL_MAX_TOKENS.
     use_latent_tail = (
         1 <= num_tokens <= _latent_tail_max_tokens
-        and mode is not None
-        and (mode.is_decode_or_idle() or mode.is_target_verify())
+        and forward_mode is not None
+        and (forward_mode.is_decode_or_idle() or forward_mode.is_target_verify())
         and self._latent_tail_weight is not None
         and self._latent_tail_scale is not None
     )

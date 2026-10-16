@@ -111,9 +111,10 @@ class TestDcpKvGather(CustomTestCase):
         lens_t = torch.tensor(lens)
         starts_t = torch.tensor(starts) if pass_starts else None
         expected = _expected(lens, starts)
-        with patch.object(
-            comm, "get_parallel", return_value=parallel
-        ), envs.SGLANG_ROCM_K3_DCP_FAST_KV_GATHER.override(fast):
+        with (
+            patch.object(comm, "get_parallel", return_value=parallel),
+            envs.SGLANG_ROCM_K3_DCP_FAST_KV_GATHER.override(fast),
+        ):
             full = comm.all_gather_kv_cache_for_dcp(kv_a, k_pe, lens_t, starts_t)
             out_a, out_pe = comm.all_gather_kv_cache_for_mha_chunk_extend(
                 kv_a[:, 0], k_pe, lens_t, starts_t

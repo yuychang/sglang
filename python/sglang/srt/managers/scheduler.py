@@ -1718,6 +1718,22 @@ class Scheduler(
                 self.truncation_align_size, dsa_index_kpool
             )
 
+    def init_mamba_truncation_align(self):
+        """Align chunked-prefill truncation to the mamba kernel chunk (LCM with any existing align)."""
+        if not get_exec().mamba.enable_mamba_extra_buffer:
+            return
+
+        chunk_size = mamba_cache_chunk_size()
+        if chunk_size <= 1:
+            return
+
+        if self.truncation_align_size is None:
+            self.truncation_align_size = chunk_size
+        else:
+            self.truncation_align_size = math.lcm(
+                self.truncation_align_size, chunk_size
+            )
+
     def check_truncation_align_fits_chunk(self):
         """A chunk shorter than the alignment truncates to zero tokens, so a prompt
         longer than the chunk would wait in the queue forever."""

@@ -93,3 +93,9 @@ def test_pack_rejects_non_2d_weight():
         pytest.skip("aiter PTPC FP8 GEMM unavailable")
     with pytest.raises(ValueError):
         ptpc.pack(torch.zeros((2, 3, 4), dtype=torch.bfloat16, device="cuda"))
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(pytest.main([__file__, "-v"]))

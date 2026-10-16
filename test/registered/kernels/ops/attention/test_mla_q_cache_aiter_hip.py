@@ -6,6 +6,7 @@ from aiter import dtypes
 from aiter.jit.utils.chip_info import get_gfx_runtime
 
 from sglang.kernels.ops.attention import mla_q_cache_aiter_hip
+from sglang.srt.environ import envs
 from sglang.test.ci.ci_register import register_amd_ci
 
 register_amd_ci(est_time=60, stage="jit-kernel-unit", runner_config="amd")
@@ -26,8 +27,9 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture(autouse=True)
-def _enable(monkeypatch):
-    monkeypatch.setenv("SGLANG_ROCM_K3_AITER_MLA_Q_CACHE_FUSION", "1")
+def _enable():
+    with envs.SGLANG_ROCM_K3_AITER_MLA_Q_CACHE_FUSION.override(True):
+        yield
 
 
 def _inputs(tokens: int, cache_dtype=torch.bfloat16, output_dtype=None):

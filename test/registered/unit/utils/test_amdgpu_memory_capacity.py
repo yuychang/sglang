@@ -1,4 +1,4 @@
-"""Unit tests for get_amdgpu_memory_capacity — no GPU needed."""
+"""Unit tests for get_amdgpu_memory_capacity; no GPU needed."""
 
 import subprocess
 import unittest
@@ -51,6 +51,8 @@ class TestAmdgpuMemoryCapacity(CustomTestCase):
         self.assertEqual(self._capacity(_rocminfo(out)), 301989888 / 1024)
 
     def test_empty_rocminfo_falls_back_to_hip(self):
+        """Empty rocminfo output (exit 0) must fall back to the torch HIP device
+        memory instead of raising."""
         self.assertEqual(self._capacity(_rocminfo(""), 294896, 294800), 294800)
 
     def test_failed_rocminfo_falls_back_to_hip(self):

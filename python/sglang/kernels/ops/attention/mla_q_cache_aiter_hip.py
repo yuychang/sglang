@@ -10,14 +10,7 @@ from sglang.srt.utils import is_hip
 _KV_LORA_RANK = 512
 _PE_DIM = 64
 _HEAD_DIM = _KV_LORA_RANK + _PE_DIM
-_FP8_DTYPES = tuple(
-    dtype
-    for dtype in (
-        getattr(torch, "float8_e4m3fn", None),
-        getattr(torch, "float8_e4m3fnuz", None),
-    )
-    if dtype is not None
-)
+_FP8_DTYPES = (torch.float8_e4m3fn, torch.float8_e4m3fnuz)
 
 
 def enabled() -> bool:

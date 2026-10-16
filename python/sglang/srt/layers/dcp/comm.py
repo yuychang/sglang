@@ -478,8 +478,7 @@ def _dcp_gather_plan_for(
 def _dcp_pad_local_kv(
     prefix_kv_a: torch.Tensor, prefix_k_pe: torch.Tensor, plan: _DcpGatherPlan
 ) -> torch.Tensor:
-    # Rows outside each request's local span are padding and stay unwritten,
-    # as in the original per-request new_empty buffers.
+    # Rows outside each request's local span are padding and stay unwritten.
     padded = prefix_kv_a.new_empty(
         (
             plan.total_padded,

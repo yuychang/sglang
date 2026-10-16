@@ -24,16 +24,14 @@ _GROUPS_PER_ROW = _HIDDEN // _GROUP
 _FP8_MAX = 448.0
 _CU_COUNT = 256
 _DEFAULT_TUNING = (2, 2)
-# (rows_per_wave, weight_cache_modifier) per captured token bucket, from
-# benchmark/kernels/kimi_k3/tune_kda_input_group64.py. These only affect how
-# output rows spread over waves and how weight loads are cached, never the
-# K=7168 reduction order, so every combination is bit-identical and selection
-# is purely on speed.
+# (rows_per_wave, weight_cache_modifier) per captured token bucket, measured on
+# MI355X; re-tune when the kernel changes. These never change the K=7168
+# reduction order, so every combination is bit-identical.
 _LAUNCH_TUNING = {1: (2, 2), 2: (3, 1)}
 
 
 def _legacy_launch() -> bool:
-    """Force the pre-tuning configuration, for A/B against it."""
+    """Use _DEFAULT_TUNING for every bucket."""
     return envs.SGLANG_ROCM_K3_KDA_GROUP64_LEGACY_LAUNCH.get()
 
 
@@ -44,8 +42,7 @@ def _is_gfx950(device: torch.device) -> bool:
         properties = torch.cuda.get_device_properties(device)
     except (AssertionError, RuntimeError):
         return False
-    arch = getattr(properties, "gcnArchName", "")
-    return str(arch).split(":", 1)[0] == "gfx950"
+    return properties.gcnArchName.split(":", 1)[0] == "gfx950"
 
 
 def supports_kimi_k3_kda_input_group64(

@@ -3,8 +3,9 @@ from unittest.mock import Mock, patch
 
 import torch
 
+from sglang.srt.environ import envs
+from sglang.srt.layers.communication import hip_fused_ar_rmsnorm
 from sglang.srt.layers.communication.hip_fused_ar_rmsnorm import (
-    _ZEROS,
     _aiter_fused_ar_rms,
     aiter_ar_uses_1stage,
     try_fused_ar_rmsnorm,
@@ -16,6 +17,12 @@ register_cpu_ci(est_time=5, suite="base-a-test-cpu")
 
 
 class TestHipFusedArRmsnorm(CustomTestCase):
+    def setUp(self):
+        for cache in (hip_fused_ar_rmsnorm._ZEROS, hip_fused_ar_rmsnorm._OUT):
+            patcher = patch.dict(cache, clear=True)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def test_aiter_ar_1stage_cutoff_matches_80kib(self):
         # Combined fused-front c2 is 6*3584*2 = 43 KiB (1-stage AR).
         c2 = torch.empty(6, 3584, dtype=torch.bfloat16)
@@ -34,10 +41,7 @@ class TestHipFusedArRmsnorm(CustomTestCase):
                 "sglang.srt.layers.communication.hip_fused_ar_rmsnorm.is_hip",
                 return_value=True,
             ),
-            patch(
-                "sglang.srt.layers.communication.hip_fused_ar_rmsnorm.envs.SGLANG_ROCM_FUSED_AR_RMSNORM.get",
-                return_value=True,
-            ),
+            envs.SGLANG_ROCM_FUSED_AR_RMSNORM.override(True),
             patch(
                 "sglang.srt.layers.communication.hip_fused_ar_rmsnorm._aiter_fused_ar_rms"
             ) as fused,
@@ -70,10 +74,7 @@ class TestHipFusedArRmsnorm(CustomTestCase):
                 "sglang.srt.layers.communication.hip_fused_ar_rmsnorm.is_hip",
                 return_value=True,
             ),
-            patch(
-                "sglang.srt.layers.communication.hip_fused_ar_rmsnorm.envs.SGLANG_ROCM_FUSED_AR_RMSNORM.get",
-                return_value=False,
-            ),
+            envs.SGLANG_ROCM_FUSED_AR_RMSNORM.override(False),
             patch(
                 "sglang.srt.layers.communication.hip_fused_ar_rmsnorm._aiter_fused_ar_rms"
             ) as fused,
@@ -87,15 +88,8 @@ class TestHipFusedArRmsnorm(CustomTestCase):
                 "sglang.srt.layers.communication.hip_fused_ar_rmsnorm.is_hip",
                 return_value=True,
             ),
-            patch(
-                "sglang.srt.layers.communication.hip_fused_ar_rmsnorm.envs.SGLANG_ROCM_FUSED_AR_RMSNORM.get",
-                return_value=True,
-            ),
-            patch(
-                "sglang.srt.layers.communication.hip_fused_ar_rmsnorm.envs."
-                "SGLANG_ROCM_FUSED_AR_RMSNORM_MAX_TOKENS.get",
-                return_value=max_tokens,
-            ),
+            envs.SGLANG_ROCM_FUSED_AR_RMSNORM.override(True),
+            envs.SGLANG_ROCM_FUSED_AR_RMSNORM_MAX_TOKENS.override(max_tokens),
             patch(
                 "sglang.srt.layers.communication.hip_fused_ar_rmsnorm._aiter_fused_ar_rms"
             ) as fused,
@@ -131,10 +125,7 @@ class TestHipFusedArRmsnorm(CustomTestCase):
                 "sglang.srt.layers.communication.hip_fused_ar_rmsnorm.is_hip",
                 return_value=True,
             ),
-            patch(
-                "sglang.srt.layers.communication.hip_fused_ar_rmsnorm.envs.SGLANG_ROCM_FUSED_AR_RMSNORM.get",
-                return_value=True,
-            ),
+            envs.SGLANG_ROCM_FUSED_AR_RMSNORM.override(True),
             patch(
                 "sglang.srt.layers.communication.hip_fused_ar_rmsnorm._aiter_fused_ar_rms",
                 side_effect=RuntimeError("no custom AR"),
@@ -143,7 +134,6 @@ class TestHipFusedArRmsnorm(CustomTestCase):
             self.assertIsNone(try_fused_ar_rmsnorm(x, weight, 1e-6, use_1stage=True))
 
     def test_helper_reuses_cached_zeros_residual_and_forwards_1stage(self):
-        _ZEROS.clear()
         x = torch.zeros(2, 3584, dtype=torch.bfloat16)
         weight = torch.ones(3584, dtype=torch.bfloat16)
         normed = torch.ones_like(x)
@@ -176,10 +166,7 @@ class TestHipFusedArRmsnorm(CustomTestCase):
                 "sglang.srt.layers.communication.hip_fused_ar_rmsnorm.is_hip",
                 return_value=True,
             ),
-            patch(
-                "sglang.srt.layers.communication.hip_fused_ar_rmsnorm.envs.SGLANG_ROCM_FUSED_AR_RMSNORM.get",
-                return_value=True,
-            ),
+            envs.SGLANG_ROCM_FUSED_AR_RMSNORM.override(True),
             patch(
                 "sglang.srt.layers.communication.hip_fused_ar_rmsnorm._aiter_fused_ar_rms",
                 side_effect=_fused,
@@ -229,10 +216,7 @@ class TestHipFusedArRmsnorm(CustomTestCase):
                 "sglang.srt.layers.communication.hip_fused_ar_rmsnorm.is_hip",
                 return_value=True,
             ),
-            patch(
-                "sglang.srt.layers.communication.hip_fused_ar_rmsnorm.envs.SGLANG_ROCM_FUSED_AR_RMSNORM.get",
-                return_value=True,
-            ),
+            envs.SGLANG_ROCM_FUSED_AR_RMSNORM.override(True),
             patch(
                 "sglang.srt.layers.communication.hip_fused_ar_rmsnorm._aiter_fused_ar_rms",
                 side_effect=_fused,
@@ -248,18 +232,6 @@ class TestHipFusedArRmsnorm(CustomTestCase):
         self.assertEqual(captured["num_norm_rows"], 8)
         self.assertTrue(captured["residual_is_inp"])
         self.assertEqual(tuple(captured["out"].shape), (8, 3584))
-
-    def test_combined_layout_keeps_shared_rows_unnormed(self):
-        n, dim = 2, 8
-        reduced = torch.arange(3 * n * dim, dtype=torch.float32).reshape(3 * n, dim)
-        weight = torch.ones(dim)
-        rms = reduced * torch.rsqrt(reduced.pow(2).mean(dim=-1, keepdim=True) + 1e-6)
-        rms = rms * weight
-        latent = rms[:n]
-        shared = reduced[n:]
-        self.assertEqual(tuple(latent.shape), (n, dim))
-        self.assertEqual(tuple(shared.shape), (2 * n, dim))
-        self.assertFalse(torch.allclose(shared, rms[n:]))
 
     def test_aiter_dispatch_forwards_k3_kernel_options(self):
         ca_comm = Mock(spec=["disabled", "custom_fused_ar_rms", "_IS_CAPTURING"])

@@ -2,10 +2,7 @@
 """M=2 CUDA-graph microbench: AR + agg HAS_ADD vs fused AR+residual + agg.
 
 Launch: torchrun --nproc_per_node=8 \\
-  python/sglang/test/manual/kernels/bench_hip_ar_residual.py
-
-SGLANG_ROCM_AR_RESIDUAL defaults off: fused AR+residual is slower than plain AR
-at M=1/2 and within 5% at M=4/8 once the add is folded into attn_res_hip.
+  test/manual/kernels/bench_hip_ar_residual.py
 """
 
 from __future__ import annotations
@@ -50,6 +47,8 @@ def _ca():
 
 
 def _time_graph(graph: torch.cuda.CUDAGraph) -> float:
+    # Hot L2 is the serving pattern here: a decode-sized AR input is the output
+    # of the GEMM that ran just before it.
     stream = torch.cuda.current_stream()
     for _ in range(WARMUP):
         graph.replay()
@@ -68,7 +67,7 @@ def main() -> int:
     _init()
     rank = dist.get_rank()
     ca = _ca()
-    if ca is None or getattr(ca, "disabled", True):
+    if ca is None or ca.disabled:
         if rank == 0:
             print("custom AR unavailable", file=sys.stderr)
         return 1

@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 import torch
 
+from sglang.srt.environ import envs
 from sglang.srt.layers.communication.hip_k3_moe_pair_ar import (
     MOE_LATENT_WIDTH,
     MOE_SHARED_WIDTH,
@@ -53,10 +54,7 @@ class TestK3MoePairAr(CustomTestCase):
                 "sglang.srt.layers.communication.hip_k3_moe_pair_ar.qr_max_size_bytes",
                 return_value=buf.numel() * buf.element_size() - 1,
             ),
-            patch(
-                "sglang.srt.layers.communication.hip_k3_moe_pair_ar.envs.SGLANG_ROCM_K3_SPLIT_OVERSIZED_MOE_AR.get",
-                return_value=True,
-            ),
+            envs.SGLANG_ROCM_K3_SPLIT_OVERSIZED_MOE_AR.override(True),
             patch(
                 "sglang.srt.layers.communication.hip_k3_moe_pair_ar.tensor_model_parallel_all_reduce",
                 side_effect=_fake_ar,
@@ -74,6 +72,9 @@ class TestK3MoePairAr(CustomTestCase):
         self.assertTrue(
             torch.equal(latent.reshape(-1), buf[: num_tokens * moe_hidden] + 1)
         )
+        self.assertTrue(
+            torch.equal(shared.reshape(-1), buf[num_tokens * moe_hidden :] + 1)
+        )
 
     def test_all_reduce_keeps_single_collective_under_cap(self):
         num_tokens = 4
@@ -87,10 +88,7 @@ class TestK3MoePairAr(CustomTestCase):
                 "sglang.srt.layers.communication.hip_k3_moe_pair_ar.qr_max_size_bytes",
                 return_value=buf.numel() * buf.element_size(),
             ),
-            patch(
-                "sglang.srt.layers.communication.hip_k3_moe_pair_ar.envs.SGLANG_ROCM_K3_SPLIT_OVERSIZED_MOE_AR.get",
-                return_value=True,
-            ),
+            envs.SGLANG_ROCM_K3_SPLIT_OVERSIZED_MOE_AR.override(True),
             patch(
                 "sglang.srt.layers.communication.hip_k3_moe_pair_ar.tensor_model_parallel_all_reduce",
                 return_value=reduced,

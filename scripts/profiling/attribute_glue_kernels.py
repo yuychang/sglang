@@ -41,7 +41,11 @@ def classify(ev):
         return "memset"
     if "CatArrayBatchedCopy" in name:
         return "cat"
-    if "index_elementwise_kernel" in name or "index_put" in name or "IndexKernel" in name:
+    if (
+        "index_elementwise_kernel" in name
+        or "index_put" in name
+        or "IndexKernel" in name
+    ):
         return "index"
     if "FillFunctor" in name or "fill_kernel" in name:
         return "fill"
@@ -120,6 +124,7 @@ class OpStacks:
         # Walk back until the span containing ts is found, then climb parents.
         chain, end_limit = [], None
         j = i - 1
+        # Arbitrary scan bound; enough for the op nesting seen in K3 traces.
         lo = max(0, i - 400)
         while j >= lo:
             o = ops[j]
@@ -134,17 +139,30 @@ class OpStacks:
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("trace")
-    ap.add_argument("--kind", default="VERIFY", help="step kind (VERIFY, DECODE, DRAFT, EXTEND...)")
+    ap.add_argument(
+        "--kind", default="VERIFY", help="step kind (VERIFY, DECODE, DRAFT, EXTEND...)"
+    )
     ap.add_argument(
         "--classes",
         default="memcpy,memset,elementwise,cat,index,fill,copy,reduce,other_torch",
         help="comma list of kernel classes, or 'all'",
     )
-    ap.add_argument("--max-us", type=float, default=None, help="only kernels shorter than this")
-    ap.add_argument("--anchors", type=int, default=2, help="neighbour (prev>next) pairs shown per group")
-    ap.add_argument("--min-count", type=float, default=0.0, help="hide groups below this count/step")
+    ap.add_argument(
+        "--max-us", type=float, default=None, help="only kernels shorter than this"
+    )
+    ap.add_argument(
+        "--anchors",
+        type=int,
+        default=2,
+        help="neighbour (prev>next) pairs shown per group",
+    )
+    ap.add_argument(
+        "--min-count", type=float, default=0.0, help="hide groups below this count/step"
+    )
     ap.add_argument("--json", help="write the grouped table to this file")
     args = ap.parse_args()
 
@@ -169,7 +187,15 @@ def main():
         sys.exit(f"no {args.kind} steps in trace")
     bs = Counter(steps[i][2][1] for i in per_step)
 
-    groups = defaultdict(lambda: {"n": 0, "us": 0.0, "anchors": Counter(), "cls": None, "kern": Counter()})
+    groups = defaultdict(
+        lambda: {
+            "n": 0,
+            "us": 0.0,
+            "anchors": Counter(),
+            "cls": None,
+            "kern": Counter(),
+        }
+    )
     total_k, total_us = 0, 0.0
     glue_k, glue_us = 0, 0.0
     for i, items in per_step.items():
@@ -187,51 +213,106 @@ def main():
             glue_us += ev.get("dur", 0.0)
             chain = stacks.chain(launch["tid"], launch["ts"])
             aten = [o for o in chain if o["name"].startswith("aten::")]
-            parent_custom = next((o["name"] for o in reversed(chain) if not o["name"].startswith("aten::")), "-")
+            parent_custom = next(
+                (
+                    o["name"]
+                    for o in reversed(chain)
+                    if not o["name"].startswith("aten::")
+                ),
+                "-",
+            )
             shown = [o["name"] for o in aten if o["name"] not in _BORING]
-            # Chain from outermost aten op that is not a child of another custom op's own aten wrapper.
+            # Shapes come from the outermost aten op; the innermost is appended when it differs.
             root = aten[0] if aten else None
             a = root["args"] if root else {}
-            shapes = fmt_dims(a.get("Input Dims"), a.get("Input type")) if root else "()"
+            shapes = (
+                fmt_dims(a.get("Input Dims"), a.get("Input type")) if root else "()"
+            )
             inner = aten[-1] if aten else None
             if inner is not None and inner is not root:
                 ia = inner["args"]
-                shapes += " => " + inner["name"].replace("aten::", "") + fmt_dims(
-                    ia.get("Input Dims"), ia.get("Input type")
+                shapes += (
+                    " => "
+                    + inner["name"].replace("aten::", "")
+                    + fmt_dims(ia.get("Input Dims"), ia.get("Input type"))
                 )
-            key = (cls, ">".join(n.replace("aten::", "") for n in shown) or "-", shapes, parent_custom)
+            key = (
+                cls,
+                ">".join(n.replace("aten::", "") for n in shown) or "-",
+                shapes,
+                parent_custom,
+            )
             g = groups[key]
             g["n"] += 1
             g["us"] += ev.get("dur", 0.0)
             g["cls"] = cls
             g["kern"][short_kernel(ev["name"])] += 1
-            prev = next((short_kernel(items[j][2]["name"]) for j in range(idx - 1, -1, -1) if not is_glue[j]), "<start>")
-            nxt = next((short_kernel(items[j][2]["name"]) for j in range(idx + 1, len(items)) if not is_glue[j]), "<end>")
+            prev = next(
+                (
+                    short_kernel(items[j][2]["name"])
+                    for j in range(idx - 1, -1, -1)
+                    if not is_glue[j]
+                ),
+                "<start>",
+            )
+            nxt = next(
+                (
+                    short_kernel(items[j][2]["name"])
+                    for j in range(idx + 1, len(items))
+                    if not is_glue[j]
+                ),
+                "<end>",
+            )
             g["anchors"][f"{prev} > {nxt}"] += 1
 
     print(f"trace: {args.trace}")
-    print(f"{args.kind} steps: {n_steps} (bs {dict(bs)}); all kernels/step {total_k / n_steps:.0f}, "
-          f"GPU {total_us / n_steps:.0f} us/step")
-    print(f"selected: {glue_k / n_steps:.1f} kernels/step, {glue_us / n_steps:.1f} us/step\n")
-    print(f"{'n/step':>7} {'us/step':>8} {'us/k':>6}  class        aten chain [shapes]  <- custom-op parent")
+    print(
+        f"{args.kind} steps: {n_steps} (bs {dict(bs)}); all kernels/step {total_k / n_steps:.0f}, "
+        f"GPU {total_us / n_steps:.0f} us/step"
+    )
+    print(
+        f"selected: {glue_k / n_steps:.1f} kernels/step, {glue_us / n_steps:.1f} us/step\n"
+    )
+    print(
+        f"{'n/step':>7} {'us/step':>8} {'us/k':>6}  class        aten chain [shapes]  <- custom-op parent"
+    )
     rows = sorted(groups.items(), key=lambda kv: -kv[1]["us"])
     out = []
     for (cls, chain, shapes, parent), g in rows:
         n = g["n"] / n_steps
         if n < args.min_count:
             continue
-        print(f"{n:7.2f} {g['us'] / n_steps:8.1f} {g['us'] / g['n']:6.2f}  {cls:11s} {chain} {shapes}  <- {parent}")
-        print(f"{'':27s}kernel: {', '.join(f'{k} x{c / n_steps:.1f}' for k, c in g['kern'].most_common(2))}")
+        print(
+            f"{n:7.2f} {g['us'] / n_steps:8.1f} {g['us'] / g['n']:6.2f}  {cls:11s} {chain} {shapes}  <- {parent}"
+        )
+        print(
+            f"{'':27s}kernel: {', '.join(f'{k} x{c / n_steps:.1f}' for k, c in g['kern'].most_common(2))}"
+        )
         for anchor, c in g["anchors"].most_common(args.anchors):
             print(f"{'':27s}between: {anchor}  (x{c / n_steps:.1f})")
-        out.append({"class": cls, "aten_chain": chain, "shapes": shapes, "custom_parent": parent,
-                    "count_per_step": n, "us_per_step": g["us"] / n_steps,
-                    "kernels": dict(g["kern"]), "anchors": dict(g["anchors"].most_common(5))})
+        out.append(
+            {
+                "class": cls,
+                "aten_chain": chain,
+                "shapes": shapes,
+                "custom_parent": parent,
+                "count_per_step": n,
+                "us_per_step": g["us"] / n_steps,
+                "kernels": dict(g["kern"]),
+                "anchors": dict(g["anchors"].most_common(5)),
+            }
+        )
     by_cls = defaultdict(lambda: [0, 0.0])
     for g in groups.values():
         by_cls[g["cls"]][0] += g["n"]
         by_cls[g["cls"]][1] += g["us"]
-    print("\nper class: " + ", ".join(f"{c}: {v[0] / n_steps:.1f}/step {v[1] / n_steps:.0f}us" for c, v in sorted(by_cls.items())))
+    print(
+        "\nper class: "
+        + ", ".join(
+            f"{c}: {v[0] / n_steps:.1f}/step {v[1] / n_steps:.0f}us"
+            for c, v in sorted(by_cls.items())
+        )
+    )
     if args.json:
         with open(args.json, "w") as fh:
             json.dump({"steps": n_steps, "groups": out}, fh, indent=1)

@@ -19,7 +19,7 @@ point behind ``_is_hip`` and keeps the checkpoint's own layout otherwise.
 """
 
 from types import SimpleNamespace
-from typing import Optional
+from typing import Optional, Tuple
 
 import torch
 from torch import nn
@@ -288,13 +288,8 @@ def _k3_apply_f_b(self_attn: nn.Module, f_a: torch.Tensor) -> torch.Tensor:
 def k3_prepare_front_down_fp8(mlp: nn.Module) -> None:
     """Pack the fused front's latent down-projection for the PTPC FP8 path.
 
-    Mirrors ``_prepare_moe_latent_mxfp4``'s split of the merged front weight --
-    ``[gate_up | router | latent_down]`` -- keeping the router head BF16 (FP8
-    logits move the top-k pick) and quantizing only the ``[3584, 7168]`` tail.
-
-    The head view is shared with the MXFP4 path when both are packed; it is a
-    slice of ``_front_w``, so this costs one FP8 copy of the down-projection and
-    nothing else.
+    Same split as kimi_k3_rocm_moe.prepare_moe_latent_mxfp4: the router head stays
+    BF16 (FP8 logits move the top-k pick); only the [3584, 7168] tail is quantized.
     """
     if not envs.SGLANG_ROCM_K3_MOE_LATENT_FP8.get() or not mlp.use_latent_moe:
         return
@@ -339,7 +334,7 @@ def k3_prepare_front_down_fp8(mlp: nn.Module) -> None:
 
 def k3_use_front_down_fp8(mlp: nn.Module, num_tokens: int) -> bool:
     return (
-        getattr(mlp, "_front_down_fp8_w", None) is not None
+        mlp._front_down_fp8_w is not None
         and num_tokens >= mlp._front_down_fp8_min_tokens
     )
 
@@ -363,16 +358,35 @@ def k3_run_front_down_fp8(
 def _k3_densify_quark_shared_experts(mlp: nn.Module) -> None:
     """Dequantize Quark MXFP4 shared experts to BF16 before the MoE front merge.
 
-    With the default bf16 SGLANG_ROCM_QUARK_MXFP4_LINEAR_ACT, Quark dequantizes
-    them anyway, but only after load_weights has merged the front. Doing it
-    here lets them join the fused front; the later loader pass is a no-op.
+    Quark dequantizes them anyway, but only after load_weights has merged the
+    front. Doing it here lets them join the fused front; the later loader pass
+    is a no-op.
     """
     from sglang.srt.layers.quantization.quark.schemes import quark_w4a4_mxfp4
 
-    shared = getattr(mlp, "shared_experts", None)
+    shared = mlp.shared_experts
     if shared is None or not quark_w4a4_mxfp4._dequant_linear_to_bf16:
         return
     for linear in (shared.gate_up_proj, shared.down_proj):
         scheme = getattr(linear, "scheme", None)
         if isinstance(scheme, quark_w4a4_mxfp4.QuarkW4A4MXFP4):
             scheme.process_weights_after_loading(linear)
+
+
+def k3_fold_kv_b_channel_scale(
+    kv_b_proj: nn.Module, kv_b_weight: torch.Tensor
+) -> Tuple[torch.Tensor, Optional[torch.Tensor], bool]:
+    """Fold a per-channel FP8 kv_b scale before the MLA absorb splits heads.
+
+    Returns (weight, per-tensor scale or None, whether the scale was folded into
+    a BF16 weight). Dim 0 must still be the channel axis the scale indexes.
+    """
+    if kv_b_weight.dtype not in (torch.float8_e4m3fn, torch.float8_e4m3fnuz):
+        return kv_b_weight, None, False
+    scale = getattr(kv_b_proj, "weight_scale", None)
+    if not isinstance(scale, torch.Tensor) or scale.numel() <= 1:
+        return kv_b_weight, None, False
+    if envs.SGLANG_ROCM_K3_MLA_ABSORB_FP8.get():
+        weight, tensor_scale = _k3_channel_fp8_to_tensor_fp8(kv_b_proj, kv_b_weight)
+        return weight, tensor_scale, False
+    return _k3_channel_fp8_to_bf16(kv_b_proj, kv_b_weight), None, True

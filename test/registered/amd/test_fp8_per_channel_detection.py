@@ -19,6 +19,7 @@ from unittest import mock
 import torch
 
 from sglang.test.ci.ci_register import register_amd_ci
+from sglang.test.test_utils import CustomTestCase
 
 register_amd_ci(est_time=15, suite="stage-a-test-1-gpu-small-amd")
 
@@ -151,7 +152,7 @@ class TestFnuzAiterPerTokenInputScale(unittest.TestCase):
         self.assertIsNone(layer.input_scale)
 
 
-class TestAcceptsGroup128Fp8Tuple(unittest.TestCase):
+class TestAcceptsGroup128Fp8Tuple(CustomTestCase):
     """Unit tests for the ROCm accepts_group128_fp8_tuple probe.
 
     It answers a different question than _is_block_scale_fp8: "may a producer

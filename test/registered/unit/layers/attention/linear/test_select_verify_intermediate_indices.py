@@ -5,11 +5,12 @@ import torch
 
 from sglang.srt.layers.attention.linear import utils
 from sglang.test.ci.ci_register import register_cpu_ci
+from sglang.test.test_utils import CustomTestCase
 
 register_cpu_ci(est_time=5, suite="base-a-test-cpu")
 
 
-class TestSelectVerifyIntermediateStateIndices(unittest.TestCase):
+class TestSelectVerifyIntermediateStateIndices(CustomTestCase):
     def setUp(self):
         self.default = torch.arange(8, dtype=torch.int32)
         self.req_pool = torch.tensor([5, 6, 7], dtype=torch.int64)

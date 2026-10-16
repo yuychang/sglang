@@ -28,7 +28,7 @@ import torch
 from torch import nn
 
 from sglang.srt.environ import envs
-from sglang.srt.layers.layernorm import RMSNorm
+from sglang.srt.model_executor.forward_batch_info import ForwardMode
 from sglang.srt.models.deepseek_common.utils_rocm import (
     accepts_group128_fp8_tuple,
     accepts_ptpc_fp8_tuple,
@@ -36,6 +36,14 @@ from sglang.srt.models.deepseek_common.utils_rocm import (
 from sglang.srt.utils import is_hip
 
 logger = logging.getLogger(__name__)
+
+_is_hip = is_hip()
+_use_aiter = envs.SGLANG_USE_AITER.get() and _is_hip
+_k3_ptpc_fp8 = _is_hip and envs.SGLANG_ROCM_K3_PTPC_FP8.get()
+_k3_ptpc_fp8_max_tokens = envs.SGLANG_ROCM_K3_PTPC_FP8_MAX_TOKENS.get()
+_k3_ptpc_fp8_min_tokens = envs.SGLANG_ROCM_K3_PTPC_FP8_MIN_TOKENS.get()
+_k3_ptpc_fp8_prefill_min_tokens = envs.SGLANG_ROCM_K3_PTPC_FP8_PREFILL_MIN_TOKENS.get()
+_k3_ptpc_fp8_shared_down = _is_hip and envs.SGLANG_ROCM_K3_PTPC_FP8_SHARED_DOWN.get()
 
 _logged_fusions: set[str] = set()
 
@@ -45,17 +53,6 @@ def _k3_log_once(key: str, msg: str, *args) -> None:
     if key not in _logged_fusions:
         _logged_fusions.add(key)
         logger.info(msg, *args)
-
-
-_is_hip = is_hip()
-_use_aiter = envs.SGLANG_USE_AITER.get() and _is_hip
-_k3_ptpc_fp8 = _is_hip and envs.SGLANG_ROCM_K3_PTPC_FP8.get()
-_k3_ptpc_fp8_max_tokens = envs.SGLANG_ROCM_K3_PTPC_FP8_MAX_TOKENS.get()
-_k3_ptpc_fp8_min_tokens = envs.SGLANG_ROCM_K3_PTPC_FP8_MIN_TOKENS.get()
-_k3_ptpc_fp8_shared_down = _is_hip and envs.SGLANG_ROCM_K3_PTPC_FP8_SHARED_DOWN.get()
-
-
-_k3_ptpc_fp8_prefill_min_tokens = envs.SGLANG_ROCM_K3_PTPC_FP8_PREFILL_MIN_TOKENS.get()
 
 
 def _k3_ptpc_fp8_batch_ok(num_tokens: int) -> bool:
@@ -103,47 +100,6 @@ def _k3_inproj_needs_bf16_hidden(self_attn: nn.Module, num_tokens: int) -> bool:
     return getattr(self_attn, "_bfa_w", None) is not None
 
 
-def _k3_fuse_rms_fp8_quant(
-    hidden_states: torch.Tensor,
-    rms: RMSNorm,
-    *,
-    group128: bool,
-):
-    """Fuse RMSNorm with the activation quant the following linear expects."""
-    if group128:
-        from aiter.ops.triton.fused_fp8_quant import fused_rms_fp8_group_quant
-
-        from sglang.srt.layers.quantization.fp8_utils import (
-            _use_aiter_bpreshuffle_gfx95,
-            materialize_bpreshuffle_fp8_scale_tuple,
-        )
-
-        hidden_states, _, _, _ = fused_rms_fp8_group_quant(
-            hidden_states,
-            rms.weight,
-            rms.variance_epsilon,
-            inp2=None,
-            inp2_weight=None,
-            inp2_epsilon=None,
-            group_size=128,
-            dtype_quant=torch.float8_e4m3fn,
-            res1=None,
-            output_unquantized_inp1=False,
-            transpose_scale=False,
-        )
-        if _use_aiter_bpreshuffle_gfx95:
-            hidden_states = materialize_bpreshuffle_fp8_scale_tuple(hidden_states)
-        return hidden_states
-
-    from sglang.srt.layers.layer_boundary.residual.add_norm import (
-        _fused_rmsnorm_fp8_per_token_quant,
-    )
-
-    return _fused_rmsnorm_fp8_per_token_quant(
-        hidden_states, rms.weight.data, rms.variance_epsilon
-    )
-
-
 def _k3_should_fuse_inproj_quant(
     *, self_attn: nn.Module, num_tokens: int, inproj: Optional[nn.Module]
 ) -> bool:
@@ -164,69 +120,6 @@ def _k3_hidden_tensor(hidden_states):
 
 def _k3_hidden_num_tokens(hidden_states) -> int:
     return _k3_hidden_tensor(hidden_states).shape[0]
-
-
-def _k3_hidden_rows(hidden_states, num_rows: int):
-    """Leading ``num_rows`` tokens, preserving the tuple form."""
-    if isinstance(hidden_states, tuple):
-        return tuple(t[:num_rows] if torch.is_tensor(t) else t for t in hidden_states)
-    return hidden_states[:num_rows]
-
-
-def _k3_stash_mla_gate_hidden(self_attn: nn.Module, hidden_states) -> None:
-    """Stash post-RMS hidden for MLA ``g_proj``.
-
-    ``g_proj`` and in_proj share ``input_layernorm``. When fusion emitted
-    ``(fp8, per-token scale)``, reuse that tuple so ``g_proj`` does not
-    launch a second ``_per_token_group_quant_8bit``. Pre-RMS BF16 is wrong:
-    the gate multiplies ``sigmoid(g_proj(RMSNorm(x)))``.
-    """
-    if not getattr(self_attn, "use_output_gate", False):
-        return
-    self_attn._gate_hidden_states = hidden_states
-    if isinstance(hidden_states, tuple):
-        _k3_log_once(
-            "mla_gproj_tuple",
-            "K3 MLA g_proj reusing in_proj RMS+quant tuple (tokens=%d)",
-            _k3_hidden_num_tokens(hidden_states),
-        )
-
-
-def _k3_maybe_fuse_inproj_quant(
-    hidden_states: torch.Tensor,
-    *,
-    rms: RMSNorm,
-    inproj: Optional[nn.Module],
-    self_attn: nn.Module,
-):
-    """Replace split RMSNorm + group/PTPC quant with one producer kernel.
-
-    Also stashes the result for the MLA output gate, which reads the same norm.
-    """
-    num_tokens = hidden_states.shape[0]
-    if not _k3_should_fuse_inproj_quant(
-        self_attn=self_attn, num_tokens=num_tokens, inproj=inproj
-    ):
-        normed = rms(hidden_states)
-        _k3_stash_mla_gate_hidden(self_attn, normed)
-        return normed
-    group128 = accepts_group128_fp8_tuple(inproj)
-    fused = _k3_fuse_rms_fp8_quant(hidden_states, rms, group128=group128)
-    if group128:
-        _k3_log_once(
-            "inproj_group128",
-            "K3 in_proj RMS+group128 producer fusion enabled (tokens=%d)",
-            num_tokens,
-        )
-    else:
-        _k3_log_once(
-            "inproj_ptpc",
-            "K3 in_proj RMS+PTPC producer fusion enabled (scheme=%s, tokens=%d)",
-            type(getattr(inproj, "scheme", None)).__name__,
-            num_tokens,
-        )
-    _k3_stash_mla_gate_hidden(self_attn, fused)
-    return fused
 
 
 def _k3_fuse_kda_o_norm_ptpc(
@@ -273,7 +166,8 @@ def _k3_fuse_kda_o_norm_ptpc(
         norm_gate,
         o_norm.weight,
         o_norm.eps,
-        sigmoid_gate=True,
+        use_sigmoid=True,
+        round_to_input_dtype=True,
     )
     _k3_log_once(
         "kda_onorm_ptpc",
@@ -311,38 +205,34 @@ def _attn_res_can_skip_out_norm(hidden_size: int, nvb: int) -> bool:
     return nvb == 0 or _use_hip_fused(hidden_size, nvb)
 
 
-def try_attn_res_inproj_quant(
-    layer: nn.Module, attn_res, hidden_states, prefix_sum, forward_batch
-):
-    """Attention-side attn-res aggregation feeding a fused RMSNorm+quant in-proj.
-
-    Returns (quantized hidden_states, prefix_sum), or None to take the plain
-    aggregation.
-    """
-    self_attn = layer.self_attn
+def attn_bank_read_quant_format(
+    self_attn: nn.Module,
+    *,
+    hidden_size: int,
+    num_valid_blocks: int,
+    num_tokens: int,
+    forward_mode: ForwardMode,
+) -> str:
+    """The ``quant_format`` the attention-residual bank read hands the in-proj
+    in: decode fuses the input RMSNorm with the activation quant the in-proj
+    expects; "" keeps the bf16 read."""
     inproj = _k3_attn_inproj(self_attn)
     if not (
-        forward_batch.forward_mode.is_decode()
-        and _attn_res_can_skip_out_norm(
-            hidden_states.shape[1], attn_res.num_valid_blocks
-        )
+        forward_mode.is_decode()
+        and _attn_res_can_skip_out_norm(hidden_size, num_valid_blocks)
         and _k3_should_fuse_inproj_quant(
-            self_attn=self_attn, num_tokens=hidden_states.shape[0], inproj=inproj
+            self_attn=self_attn, num_tokens=num_tokens, inproj=inproj
         )
     ):
-        return None
-    hidden_states, prefix_sum = attn_res.forward(
-        hidden_states,
-        prefix_sum,
-        layer.self_attention_res_proj,
-        layer.self_attention_res_norm,
-        None,  # out_norm: the fused RMSNorm+quant below applies it
-        write=layer.is_block_write_layer,
+        return ""
+    if accepts_group128_fp8_tuple(inproj):
+        _k3_log_once(
+            "inproj_group128", "K3 in_proj RMS+group128 producer fusion enabled"
+        )
+        return "fp8"
+    _k3_log_once(
+        "inproj_ptpc",
+        "K3 in_proj RMS+PTPC producer fusion enabled (scheme=%s)",
+        type(inproj.scheme).__name__,
     )
-    hidden_states = _k3_maybe_fuse_inproj_quant(
-        hidden_states,
-        rms=layer.input_layernorm,
-        inproj=inproj,
-        self_attn=self_attn,
-    )
-    return hidden_states, prefix_sum
+    return "fp8_per_token"

@@ -55,36 +55,20 @@ def try_all_reduce_add(
 
         group = get_tp_group()
         ca_comm = group.ca_comm
-        if ca_comm is None or getattr(ca_comm, "disabled", True):
+        if ca_comm is None or ca_comm.disabled:
             return None
         if residual is None:
-            if hasattr(ca_comm, "custom_all_reduce"):
-                out = ca_comm.custom_all_reduce(x)
-                return out
-            return None
-        # Kimi-K3 KDA preserves a leading singleton/head view around the residual while
-        # o_proj returns the same token-major storage flattened. Aggregation
-        # treats these as the same elementwise tensor; normalize the view so
-        # AITER's shape guard does not send the seven KDA layers down split AR.
+            return ca_comm.custom_all_reduce(x)
+        # o_proj returns a flattened view of the residual's storage; AITER's
+        # shape guard needs matching shapes.
         if residual.shape != x.shape:
             if residual.numel() != x.numel() or not residual.is_contiguous():
                 return None
             residual = residual.view_as(x)
+        # Older AITER builds lack this method.
         if not hasattr(ca_comm, "custom_all_reduce_residual"):
             return None
         return ca_comm.custom_all_reduce_residual(x, residual)
     except Exception as exc:
         logger.debug("HIP AR+residual unavailable: %s", exc)
         return None
-
-
-def all_reduce_add(
-    x: torch.Tensor, residual: Optional[torch.Tensor]
-) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
-    """Complete a deferred o_proj all-reduce; returns (x, still-pending residual)."""
-    fused = try_all_reduce_add(x, residual)
-    if fused is not None:
-        return fused, None
-    from sglang.srt.distributed import tensor_model_parallel_all_reduce
-
-    return tensor_model_parallel_all_reduce(x), residual

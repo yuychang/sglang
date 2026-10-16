@@ -25,6 +25,12 @@ class TestMlaBf16AbsorbWeight(CustomTestCase):
         scaled = _absorb_weight_bf16(weight, 2.0)
         assert torch.equal(scaled, weight * 2)
 
+    def test_non_bf16_weight_is_cast_under_unit_scale(self):
+        weight = torch.randn(2, 4, 8).to(torch.float8_e4m3fn)
+        out = _absorb_weight_bf16(weight, 1.0)
+        self.assertIsNot(out, weight)
+        self.assertEqual(out.dtype, torch.bfloat16)
+
 
 if __name__ == "__main__":
     unittest.main()

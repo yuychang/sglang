@@ -511,8 +511,3 @@ def build_latent_moe_tail_fp8_persistent_module(
         },
     }
     return launch_tail
-
-
-def build_b1_latent_moe_tail_fp8_persistent_module(**kwargs):
-    """Compatibility alias for callers outside SGLang."""
-    return build_latent_moe_tail_fp8_persistent_module(tile_m=1, **kwargs)

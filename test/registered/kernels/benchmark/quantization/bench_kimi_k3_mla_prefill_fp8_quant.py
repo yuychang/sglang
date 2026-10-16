@@ -1,8 +1,8 @@
 """Microbenchmark for the Kimi-K3 MLA prefill per-tensor FP8 Q/K/V quant.
 
-Compares the per-tensor amax + static-quant sequence that the FlyDSL FP8 MLA
-prefill used before (``AiterAttnBackend._quantize_mla_prefill_fp8`` once per
-operand) with the batched two-launch ``mla_prefill_fp8_quant``. Shapes are
+Compares the per-tensor amax + static-quant sequence
+(``AiterAttnBackend._quantize_mla_prefill_fp8`` once per operand) with the
+batched two-launch ``mla_prefill_fp8_quant``. Shapes are
 Kimi-K3 TP8: 12 local heads, QK dim 192, V dim 128, V a strided slice of the
 fused kv_b_proj output.
 """
@@ -28,6 +28,9 @@ HEADS = 12
 QK_DIM = 192
 V_DIM = 128
 NOPE_DIM = 128
+# Operand bytes each timed pass walks through, well past MI355X's 256 MB MALL,
+# so no call reads operands the previous call left in cache.
+_ROTATION_BYTES = 1 << 30
 
 
 def make_operands(num_q: int, num_kv: int, kv_fp8: bool):
@@ -60,14 +63,17 @@ def count_kernels(fn) -> int:
     )
 
 
-def gpu_us(fn, warmup: int, iters: int, trials: int) -> float:
+def gpu_us(fns, warmup: int, iters: int, trials: int) -> float:
+    """Per-call GPU time of ``fns``, one closure per operand copy."""
     for _ in range(warmup):
-        fn()
+        for fn in fns:
+            fn()
     torch.cuda.synchronize()
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph):
         for _ in range(iters):
-            fn()
+            for fn in fns:
+                fn()
     graph.replay()
     torch.cuda.synchronize()
     samples = []
@@ -78,7 +84,7 @@ def gpu_us(fn, warmup: int, iters: int, trials: int) -> float:
         graph.replay()
         end.record()
         end.synchronize()
-        samples.append(start.elapsed_time(end) * 1000.0 / iters)
+        samples.append(start.elapsed_time(end) * 1000.0 / (iters * len(fns)))
     return statistics.median(samples)
 
 
@@ -125,13 +131,28 @@ def main():
     for name, num_q, num_kv, kv_fp8 in cases:
         torch.manual_seed(0)
         tensors = make_operands(num_q, num_kv, kv_fp8)
+        set_bytes = sum(t.numel() * t.element_size() for t in tensors)
+        copies = [tensors] + [
+            make_operands(num_q, num_kv, kv_fp8)
+            for _ in range(_ROTATION_BYTES // set_bytes)
+        ]
         old_fn = functools.partial(legacy, tensors)
         new_fn = functools.partial(fused, tensors)
         row = [
             count_kernels(old_fn),
             count_kernels(new_fn),
-            gpu_us(old_fn, 3, args.iters, args.trials),
-            gpu_us(new_fn, 3, args.iters, args.trials),
+            gpu_us(
+                [functools.partial(legacy, c) for c in copies],
+                3,
+                args.iters,
+                args.trials,
+            ),
+            gpu_us(
+                [functools.partial(fused, c) for c in copies],
+                3,
+                args.iters,
+                args.trials,
+            ),
             host_us(old_fn, args.iters, 5 * args.trials),
             host_us(new_fn, args.iters, 5 * args.trials),
         ]
@@ -140,7 +161,7 @@ def main():
             f"{row[4]:>11.1f} {row[5]:>11.1f}",
             flush=True,
         )
-        del tensors, old_fn, new_fn
+        del tensors, copies, old_fn, new_fn
         torch.cuda.empty_cache()
 
 

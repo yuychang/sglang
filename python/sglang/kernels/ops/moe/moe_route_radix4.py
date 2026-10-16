@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 _NUM_EXPERTS = 896
 _TOPK = 16
 _SORT_BM = 16
-_K3_MODEL_DIM = 3584
 _FUSE_SORT_MAX_TOKENS = 64
 # One block per token, so the grid outgrows the machine somewhere past a
 # thousand tokens and the kernel turns throughput-bound, where spreading a token
@@ -143,21 +142,9 @@ def _empty_moe_buf(device: torch.device) -> torch.Tensor:
     return buf
 
 
-def _register_presorted(aux: dict) -> None:
-    try:
-        from aiter.fused_moe import register_presorted_moe
-    except Exception:
-        return
-    register_presorted_moe(aux)
-
-
-def should_fuse_sort(n_tokens: int) -> bool:
+def fused_sort_covered(n_tokens: int) -> bool:
     """BM=16 a4w4 decode rows in the K3 FMOE table: M in 1..64 except the
     token=3 BM=32 hole. fused_moe still ignores the aux unless block_m is 16."""
-    from sglang.srt.environ import envs
-
-    if not envs.SGLANG_ROCM_K3_RADIX4_FUSE_SORT.get():
-        return False
     return 1 <= n_tokens <= _FUSE_SORT_MAX_TOKENS
 
 
@@ -167,8 +154,6 @@ def route_radix4(
     topk: int,
     renormalize: bool,
     routed_scaling_factor: float,
-    *,
-    fuse_sort: Optional[bool] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Returns (weights [M, topk] fp32, ids [M, topk] int32). Caller must have
     checked covered().
@@ -185,30 +170,20 @@ def route_radix4(
     token's routing from depending on the batch size, since batches past
     _MAX_TOKENS fall back to aiter. None of it depends on how the kernel's
     compaction raced, so a row also repeats bit for bit run to run.
-
-    When ``fuse_sort`` is true (default for decode-sized M when the env gate is
-    on), the same launch also emits AITER BM=16 sort metadata and registers it
-    so ``fused_moe`` can skip ``mxfp4_moe_sort``.
     """
     M = scores.shape[0]
     out_w = torch.empty((M, topk), dtype=torch.float32, device=scores.device)
     out_i = torch.empty((M, topk), dtype=torch.int32, device=scores.device)
-    if fuse_sort is None:
-        fuse_sort = should_fuse_sort(M)
-    if not fuse_sort:
-        build().run(
-            scores,
-            bias,
-            out_w,
-            out_i,
-            topk,
-            float(routed_scaling_factor),
-            bool(renormalize),
-        )
-        return out_w, out_i
-    return _route_radix4_with_sort(
-        scores, bias, topk, renormalize, routed_scaling_factor, out_w, out_i
+    build().run(
+        scores,
+        bias,
+        out_w,
+        out_i,
+        topk,
+        float(routed_scaling_factor),
+        bool(renormalize),
     )
+    return out_w, out_i
 
 
 def route_radix4_with_sort(
@@ -219,8 +194,10 @@ def route_radix4_with_sort(
     routed_scaling_factor: float,
     moe_buf: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, dict]:
-    """Route and BM=16-sort in one launch. Returns weights, ids, and the sort
-    aux dict fused_moe expects. Does not register the aux; tests use this."""
+    """Route and BM=16-sort in one launch, zeroing ``moe_buf`` (the MoE output)
+    when given. Returns weights, ids, and the sort aux dict that AITER's
+    ``register_presorted_moe`` takes so ``fused_moe`` skips its own sort.
+    Caller must have checked covered() and fused_sort_covered()."""
     M = scores.shape[0]
     out_w = torch.empty((M, topk), dtype=torch.float32, device=scores.device)
     out_i = torch.empty((M, topk), dtype=torch.int32, device=scores.device)
@@ -228,33 +205,6 @@ def route_radix4_with_sort(
         scores, bias, topk, renormalize, routed_scaling_factor, out_w, out_i, moe_buf
     )
     return out_w, out_i, aux
-
-
-def _route_radix4_with_sort(
-    scores,
-    bias,
-    topk,
-    renormalize,
-    routed_scaling_factor,
-    out_w,
-    out_i,
-):
-    moe_buf = None
-    try:
-        from sglang.srt.layers.zero_copy_context import get_moe_output_spec
-
-        moe_buf = get_moe_output_spec(
-            torch.Size((scores.shape[0], _K3_MODEL_DIM)),
-            torch.bfloat16,
-            scores.device,
-        )
-    except Exception:
-        moe_buf = None
-    aux = _launch_with_sort(
-        scores, bias, topk, renormalize, routed_scaling_factor, out_w, out_i, moe_buf
-    )
-    _register_presorted(aux)
-    return out_w, out_i
 
 
 def _launch_with_sort(
@@ -305,7 +255,6 @@ def _launch_with_sort(
     )
     return {
         "topk_ids_ptr": int(out_i.data_ptr()),
-        # sorted_weights were gathered from out_w; ROCm/aiter#6484 matches on it.
         "topk_weights_ptr": int(out_w.data_ptr()),
         "M": M,
         "block_m": _SORT_BM,
