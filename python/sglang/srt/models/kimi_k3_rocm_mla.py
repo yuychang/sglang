@@ -57,20 +57,25 @@ def try_fused_mla_q_cache(
     ):
         return None
 
-    # AITER's asm decode uses FP8 Q when the cache is FP8. Gluon keeps Q in
-    # BF16 while retaining the fused FP8 cache write; its h12/bh16 kernel is
-    # both faster and more accurate for K3's long-context decode regime.
+    # ASM decode consumes FP8 Q when the verify window fits the native
+    # 16-head kernel (qlen <= 4). Wider windows stay on Gluon, which keeps
+    # BF16 Q and still writes the FP8 cache.
     triton_decode = self.current_attention_backend in ("triton", "triton_mla")
     tokens, heads = q_nope_out.shape[0], q_nope_out.shape[1]
     from sglang.srt.layers.attention.aiter_mla_gluon import (
+        fp8_q_asm_mla_enabled,
         prefer_mla_gluon_decode,
     )
 
-    gluon_decode = not triton_decode and prefer_mla_gluon_decode(
-        head_pad_mode="zero",
-        num_head=heads,
-        kv_cache_dtype=kv_cache.dtype,
-        q_dtype=torch.bfloat16,
+    gluon_decode = (
+        not triton_decode
+        and not fp8_q_asm_mla_enabled()
+        and prefer_mla_gluon_decode(
+            head_pad_mode="zero",
+            num_head=heads,
+            kv_cache_dtype=kv_cache.dtype,
+            q_dtype=torch.bfloat16,
+        )
     )
     q_out_dtype = q_nope_out.dtype if triton_decode or gluon_decode else kv_cache.dtype
     if (
@@ -131,10 +136,6 @@ def try_fused_mla_q_cache(
             q_scale=self._k3_mla_q_cache_scale,
         )
     else:
-        # The Triton kernel indexes cos/sin by position without clamping. All-zero
-        # positions read row 0 of the one-row identity tables (cos=1, sin=0),
-        # which is identity RoPE with no out-of-bounds reads on padded tokens.
-        # q_scale is omitted because K3's Q scale is always 1.0.
         q, _, _, _ = fused_qk_rope_cat_and_cache_mla(
             q_nope_out,
             q_pe,
@@ -142,12 +143,15 @@ def try_fused_mla_q_cache(
             k_pe,
             kv_cache,
             out_cache_loc,
-            mla_zero_positions(self, tokens, positions.device),
+            positions,
             cos_cache,
             sin_cache,
             scale,
             True,
+            q_scale=self._k3_mla_q_cache_scale,
             q_out_dtype=q_out_dtype,
+            compute_all_q_rope=False,
+            identity_rope=True,
         )
     k_placeholder = mla_k_placeholder(
         self, k_nope.shape[0], k_nope.dtype, k_nope.device
@@ -178,19 +182,6 @@ def mla_q_out_buffer(
         if zero_init:
             buf.view(torch.uint8).zero_()
         self._k3_mla_q_out = buf
-    return buf[:tokens]
-
-
-def mla_zero_positions(self, tokens: int, device: torch.device) -> torch.Tensor:
-    """Persistent all-zero positions for the identity-RoPE Triton fallback."""
-    buf = getattr(self, "_k3_mla_zero_positions", None)
-    if (
-        not isinstance(buf, torch.Tensor)
-        or buf.device != device
-        or buf.shape[0] < tokens
-    ):
-        buf = torch.zeros((tokens,), dtype=torch.int64, device=device)
-        self._k3_mla_zero_positions = buf
     return buf[:tokens]
 
 

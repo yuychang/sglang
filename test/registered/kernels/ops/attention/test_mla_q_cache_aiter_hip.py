@@ -118,9 +118,7 @@ def test_fused_mla_q_cache_uses_each_token_slot_across_page_boundaries():
     )
     values["slot_mapping"] = slots
     values["positions"] = torch.arange(100, 108, dtype=torch.int64, device="cuda")
-    values["kv_cache"] = torch.zeros(
-        304, 1, 576, dtype=torch.bfloat16, device="cuda"
-    )
+    values["kv_cache"] = torch.zeros(304, 1, 576, dtype=torch.bfloat16, device="cuda")
     expected_q, expected_k = _reference(values)
 
     actual = mla_q_cache_aiter_hip.run(**values)

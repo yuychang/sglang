@@ -85,6 +85,8 @@ from sglang.kernels.ops.quantization.fp8_kernel import fp8_dtype, scaled_fp8_qua
 from sglang.srt.configs.model_config import AttentionArch
 from sglang.srt.environ import envs
 from sglang.srt.layers.attention.aiter_mla_gluon import (
+    FP8_Q_ASM_MAX_QLEN,
+    fp8_q_asm_mla_selected,
     log_mla_gluon_capability,
     mla_gluon_decode,
     prefer_mla_gluon_decode,
@@ -418,6 +420,7 @@ class AiterAttnBackend(AttentionBackend):
                 "SGLANG_AITER_MLA_VERIFY_BACKEND must be 'gluon' or 'asm', "
                 f"got {self.mla_verify_backend!r}"
             )
+        self.use_mla_fp8_q_asm = False
         self._cprr_launch_logged = False
         # fast_mode / intra_batch_mode for the cp verify schedule. Not the
         # module defaults: those size reduce_partial_map at 65536 entries
@@ -736,11 +739,54 @@ class AiterAttnBackend(AttentionBackend):
                     fast_mode = False
                     intra_batch_mode = False
                 log_mla_gluon_capability(logger)
+                # SGLANG_AITER_MLA_PERSIST=0 is the recipe default. The fp8-Q
+                # ASM kernel is still the decode/verify path when the DSpark
+                # window is at most 4 tokens (c4, c14, c16). A wider window
+                # (block 7 at c1) is remapped onto a slower kernel and stays
+                # on Gluon.
+                verify_qlen = int(self.num_draft_tokens or 1)
+                if fp8_q_asm_mla_selected(
+                    decode_backend=self.mla_decode_backend,
+                    verify_backend=self.mla_verify_backend,
+                    dcp_world_size=self.dcp_world_size,
+                    verify_qlen=verify_qlen,
+                    gfx95=is_gfx95_supported(),
+                ):
+                    self.use_mla_fp8_q_asm = True
+                    _use_mla_ps_kernel = True
+                    fast_mode = True
+                    intra_batch_mode = False
+                    logger.info(
+                        "aiter mla: decode/verify use the fp8-Q asm kernel "
+                        "(qlen<=%s) instead of gluon",
+                        FP8_Q_ASM_MAX_QLEN,
+                    )
+                elif (
+                    self.mla_decode_backend == "asm"
+                    and self.mla_verify_backend == "asm"
+                    and self.dcp_world_size <= 1
+                    and verify_qlen > FP8_Q_ASM_MAX_QLEN
+                    and is_gfx95_supported()
+                ):
+                    logger.info(
+                        "aiter mla: verify qlen=%s stays on gluon; fp8-Q asm "
+                        "is only used for qlen<=%s",
+                        verify_qlen,
+                        FP8_Q_ASM_MAX_QLEN,
+                    )
 
             use_any_mla_persist = _use_mla_ps_kernel or self.use_mla_dcp_asm
             self.max_split_per_batch = 32 if use_any_mla_persist else None
+            if self.use_mla_fp8_q_asm:
+                # Leave the split count to AITER's sequence-length-aware
+                # scheduler instead of capping it at ceil(CU / batch).
+                self.max_split_per_batch = -1
 
-            if self.num_draft_tokens is None and use_any_mla_persist:
+            if (
+                self.num_draft_tokens is None
+                and use_any_mla_persist
+                and not self.use_mla_fp8_q_asm
+            ):
                 self.max_split_per_batch = 64
 
             # When the env var is on, aiter plans the KV splits. The default
@@ -960,7 +1006,7 @@ class AiterAttnBackend(AttentionBackend):
             kv_last_page_len,
             nhead // nhead_kv,
             nhead_kv,
-            False,
+            getattr(self, "use_mla_fp8_q_asm", False),
             work_metadata,
             work_info_set,
             work_indptr,
@@ -1433,9 +1479,7 @@ class AiterAttnBackend(AttentionBackend):
         fm.asm_ctx_tok_idx, fm.asm_ctx_cu_k = tok_idx, cu_k
         return tok_idx, cu_k
 
-    def _set_uniform_qo_indptr(
-        self, bs: int, tokens_per_req: int
-    ) -> torch.Tensor:
+    def _set_uniform_qo_indptr(self, bs: int, tokens_per_req: int) -> torch.Tensor:
         qo_indptr = self.qo_indptr[: bs + 1]
         # This metadata builder also runs outside graph replay. Writing arange
         # directly into the persistent buffer avoids a temporary allocation and
@@ -1784,7 +1828,7 @@ class AiterAttnBackend(AttentionBackend):
         kernel takes None instead. mla.py re-decides persistent mode only on
         None. It would read -1 as a real count.
         """
-        if self.use_mla_auto_kv_splits:
+        if self.use_mla_auto_kv_splits or getattr(self, "use_mla_fp8_q_asm", False):
             return None
         return self.forward_metadata.num_kv_splits
 
