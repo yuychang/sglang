@@ -629,6 +629,22 @@ class DefaultModelLoader(BaseModelLoader):
             hf_weights_files = list(resolved_source.weight_files)
             use_safetensors = resolved_source.use_safetensors
 
+        tensor_file_map = None
+        if use_safetensors:
+            index_path = os.path.join(hf_folder, "model.safetensors.index.json")
+            if os.path.isfile(index_path):
+                with open(index_path) as index_file:
+                    weight_map = json.load(index_file).get("weight_map")
+                if weight_map:
+                    # The index is authoritative at tensor granularity. This
+                    # matters for overlay checkpoints where an existing shard
+                    # still physically contains a tensor remapped to a newer
+                    # shard.
+                    tensor_file_map = {
+                        name: os.path.basename(filename)
+                        for name, filename in weight_map.items()
+                    }
+
         if self.load_config.load_format == LoadFormat.NPCACHE:
             # Currently np_cache only support *.bin checkpoints
             assert use_safetensors is False
@@ -703,6 +719,7 @@ class DefaultModelLoader(BaseModelLoader):
                     prefetch=start_iterator_prefetch,
                     prefetch_num_threads=prefetch_num_threads,
                     drop_cache_after_load=weight_loader_drop_cache_after_load,
+                    tensor_file_map=tensor_file_map,
                 )
             else:
                 weights_iterator = safetensors_weights_iterator(
@@ -711,6 +728,7 @@ class DefaultModelLoader(BaseModelLoader):
                     prefetch=start_iterator_prefetch,
                     prefetch_num_threads=prefetch_num_threads,
                     drop_cache_after_load=weight_loader_drop_cache_after_load,
+                    tensor_file_map=tensor_file_map,
                 )
 
         else:
