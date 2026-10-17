@@ -8,11 +8,14 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import torch
+from safetensors.torch import save_file
 
 from sglang.srt.model_loader.weight_utils import (
+    buffered_multi_thread_safetensors_weights_iterator,
     filter_duplicate_safetensors_files,
     initialize_dummy_weights,
     maybe_add_mtp_safetensors,
+    safetensors_weights_iterator,
 )
 from sglang.srt.utils import runai_utils
 from sglang.test.ci.ci_register import register_cpu_ci
@@ -156,6 +159,32 @@ class TestFilterDuplicateSafetensorsFiles(CustomTestCase):
             index_file=INDEX_NAME,
         )
         self.assertEqual(result, [single])
+
+
+class TestSafetensorsIndexFiltering(CustomTestCase):
+    def test_remapped_tensor_is_read_only_from_authoritative_shard(self):
+        with tempfile.TemporaryDirectory() as folder:
+            old = os.path.join(folder, "old.safetensors")
+            overlay = os.path.join(folder, "overlay.safetensors")
+            save_file(
+                {"kept": torch.tensor([1]), "replaced": torch.tensor([2])}, old
+            )
+            save_file({"replaced": torch.tensor([3])}, overlay)
+            tensor_file_map = {
+                "kept": os.path.basename(old),
+                "replaced": os.path.basename(overlay),
+            }
+
+            for iterator in (
+                safetensors_weights_iterator(
+                    [old, overlay], tensor_file_map=tensor_file_map
+                ),
+                buffered_multi_thread_safetensors_weights_iterator(
+                    [old, overlay], max_workers=2, tensor_file_map=tensor_file_map
+                ),
+            ):
+                loaded = {name: value.item() for name, value in iterator}
+                self.assertEqual(loaded, {"kept": 1, "replaced": 3})
 
 
 class TestMaybeAddMtpSafetensors(CustomTestCase):
