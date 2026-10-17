@@ -23,7 +23,7 @@ def _ops():
 
         module = load_module(
             "sglang.kernels.ops.attention.kda_flydsl.kda_decode",
-            "aiter.ops.flydsl.kda_decode",
+            "aiter.ops.flydsl.linear_attention_kernels",
         )
     except (ImportError, ModuleNotFoundError):
         return None, None
