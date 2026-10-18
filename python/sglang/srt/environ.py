@@ -959,11 +959,11 @@ class Envs:
     SGLANG_ROCM_AR_RESIDUAL = EnvBool(False)
     SGLANG_ROCM_AR_RESIDUAL_MAX_TOKENS = EnvInt(8)
     # Fuse the attention-TP all-reduce, the pending residual add, AttnRes and
-    # the post-attention RMSNorm into one kernel for M <= 16. That is the
-    # TokenSpeed small-batch attention collective. Larger M and a block-write
-    # layer with no residual stay on the split path. Off until a serving run
-    # shows it is not a regression; the manual kernel test is bitwise with
-    # attn_res_hip.
+    # the post-attention RMSNorm for M <= 16. Bitwise with attn_res_hip.
+    # Off: on MI355X TP8, H=7168, nvb=4, a CUDA graph measured 87–135 us
+    # against 16–19 us for AITER custom all-reduce plus attn_res_hip
+    # (test/manual/kernels/bench_hip_ar_attnres.py). One CTA per token does
+    # the remote sum, and the two flag kernels add another round trip each.
     SGLANG_ROCM_AR_ATTNRES = EnvBool(False)
     SGLANG_ROCM_AR_ATTNRES_MAX_TOKENS = EnvInt(16)
     # Fold the Kimi-K3 KDA [f_a|b] tail into the wide [q,k,v,g] projection.
