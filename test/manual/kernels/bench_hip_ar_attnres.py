@@ -7,6 +7,8 @@ it also times custom all-reduce-with-residual plus attn_res_hip without the
 add, which is the path SGLANG_ROCM_AR_RESIDUAL turns on.
 
 Launch: torchrun --nproc_per_node=8 test/manual/kernels/bench_hip_ar_attnres.py
+
+MI355X TP8, H=7168, nvb=4, 2026-10-18: fused 87–135 us, split 16–19 us.
 """
 
 from __future__ import annotations
