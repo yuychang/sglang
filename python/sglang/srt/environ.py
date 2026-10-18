@@ -958,14 +958,6 @@ class Envs:
     # into all-gather. Set MAX_TOKENS=4 to keep it on 1-stage sizes only.
     SGLANG_ROCM_AR_RESIDUAL = EnvBool(False)
     SGLANG_ROCM_AR_RESIDUAL_MAX_TOKENS = EnvInt(8)
-    # Fuse the attention-TP all-reduce, the pending residual add, AttnRes and
-    # the post-attention RMSNorm for M <= 16. Bitwise with attn_res_hip.
-    # Off: on MI355X TP8, H=7168, nvb=4, a CUDA graph measured 87–135 us
-    # against 16–19 us for AITER custom all-reduce plus attn_res_hip
-    # (test/manual/kernels/bench_hip_ar_attnres.py). One CTA per token does
-    # the remote sum, and the two flag kernels add another round trip each.
-    SGLANG_ROCM_AR_ATTNRES = EnvBool(False)
-    SGLANG_ROCM_AR_ATTNRES_MAX_TOKENS = EnvInt(16)
     # Fold the Kimi-K3 KDA [f_a|b] tail into the wide [q,k,v,g] projection.
     # The merged N=6288 shape is used only up to MAX_TOKENS below, where decode
     # is bandwidth bound; larger batches keep the tuned N=6144 split path.

@@ -151,33 +151,6 @@ class AttnBankState:
             write=False,
         )
 
-    def all_reduce_and_read_ffn_input(self, hidden_states, residual, forward_batch, norm):
-        """All-reduce o_proj, add the residual, mix AttnRes and RMSNorm.
-
-        One kernel for M <= 16. Returns None, before any collective, when the
-        batch is outside that window so the split path runs instead.
-        """
-        if self.fuses_slice_collectives or residual is None:
-            return None
-        if not isinstance(hidden_states, torch.Tensor):
-            return None
-        from sglang.srt.layers.communication.hip_ar_attnres import (
-            try_all_reduce_residual_attnres,
-        )
-
-        bank = self.bank.require()
-        if _bank_rows(bank, hidden_states) is not None:
-            return None
-        return try_all_reduce_residual_attnres(
-            hidden_states,
-            residual,
-            bank.block_residual,
-            bank.num_valid_blocks,
-            self.ffn_score_proj,
-            self.ffn_score_norm,
-            norm,
-        )
-
     def reduce_scatter_and_read_ffn_input(
         self, hidden_states, residual, forward_batch, norm
     ):
@@ -312,22 +285,15 @@ class _FfnReadout(_BankReadout):
     @property
     def completing_fusions(self) -> Tuple[ReadoutFusion, ...]:
         state = self.state
-        fused = (
-            ReadoutFusion(
-                SumGroup.ATTN_TP,
-                state.all_reduce_and_read_ffn_input,
-                reads=True,
-            ),
-        )
         if not state.fuses_slice_collectives:
-            return (*fused, *state.ffn_input_fusions)
+            return state.ffn_input_fusions
         reads = ReadoutFusion(
             SumGroup.ATTN_TP,
             state.reduce_scatter_and_read_ffn_input,
             scatters=True,
             reads=True,
         )
-        return (reads, *fused, *state.ffn_input_fusions)
+        return (reads, *state.ffn_input_fusions)
 
     def read(self, residual, norm, quant_format="", post_residual_addition=None):
         # The attention read of a write layer leaves the residual empty, so the
