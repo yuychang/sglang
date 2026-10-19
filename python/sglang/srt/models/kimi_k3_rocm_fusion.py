@@ -90,33 +90,26 @@ def _k3_split_linear_accepts_fp8_tuple(module: nn.Module) -> bool:
     return accepts_group128_fp8_tuple(module) or _k3_linear_accepts_ptpc_tuple(module)
 
 
-def _k3_inproj_needs_bf16_hidden(self_attn: nn.Module, num_tokens: int) -> bool:
-    """True when a BF16 copy of the RMSNormed hidden is still consumed.
-
-    Merged KDA ``qkvgbfa`` decode is a single GEMM, so the producer can emit
-    only the FP8 tuple. The split ``[q,k,v,g]`` + ``f_a`` / ``b`` path still
-    reads BF16 when those linears cannot consume the tuple. Quark dequantizes
-    a per-channel FP8 weight whose N is not a multiple of 16 (KDA ``b_proj``
-    is 12-wide at TP8) and clears ``weight_scale``; ``apply_weights`` then
-    rejects ``(fp8, scale)``.
-    """
-    sizes = getattr(self_attn, "_qkvgbfa_sizes", None)
-    limit = getattr(self_attn, "_qkvgbfa_bs_limit", 0) or 0
-    if sizes is not None and 0 < num_tokens <= limit:
+def _k3_kda_inproj_needs_bf16_hidden(attn: nn.Module, num_tokens: int) -> bool:
+    if attn._qkvgbfa_sizes is not None and 0 < num_tokens <= attn._qkvgbfa_bs_limit:
         return False
-    if getattr(self_attn, "_bfa_w", None) is not None:
+    if attn._bfa_w is not None:
         return True
-    # Non-full-rank KDA folds beta into fused_qkvbfg_a_proj. MLA has neither
-    # projection. Only the full-rank split path calls these on hidden_states.
-    if not getattr(self_attn, "use_full_rank_gate", False):
+    if not attn.use_full_rank_gate:
         return False
-    for name in ("b_proj", "f_a_proj"):
-        module = getattr(self_attn, name, None)
-        if module is None:
-            continue
-        if not _k3_split_linear_accepts_fp8_tuple(module):
-            return True
-    return False
+    # Quark sets weight_scale to None when N % 16 != 0 (b_proj is 12 at TP8).
+    return not (
+        _k3_split_linear_accepts_fp8_tuple(attn.b_proj)
+        and _k3_split_linear_accepts_fp8_tuple(attn.f_a_proj)
+    )
+
+
+def _k3_inproj_needs_bf16_hidden(self_attn: nn.Module, num_tokens: int) -> bool:
+    from sglang.srt.models.kimi_k3 import KimiK3DeltaAttention
+
+    if not isinstance(self_attn, KimiK3DeltaAttention):
+        return False
+    return _k3_kda_inproj_needs_bf16_hidden(self_attn, num_tokens)
 
 
 def _k3_should_fuse_inproj_quant(

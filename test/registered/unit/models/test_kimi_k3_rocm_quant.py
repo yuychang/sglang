@@ -16,6 +16,10 @@ from sglang.srt.layers.quantization.quark.schemes.quark_w4a4_mxfp4 import (
     QuarkW4A4MXFP4,
 )
 from sglang.srt.models.kimi_k3 import _is_unquantized_mergeable
+from sglang.srt.models.kimi_k3_rocm_fusion import (
+    _k3_inproj_needs_bf16_hidden,
+    _k3_kda_inproj_needs_bf16_hidden,
+)
 from sglang.srt.models.kimi_k3_rocm_quant import (
     _k3_channel_fp8_to_bf16,
     _k3_channel_fp8_to_tensor_fp8,
@@ -261,6 +265,89 @@ class TestDensifyQuarkSharedExperts(CustomTestCase):
             _k3_densify_quark_shared_experts(mlp)
 
         self.assertEqual(mlp.shared_experts.down_proj.weight.dtype, torch.uint8)
+
+
+def _bf16_linear():
+    return SimpleNamespace(
+        weight=torch.empty(32, 12, dtype=torch.bfloat16),
+        weight_scale=None,
+        scheme=SimpleNamespace(per_token=True, weight_qscheme="per_channel"),
+    )
+
+
+def _group128_linear():
+    return SimpleNamespace(
+        weight=torch.empty(128, 512, dtype=torch.float8_e4m3fn),
+        weight_scale=torch.empty(128, 4, dtype=torch.float32),
+    )
+
+
+class TestKdaInprojBf16Hidden(CustomTestCase):
+    """Fusion off leaves b_proj dequantized, and that linear rejects an
+    (fp8, scale) activation from the attention-residual producer."""
+
+    def test_dequantized_b_proj_keeps_bf16_hidden(self):
+        attn = SimpleNamespace(
+            _qkvgbfa_sizes=None,
+            _bfa_w=None,
+            use_full_rank_gate=True,
+            b_proj=_bf16_linear(),
+            f_a_proj=_group128_linear(),
+        )
+        self.assertTrue(_k3_kda_inproj_needs_bf16_hidden(attn, 8))
+
+    def test_split_above_the_token_cap_keeps_bf16_hidden(self):
+        attn = SimpleNamespace(
+            _qkvgbfa_sizes=[1, 2, 3],
+            _qkvgbfa_bs_limit=4,
+            _bfa_w=None,
+            use_full_rank_gate=True,
+            b_proj=_bf16_linear(),
+            f_a_proj=_group128_linear(),
+        )
+        self.assertTrue(_k3_kda_inproj_needs_bf16_hidden(attn, 8))
+
+    def test_merged_gemm_does_not_keep_bf16_hidden(self):
+        attn = SimpleNamespace(
+            _qkvgbfa_sizes=[1, 2, 3],
+            _qkvgbfa_bs_limit=64,
+            _bfa_w=None,
+            use_full_rank_gate=True,
+            b_proj=_bf16_linear(),
+            f_a_proj=_bf16_linear(),
+        )
+        self.assertFalse(_k3_kda_inproj_needs_bf16_hidden(attn, 8))
+
+    def test_bf16_tiny_gemm_keeps_hidden(self):
+        attn = SimpleNamespace(
+            _qkvgbfa_sizes=None,
+            _bfa_w=torch.empty(1),
+            use_full_rank_gate=True,
+        )
+        self.assertTrue(_k3_kda_inproj_needs_bf16_hidden(attn, 8))
+
+    def test_tuple_stays_when_both_split_linears_accept_it(self):
+        attn = SimpleNamespace(
+            _qkvgbfa_sizes=None,
+            _bfa_w=None,
+            use_full_rank_gate=True,
+            b_proj=_group128_linear(),
+            f_a_proj=_group128_linear(),
+        )
+        self.assertFalse(_k3_kda_inproj_needs_bf16_hidden(attn, 8))
+
+    def test_non_kda_attention_does_not_keep_bf16_hidden(self):
+        self.assertFalse(_k3_inproj_needs_bf16_hidden(torch.nn.Module(), 8))
+
+    def test_low_rank_kda_does_not_keep_bf16_hidden(self):
+        attn = SimpleNamespace(
+            _qkvgbfa_sizes=None,
+            _bfa_w=None,
+            use_full_rank_gate=False,
+            b_proj=_bf16_linear(),
+            f_a_proj=_bf16_linear(),
+        )
+        self.assertFalse(_k3_kda_inproj_needs_bf16_hidden(attn, 8))
 
 
 if __name__ == "__main__":
