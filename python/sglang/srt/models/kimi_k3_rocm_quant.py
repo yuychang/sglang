@@ -130,3 +130,27 @@ def _k3_merge_kda_inproj_fp8(self_attn: nn.Module) -> bool:
         self_attn.f_b_proj, self_attn.f_b_proj.weight.data
     ).contiguous()
     return True
+
+
+_FP8_ACTIVATION_DTYPES = (torch.float8_e4m3fn, torch.float8_e4m3fnuz)
+
+
+def _k3_linear_takes_fp8_tuple(linear: nn.Module) -> bool:
+    from sglang.srt.layers.quantization.quark.schemes import QuarkW8A8Fp8
+
+    if not isinstance(linear.scheme, QuarkW8A8Fp8):
+        return False
+    # Quark sets weight_scale to None when N % 16 != 0 (b_proj is 12 at TP8).
+    return (
+        linear.weight_scale is not None
+        and linear.weight.dtype in _FP8_ACTIVATION_DTYPES
+    )
+
+
+def k3_unfused_inproj_hidden(*, hidden_states, b_proj: nn.Module, f_a_proj: nn.Module):
+    if not isinstance(hidden_states, tuple):
+        return hidden_states
+    if _k3_linear_takes_fp8_tuple(b_proj) and _k3_linear_takes_fp8_tuple(f_a_proj):
+        return hidden_states
+    values, scale = hidden_states
+    return (values.to(torch.float32) * scale.reshape(-1, 1)).to(torch.bfloat16)

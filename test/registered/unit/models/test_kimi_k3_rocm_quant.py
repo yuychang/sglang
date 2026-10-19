@@ -18,6 +18,7 @@ from sglang.srt.models.kimi_k3_rocm_quant import (
     _k3_channel_fp8_to_bf16,
     _k3_channel_fp8_to_tensor_fp8,
     _k3_merge_kda_inproj_fp8,
+    k3_unfused_inproj_hidden,
 )
 from sglang.test.test_utils import CustomTestCase
 
@@ -210,6 +211,61 @@ class TestMergeKdaInprojFp8(CustomTestCase):
     def test_env_disables_merge(self, _):
         with envs.SGLANG_ROCM_K3_FUSE_KDA_INPROJ.override(False):
             self.assertFalse(_k3_merge_kda_inproj_fp8(_kda_attn()))
+
+
+class TestUnfusedInprojHidden(CustomTestCase):
+    """With in-proj fusion off, Quark dequantizes 12-wide b_proj and apply_weights
+    rejects an (fp8, scale) activation."""
+
+    def _scheme(self):
+        scheme = QuarkW8A8Fp8(
+            {"qscheme": "per_channel"},
+            {"qscheme": "per_channel", "is_dynamic": True},
+        )
+        scheme.out_dtype = torch.bfloat16
+        return scheme
+
+    def _fp8_linear(self, scheme, out_features: int):
+        weight, scale, _ = _per_channel_fp8(out_features, 16)
+        return SimpleNamespace(
+            scheme=scheme,
+            weight=weight,
+            weight_scale=scale.squeeze(1),
+        )
+
+    def test_dequantized_b_proj_receives_bf16(self):
+        scheme = self._scheme()
+        b_proj = SimpleNamespace(
+            scheme=scheme,
+            weight=torch.randn(16, 12, dtype=torch.bfloat16),
+            weight_scale=None,
+            input_scale=None,
+        )
+        values = torch.ones(4, 16, dtype=torch.float8_e4m3fn)
+        scale = torch.full((4, 1), 0.5)
+        with self.assertRaises(AssertionError):
+            scheme.apply_weights(b_proj, (values, scale))
+
+        hidden = k3_unfused_inproj_hidden(
+            hidden_states=(values, scale),
+            b_proj=b_proj,
+            f_a_proj=self._fp8_linear(scheme, 8),
+        )
+
+        self.assertEqual(hidden.dtype, torch.bfloat16)
+        scheme.apply_weights(b_proj, hidden)
+
+    def test_keeps_the_tuple_when_both_linears_accept_it(self):
+        scheme = self._scheme()
+        values = torch.ones(4, 16, dtype=torch.float8_e4m3fn)
+        scale = torch.ones(4, 1)
+        hidden = (values, scale)
+        out = k3_unfused_inproj_hidden(
+            hidden_states=hidden,
+            b_proj=self._fp8_linear(scheme, 16),
+            f_a_proj=self._fp8_linear(scheme, 8),
+        )
+        self.assertIs(out, hidden)
 
 
 if __name__ == "__main__":

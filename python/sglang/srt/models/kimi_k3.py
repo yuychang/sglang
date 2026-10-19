@@ -2073,6 +2073,15 @@ class KimiK3DeltaAttention(nn.Module):
                 )
                 beta = bfa[..., n_fa : n_fa + n_b]
             else:
+                from sglang.srt.models.kimi_k3_rocm_quant import (
+                    k3_unfused_inproj_hidden,
+                )
+
+                hidden_states = k3_unfused_inproj_hidden(
+                    hidden_states=hidden_states,
+                    b_proj=self.b_proj,
+                    f_a_proj=self.f_a_proj,
+                )
                 fused_states, _ = self.fused_qkvg_proj(hidden_states)
                 qkv, g_proj_states = torch.split(fused_states, self.split_sizes, dim=-1)
                 beta = self.b_proj(hidden_states)[0]
