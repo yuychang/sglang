@@ -3362,11 +3362,11 @@ class KimiK3LinearForCausalLM(nn.Module):
                     # channel axis it indexes, i.e. before the head split.
                     if envs.SGLANG_OPT_HIP_K3_MLA_ABSORB_FP8.get():
                         kv_b_weight, kv_b_tensor_scale = _k3_channel_fp8_to_tensor_fp8(
-                            self_attn.kv_b_proj, kv_b_weight
+                            module=self_attn.kv_b_proj, weight=kv_b_weight
                         )
                     else:
                         kv_b_weight = _k3_channel_fp8_to_bf16(
-                            self_attn.kv_b_proj, kv_b_weight
+                            module=self_attn.kv_b_proj, weight=kv_b_weight
                         )
                         scale_folded_into_weight = True
             w_kc, w_vc = kv_b_weight.unflatten(

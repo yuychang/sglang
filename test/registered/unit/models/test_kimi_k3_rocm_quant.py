@@ -79,7 +79,7 @@ class TestChannelFp8ToTensorFp8(CustomTestCase):
         weight, scale, _ = _per_channel_fp8(out_features=8, in_features=16)
         module = SimpleNamespace(weight_scale=scale.squeeze(1))
 
-        q, tensor_scale = _k3_channel_fp8_to_tensor_fp8(module, weight)
+        q, tensor_scale = _k3_channel_fp8_to_tensor_fp8(module=module, weight=weight)
 
         self.assertEqual(q.dtype, weight.dtype)
         self.assertEqual(q.shape, weight.shape)
@@ -97,10 +97,10 @@ class TestChannelFp8ToTensorFp8(CustomTestCase):
         weight, scale, _ = _per_channel_fp8(out_features=8, in_features=16)
 
         flat = _k3_channel_fp8_to_tensor_fp8(
-            SimpleNamespace(weight_scale=scale.squeeze(1)), weight
+            module=SimpleNamespace(weight_scale=scale.squeeze(1)), weight=weight
         )
         column = _k3_channel_fp8_to_tensor_fp8(
-            SimpleNamespace(weight_scale=scale.clone()), weight
+            module=SimpleNamespace(weight_scale=scale.clone()), weight=weight
         )
 
         torch.testing.assert_close(flat[0].float(), column[0].float())

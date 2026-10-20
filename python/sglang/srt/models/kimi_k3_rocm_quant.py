@@ -50,7 +50,7 @@ def _k3_channel_fp8_to_bf16(module: nn.Module, weight: torch.Tensor) -> torch.Te
 
 
 def _k3_channel_fp8_to_tensor_fp8(
-    module: nn.Module, weight: torch.Tensor
+    *, module: nn.Module, weight: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """(per-tensor FP8, scalar scale) for the AITER absorb BMMs; must run before
     the kv_b head split, while dim 0 is still the channel axis."""
@@ -127,7 +127,7 @@ def _k3_merge_kda_inproj_fp8(self_attn: nn.Module) -> bool:
     # f_b is [heads * head_dim, head_dim]; BF16 lets it use the tiny GEMM and
     # the fused KDA decode.
     self_attn._bfa_f_b_w = _k3_channel_fp8_to_bf16(
-        self_attn.f_b_proj, self_attn.f_b_proj.weight.data
+        module=self_attn.f_b_proj, weight=self_attn.f_b_proj.weight.data
     ).contiguous()
     return True
 
@@ -147,7 +147,12 @@ def _k3_linear_takes_fp8_tuple(linear: nn.Module) -> bool:
     )
 
 
-def k3_unfused_inproj_hidden(*, hidden_states, b_proj: nn.Module, f_a_proj: nn.Module):
+def k3_unfused_inproj_hidden(
+    *,
+    hidden_states: torch.Tensor | tuple[torch.Tensor, torch.Tensor],
+    b_proj: nn.Module,
+    f_a_proj: nn.Module,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     if not isinstance(hidden_states, tuple):
         return hidden_states
     if _k3_linear_takes_fp8_tuple(b_proj) and _k3_linear_takes_fp8_tuple(f_a_proj):

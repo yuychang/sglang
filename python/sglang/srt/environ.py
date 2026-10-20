@@ -986,6 +986,10 @@ class Envs:
     # Requantize Quark per-channel FP8 kv_b to per-tensor FP8 so the MLA absorb
     # BMMs run the AITER a8w8 kernel (~2.3% weight error vs dequant to bf16).
     SGLANG_OPT_HIP_K3_MLA_ABSORB_FP8 = EnvBool(True)
+    # Kimi-K3 FlyDSL KDA operators: auto (vendored, then AITER) | sglang | aiter.
+    SGLANG_OPT_HIP_K3_FLYDSL_SOURCE = EnvStrWithAlias(
+        "auto", deprecated_name="SGLANG_K3_FLYDSL_SOURCE"
+    )
     # ROCm decode attention kernel: auto (aiter_sparse on gfx950, tilelang elsewhere) |
     # aiter_sparse | tilelang | triton | torch | comparison | unified_kv_triton
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("auto")
