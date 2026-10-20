@@ -997,6 +997,11 @@ class Envs:
     # Fuse the Kimi-K3 gfx950 MLA decode identity-RoPE Q, Q concat and latent KV
     # cache write into one AITER launch; fails closed to the split chain.
     SGLANG_OPT_HIP_K3_MLA_Q_CACHE_FUSION = EnvBool(False)
+    # Kimi-K3 AITER path: keep the checkpoint's MoE intermediate width instead of
+    # padding it for the generic AITER kernels. Needs SGLANG_USE_AITER.
+    SGLANG_OPT_HIP_K3_AITER = EnvBoolWithAlias(
+        False, deprecated_name="SGLANG_AITER_K3_OPT"
+    )
     # ROCm decode attention kernel: auto (aiter_sparse on gfx950, tilelang elsewhere) |
     # aiter_sparse | tilelang | triton | torch | comparison | unified_kv_triton
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("auto")
