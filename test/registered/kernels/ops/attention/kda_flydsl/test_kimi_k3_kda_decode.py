@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import importlib.util
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import pytest
 import torch
@@ -171,6 +171,16 @@ def _copy_inputs(inputs: Inputs) -> Inputs:
 
 
 def _reference(inputs: Inputs) -> torch.Tensor:
+    if inputs.state.dtype != torch.float32:
+        # The kernel's rounding boundary for a narrow state: widen on load,
+        # update in FP32, round to nearest-even on store.
+        stored = inputs.state
+        inputs.state = stored.float()
+        output = _reference(inputs)
+        stored.copy_(inputs.state)
+        inputs.state = stored
+        return output
+
     batch = inputs.x.shape[0]
     output = torch.zeros(
         (1, batch, _HEADS, _DIM),
@@ -524,6 +534,146 @@ def test_aiter_fused_kda_decode_matches_reference():
     assert _relative_rmse(reference, out) < 1e-3
     assert _relative_rmse(reference_inputs.state, actual_inputs.state) < 1e-3
     assert torch.equal(reference_inputs.conv_state, actual_inputs.conv_state)
+
+
+def _bf16_dense_state(inputs: Inputs) -> None:
+    # SGLang's --mamba-ssm-dtype bfloat16 pool: [cache, 12, 128, 128], dense.
+    inputs.state = inputs.state.to(torch.bfloat16).contiguous()
+    assert inputs.state.stride() == (_HEADS * _DIM * _DIM, _DIM * _DIM, _DIM, 1)
+
+
+def _adapter_covers(adapter, f_a, f_b_weight, inputs: Inputs) -> bool:
+    return adapter.covered(
+        f_a,
+        f_b_weight,
+        inputs.x,
+        inputs.raw_beta,
+        inputs.conv_state,
+        inputs.state,
+        inputs.state_indices,
+        inputs.output_gate,
+        inputs.norm_weight,
+    )
+
+
+@pytest.mark.parametrize("batch", [1, 2, 8])
+def test_aiter_fused_kda_decode_bf16_state_matches_reference(batch: int) -> None:
+    """A BF16 recurrent state loads as BF16, updates in FP32, stores as BF16."""
+    from sglang.kernels.ops.attention import kda_fused_decode_aiter_hip
+    from sglang.srt.environ import envs
+
+    f_a, f_b_weight, seed = _make_fb_inputs(batch)
+    _bf16_dense_state(seed)
+    reference_inputs = _copy_inputs(seed)
+    actual_inputs = _copy_inputs(seed)
+    with (
+        envs.SGLANG_OPT_HIP_K3_KDA_FUSED_BACKEND.override("aiter"),
+        envs.SGLANG_OPT_HIP_K3_FLYDSL_SOURCE.override("aiter"),
+    ):
+        assert _adapter_covers(
+            kda_fused_decode_aiter_hip, f_a, f_b_weight, actual_inputs
+        )
+        out = kda_fused_decode_aiter_hip.run(
+            f_a=f_a,
+            f_b_weight=f_b_weight,
+            mixed_qkv=actual_inputs.x,
+            conv_weight=actual_inputs.conv_weight,
+            conv_state=actual_inputs.conv_state,
+            raw_beta=actual_inputs.raw_beta,
+            A_log=actual_inputs.A_log,
+            dt_bias=actual_inputs.dt_bias,
+            lower_bound=_LOWER_BOUND,
+            state=actual_inputs.state,
+            state_indices=actual_inputs.state_indices,
+            output_gate=actual_inputs.output_gate,
+            norm_weight=actual_inputs.norm_weight,
+            norm_eps=_NORM_EPS,
+        )
+    torch.cuda.synchronize()
+    reference = _reference(reference_inputs)
+    assert actual_inputs.state.dtype == torch.bfloat16
+    assert _relative_rmse(reference, out) < 1e-3
+    assert _relative_rmse(reference_inputs.state, actual_inputs.state) < 1e-3
+    # Only elements whose FP32 update sits on a BF16 rounding tie may differ;
+    # a truncating store or a misread load would flip far more bits.
+    reference_bits = reference_inputs.state.view(torch.int16)
+    actual_bits = actual_inputs.state.view(torch.int16)
+    assert (reference_bits != actual_bits).float().mean().item() <= 1e-3
+    assert torch.equal(reference_inputs.conv_state, actual_inputs.conv_state)
+
+
+def test_aiter_fused_kda_decode_covers_c48_bf16_state_layout() -> None:
+    """The c48 rejection: state (673, 12, 128, 128) bf16, conv (673, 4608, 3)."""
+    from sglang.kernels.ops.attention import kda_fused_decode_aiter_hip
+    from sglang.srt.environ import envs
+
+    cache = 673
+    f_a, f_b_weight, inputs = _make_fb_inputs(batch=2)
+    inputs.state = torch.empty(
+        (cache, _HEADS, _DIM, _DIM), dtype=torch.bfloat16, device=_DEVICE
+    )
+    assert inputs.state.stride() == (196608, 16384, 128, 1)
+    # SGLang's [cache, 3, 4608] conv cache viewed through transpose(-1, -2).
+    inputs.conv_state = torch.empty(
+        (cache, _CONV_WIDTH - 1, _CHANNELS), dtype=torch.bfloat16, device=_DEVICE
+    ).transpose(-1, -2)
+    assert inputs.conv_state.stride() == (13824, 1, 4608)
+    with (
+        envs.SGLANG_OPT_HIP_K3_KDA_FUSED_BACKEND.override("aiter"),
+        envs.SGLANG_OPT_HIP_K3_FLYDSL_SOURCE.override("aiter"),
+    ):
+        assert _adapter_covers(kda_fused_decode_aiter_hip, f_a, f_b_weight, inputs)
+        fp16_inputs = replace(inputs, state=inputs.state.to(torch.float16))
+        assert not _adapter_covers(
+            kda_fused_decode_aiter_hip, f_a, f_b_weight, fp16_inputs
+        )
+
+
+def test_sglang_source_does_not_cover_bf16_state() -> None:
+    """The vendored kernel is FP32-state only, so dispatch must not route BF16 to it."""
+    from sglang.kernels.ops.attention import kda_fused_decode_aiter_hip
+    from sglang.srt.environ import envs
+
+    f_a, f_b_weight, inputs = _make_fb_inputs(batch=2)
+    with (
+        envs.SGLANG_OPT_HIP_K3_KDA_FUSED_BACKEND.override("aiter"),
+        envs.SGLANG_OPT_HIP_K3_FLYDSL_SOURCE.override("sglang"),
+    ):
+        assert _adapter_covers(kda_fused_decode_aiter_hip, f_a, f_b_weight, inputs)
+        _bf16_dense_state(inputs)
+        assert not _adapter_covers(kda_fused_decode_aiter_hip, f_a, f_b_weight, inputs)
+        with pytest.raises(ValueError, match="`state` must have dtype"):
+            _run_with_f_b(f_a, f_b_weight, inputs)
+
+
+def test_aiter_fused_kda_warmup_builds_every_state_dtype(monkeypatch) -> None:
+    from sglang.kernels.ops.attention import kda_fused_decode_aiter_hip
+    from sglang.srt.environ import envs
+
+    f_a, f_b_weight, inputs = _make_fb_inputs(batch=1)
+    warmed_dtypes = []
+    real_run = kda_fused_decode_aiter_hip.run
+
+    def recording_run(**kwargs):
+        warmed_dtypes.append(kwargs["state"].dtype)
+        return real_run(**kwargs)
+
+    monkeypatch.setattr(kda_fused_decode_aiter_hip, "run", recording_run)
+    monkeypatch.setattr(kda_fused_decode_aiter_hip, "_WARMED", set())
+    with (
+        envs.SGLANG_OPT_HIP_K3_KDA_FUSED_BACKEND.override("aiter"),
+        envs.SGLANG_OPT_HIP_K3_FLYDSL_SOURCE.override("aiter"),
+    ):
+        kda_fused_decode_aiter_hip.warmup(
+            f_b_weight=f_b_weight,
+            conv_weight=inputs.conv_weight,
+            A_log=inputs.A_log,
+            dt_bias=inputs.dt_bias,
+            lower_bound=_LOWER_BOUND,
+            norm_weight=inputs.norm_weight,
+            norm_eps=_NORM_EPS,
+        )
+    assert warmed_dtypes == [torch.float32, torch.bfloat16]
 
 
 if __name__ == "__main__":
