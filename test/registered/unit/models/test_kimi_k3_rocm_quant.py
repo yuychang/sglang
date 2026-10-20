@@ -209,7 +209,7 @@ class TestMergeKdaInprojFp8(CustomTestCase):
         self.assertFalse(_k3_merge_kda_inproj_fp8(_kda_attn(bf16_b_proj=True)))
 
     def test_env_disables_merge(self, _):
-        with envs.SGLANG_ROCM_K3_FUSE_KDA_INPROJ.override(False):
+        with envs.SGLANG_OPT_HIP_K3_FUSE_KDA_INPROJ.override(False):
             self.assertFalse(_k3_merge_kda_inproj_fp8(_kda_attn()))
 
 
