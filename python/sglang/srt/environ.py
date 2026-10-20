@@ -976,8 +976,12 @@ class Envs:
     # Fold the KDA [f_a|b] tail into the wide [q,k,v,g] projection so the whole
     # in-proj is one GEMM. Decode is bandwidth bound there, so the 144 extra
     # output columns ride along nearly free.
-    SGLANG_ROCM_K3_FUSE_KDA_INPROJ = EnvBool(True)
-    SGLANG_ROCM_K3_FUSE_KDA_INPROJ_MAX_TOKENS = EnvInt(256)
+    SGLANG_OPT_HIP_K3_FUSE_KDA_INPROJ = EnvBoolWithAlias(
+        True, deprecated_name="SGLANG_ROCM_K3_FUSE_KDA_INPROJ"
+    )
+    SGLANG_OPT_HIP_K3_FUSE_KDA_INPROJ_MAX_TOKENS = EnvIntWithAlias(
+        256, deprecated_name="SGLANG_ROCM_K3_FUSE_KDA_INPROJ_MAX_TOKENS"
+    )
     # Fused AITER KDA decode. Empty keeps the unfused chain; "aiter" selects
     # the gfx950 FlyDSL kernel.
     SGLANG_OPT_HIP_K3_KDA_FUSED_BACKEND = EnvStrWithAlias(

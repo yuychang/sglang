@@ -97,7 +97,9 @@ def _k3_merge_kda_inproj_fp8(self_attn: nn.Module) -> bool:
     """Merge Quark FP8 [q,k,v,g | f_a | b] into one per-channel FP8 linear for
     decode up to the token limit; the original linears serve larger batches."""
     # Runs before process_weights_after_loading: weights are [out, in], scales [out].
-    if not (envs.SGLANG_ROCM_K3_FUSE_KDA_INPROJ.get() and self_attn.use_full_rank_gate):
+    if not (
+        envs.SGLANG_OPT_HIP_K3_FUSE_KDA_INPROJ.get() and self_attn.use_full_rank_gate
+    ):
         return False
     mods = (self_attn.fused_qkvg_proj, self_attn.f_a_proj, self_attn.b_proj)
     if not all(_k3_is_raw_quark_channel_fp8(m) for m in (*mods, self_attn.f_b_proj)):
