@@ -982,12 +982,12 @@ class DeepseekMLARocmForwardMixin:
                 )
             ):
                 fused = self._try_fused_mla_q_cache(
-                    q_nope_out,
-                    q_pe,
-                    k_nope,
-                    k_pe,
-                    positions,
-                    forward_batch.out_cache_loc,
+                    q_nope_out=q_nope_out,
+                    q_pe=q_pe,
+                    k_nope=k_nope,
+                    k_pe=k_pe,
+                    positions=positions,
+                    out_cache_loc=forward_batch.out_cache_loc,
                 )
                 if fused is not None:
                     q, k = fused
@@ -1132,6 +1132,7 @@ class DeepseekMLARocmForwardMixin:
 
     def _try_fused_mla_q_cache(
         self: DeepseekV2AttentionMLA,
+        *,
         q_nope_out: torch.Tensor,
         q_pe: torch.Tensor,
         k_nope: torch.Tensor,

@@ -40,6 +40,7 @@ def available() -> bool:
 
 
 def covered(
+    *,
     q_nope: torch.Tensor,
     q_pe: torch.Tensor,
     k_nope: torch.Tensor,

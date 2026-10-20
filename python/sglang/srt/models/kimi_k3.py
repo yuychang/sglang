@@ -2329,6 +2329,7 @@ class KimiK3MLAAttention(DeepseekV2AttentionMLA):
 
     def _try_fused_mla_q_cache(
         self,
+        *,
         q_nope_out: torch.Tensor,
         q_pe: torch.Tensor,
         k_nope: torch.Tensor,

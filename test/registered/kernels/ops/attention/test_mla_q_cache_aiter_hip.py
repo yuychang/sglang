@@ -47,7 +47,8 @@ def _inputs(tokens: int, cache_dtype=torch.bfloat16, output_dtype=None):
         "k_pe": k_pe,
         "kv_cache": torch.zeros(tokens + 4, 1, 576, device="cuda", dtype=cache_dtype),
         "slot_mapping": torch.arange(tokens, device="cuda", dtype=torch.int64),
-        "positions": torch.arange(tokens, device="cuda", dtype=torch.int64),
+        # The cos/sin tables have one identity row, so every position must be 0.
+        "positions": torch.zeros(tokens, device="cuda", dtype=torch.int64),
         "k_scale": torch.ones(1, device="cuda", dtype=torch.float32),
         "q_scale": torch.ones(1, device="cuda", dtype=torch.float32),
         "cos_cache": torch.ones(1, 32, device="cuda", dtype=torch.bfloat16),
@@ -114,7 +115,6 @@ def test_fused_mla_q_cache_uses_each_token_slot_across_page_boundaries():
         device="cuda",
     )
     values["slot_mapping"] = slots
-    values["positions"] = torch.arange(100, 108, dtype=torch.int64, device="cuda")
     values["kv_cache"] = torch.zeros(304, 1, 576, dtype=torch.bfloat16, device="cuda")
     expected_q, expected_k = _reference(values)
 

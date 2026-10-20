@@ -24,7 +24,7 @@ import torch
 from sglang.srt.environ import envs
 
 
-def _bf16_q_decode(self, heads: int, kv_cache: torch.Tensor) -> bool:
+def _bf16_q_decode(self, *, heads: int, kv_cache: torch.Tensor) -> bool:
     # Gluon and Triton decode take the 12-head BF16 Q as written. ASM pads Q
     # to 16 heads itself, so it keeps the split chain.
     if self.current_attention_backend in ("triton", "triton_mla"):
@@ -43,6 +43,7 @@ def _bf16_q_decode(self, heads: int, kv_cache: torch.Tensor) -> bool:
 
 def _mla_q_cache_shapes_match(
     self,
+    *,
     q_nope_out: torch.Tensor,
     q_pe: torch.Tensor,
     k_nope: torch.Tensor,
@@ -64,6 +65,7 @@ def _mla_q_cache_shapes_match(
 
 def try_fused_mla_q_cache(
     self,
+    *,
     q_nope_out: torch.Tensor,
     q_pe: torch.Tensor,
     k_nope: torch.Tensor,
@@ -87,18 +89,18 @@ def try_fused_mla_q_cache(
     cos_cache = self._k3_identity_rope_cos
     sin_cache = self._k3_identity_rope_sin
 
-    if not _bf16_q_decode(self, heads, kv_cache):
+    if not _bf16_q_decode(self, heads=heads, kv_cache=kv_cache):
         return None
     if not _mla_q_cache_shapes_match(
         self,
-        q_nope_out,
-        q_pe,
-        k_nope,
-        k_pe,
-        positions,
-        out_cache_loc,
-        tokens,
-        heads,
+        q_nope_out=q_nope_out,
+        q_pe=q_pe,
+        k_nope=k_nope,
+        k_pe=k_pe,
+        positions=positions,
+        out_cache_loc=out_cache_loc,
+        tokens=tokens,
+        heads=heads,
     ):
         return None
     q_out = _q_out_buffer(
@@ -115,17 +117,17 @@ def try_fused_mla_q_cache(
     # clamps the position, so all-zero positions keep the reads on row 0.
     zero_positions = _zero_positions(self, tokens=tokens, device=positions.device)
     if mla_q_cache_aiter_hip.covered(
-        q_nope_out,
-        q_pe,
-        k_nope,
-        k_pe,
-        kv_cache,
-        out_cache_loc,
-        zero_positions,
-        scale,
-        cos_cache,
-        sin_cache,
-        q_out,
+        q_nope=q_nope_out,
+        q_pe=q_pe,
+        k_nope=k_nope,
+        k_pe=k_pe,
+        kv_cache=kv_cache,
+        slot_mapping=out_cache_loc,
+        positions=zero_positions,
+        k_scale=scale,
+        cos_cache=cos_cache,
+        sin_cache=sin_cache,
+        out=q_out,
         q_scale=self._k3_mla_q_cache_scale,
     ):
         q = mla_q_cache_aiter_hip.run(
@@ -221,8 +223,9 @@ def init_mla_rocm_state(self) -> None:
     # One-row identity RoPE tables: K3 MLA applies no RoPE, so cos=1 and sin=0.
     rope_cos = rope_sin = q_cache_scale = None
     if self._k3_mla_q_cache_fusion:
-        rope_cos = torch.ones((1, 32), dtype=torch.bfloat16)
-        rope_sin = torch.zeros((1, 32), dtype=torch.bfloat16)
+        half_rope_dim = self.qk_rope_head_dim // 2
+        rope_cos = torch.ones((1, half_rope_dim), dtype=torch.bfloat16)
+        rope_sin = torch.zeros((1, half_rope_dim), dtype=torch.bfloat16)
         q_cache_scale = torch.ones((1,), dtype=torch.float32)
     self.register_buffer("_k3_identity_rope_cos", rope_cos, persistent=False)
     self.register_buffer("_k3_identity_rope_sin", rope_sin, persistent=False)
