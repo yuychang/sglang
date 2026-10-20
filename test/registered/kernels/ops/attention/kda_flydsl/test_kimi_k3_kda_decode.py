@@ -454,6 +454,78 @@ def test_fused_kda_backend_is_opt_in():
         assert kda_fused_decode_aiter_hip.enabled()
 
 
+def test_aiter_source_binds_pr6026_kda_decode():
+    """SGLANG_OPT_HIP_K3_FLYDSL_SOURCE=aiter must call ROCm/aiter#6026."""
+    import aiter.ops.flydsl.linear_attention_kernels as aiter_kda
+
+    from sglang.kernels.ops.attention import kda_fused_decode_aiter_hip
+    from sglang.srt.environ import envs
+
+    with envs.SGLANG_OPT_HIP_K3_FLYDSL_SOURCE.override("aiter"):
+        run, supported = kda_fused_decode_aiter_hip._ops()
+    assert run is aiter_kda.flydsl_kda_decode_with_f_b
+    assert supported is aiter_kda.is_flydsl_kda_decode_supported
+
+
+def test_sglang_source_binds_vendored_kda_decode():
+    from sglang.kernels.ops.attention import kda_fused_decode_aiter_hip
+    from sglang.srt.environ import envs
+
+    with envs.SGLANG_OPT_HIP_K3_FLYDSL_SOURCE.override("sglang"):
+        run, supported = kda_fused_decode_aiter_hip._ops()
+    assert run is flydsl_kimi_k3_kda_decode_with_f_b
+    assert supported is is_flydsl_kimi_k3_kda_decode_supported
+
+
+def test_aiter_fused_kda_decode_matches_reference():
+    """The adapter must call ROCm/aiter#6026 and match the unfused reference."""
+    from sglang.kernels.ops.attention import kda_fused_decode_aiter_hip
+    from sglang.srt.environ import envs
+
+    f_a, f_b_weight, seed = _make_fb_inputs(batch=2)
+    reference_inputs = _copy_inputs(seed)
+    actual_inputs = _copy_inputs(seed)
+    with (
+        envs.SGLANG_OPT_HIP_K3_KDA_FUSED_BACKEND.override("aiter"),
+        envs.SGLANG_OPT_HIP_K3_FLYDSL_SOURCE.override("aiter"),
+    ):
+        assert kda_fused_decode_aiter_hip.available(f_a.device)
+        assert kda_fused_decode_aiter_hip.covered(
+            f_a,
+            f_b_weight,
+            actual_inputs.x,
+            actual_inputs.raw_beta,
+            actual_inputs.conv_state,
+            actual_inputs.state,
+            actual_inputs.state_indices,
+            actual_inputs.output_gate,
+            actual_inputs.norm_weight,
+        )
+        out = kda_fused_decode_aiter_hip.run(
+            f_a=f_a,
+            f_b_weight=f_b_weight,
+            mixed_qkv=actual_inputs.x,
+            conv_weight=actual_inputs.conv_weight,
+            conv_state=actual_inputs.conv_state,
+            raw_beta=actual_inputs.raw_beta,
+            A_log=actual_inputs.A_log,
+            dt_bias=actual_inputs.dt_bias,
+            lower_bound=_LOWER_BOUND,
+            state=actual_inputs.state,
+            state_indices=actual_inputs.state_indices,
+            output_gate=actual_inputs.output_gate,
+            norm_weight=actual_inputs.norm_weight,
+            norm_eps=_NORM_EPS,
+        )
+    torch.cuda.synchronize()
+    reference = _reference(reference_inputs)
+    assert out.shape == reference.shape
+    assert out.dtype == torch.bfloat16
+    assert _relative_rmse(reference, out) < 1e-3
+    assert _relative_rmse(reference_inputs.state, actual_inputs.state) < 1e-3
+    assert torch.equal(reference_inputs.conv_state, actual_inputs.conv_state)
+
+
 if __name__ == "__main__":
     import sys
 
