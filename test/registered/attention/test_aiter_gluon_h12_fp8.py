@@ -445,5 +445,78 @@ class TestMlaDcpAsmDecode(CustomTestCase):
         self.assertFalse(be._use_mla_decode_persist_metadata())
 
 
+class TestFp8QAsmSelection(CustomTestCase):
+    """The fp8-Q ASM kernel covers a verify window of at most 4 tokens on gfx950;
+    a wider window, a Gluon backend, DCP or the switch left off keeps the
+    previous routing."""
+
+    def _selected(self, **overrides):
+        from sglang.srt.layers.attention.aiter_backend import (
+            _fp8_q_asm_mla_selected,
+        )
+
+        kwargs = dict(
+            enabled=True,
+            decode_backend="asm",
+            verify_backend="asm",
+            dcp_world_size=1,
+            verify_qlen=4,
+            gfx95=True,
+        )
+        kwargs.update(overrides)
+        return _fp8_q_asm_mla_selected(**kwargs)
+
+    def test_off_by_default(self):
+        self.assertFalse(envs.SGLANG_OPT_HIP_MLA_FP8_Q_ASM.get())
+        self.assertFalse(self._selected(enabled=False))
+
+    def test_verify_window_bound(self):
+        self.assertTrue(self._selected(verify_qlen=4))
+        self.assertFalse(self._selected(verify_qlen=5))
+
+    def test_requires_asm_for_decode_and_verify(self):
+        self.assertFalse(self._selected(decode_backend="gluon"))
+        self.assertFalse(self._selected(verify_backend="gluon"))
+
+    def test_dcp_keeps_its_own_route(self):
+        self.assertFalse(self._selected(dcp_world_size=2))
+
+
+class TestFp8QAsmQueryCast(CustomTestCase):
+    """The fp8-Q kernel reads FP8 Q, so a BF16 Q inside its window is cast with
+    a unit scale instead of reaching the kernel as BF16."""
+
+    def test_bf16_q_is_cast_inside_the_window(self):
+        from sglang.srt.layers.attention import aiter_backend
+        from sglang.srt.layers.attention.aiter_backend import AiterAttnBackend
+
+        be = AiterAttnBackend.__new__(AiterAttnBackend)
+        be.num_head = 12
+        be.num_head_padded = 16
+        be.mla_kernel_num_head_padded = 16
+        be.head_pad_mode = "zero"
+        be.kv_cache_dtype = fp8_dtype
+        be.dcp_world_size = 1
+        be.input_dtype = torch.bfloat16
+        be.use_mla_fp8_q_asm = True
+        layer = mock.Mock(tp_q_head_num=12, v_head_dim=512)
+        q = torch.randn(2, 12, 576, dtype=torch.bfloat16)
+        decode = mock.Mock()
+
+        with (
+            mock.patch.object(aiter_backend, "mla_decode_fwd", decode, create=True),
+            mock.patch.object(aiter_backend, "is_gfx95_supported", return_value=True),
+            mock.patch.object(aiter_backend, "_use_mla_ps_kernel", False),
+        ):
+            be._mla_decode_fwd_with_head_pad(
+                q, torch.zeros(8, 1, 1, 576, dtype=fp8_dtype), layer, max_seqlen_q=1
+            )
+
+        q_in = decode.call_args.args[0]
+        self.assertEqual(q_in.dtype, fp8_dtype)
+        self.assertEqual(q_in.shape, (2, 16, 576))
+        self.assertEqual(decode.call_args.kwargs["q_scale"].item(), 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()
