@@ -990,6 +990,9 @@ class Envs:
     SGLANG_OPT_HIP_K3_FLYDSL_SOURCE = EnvStrWithAlias(
         "auto", deprecated_name="SGLANG_K3_FLYDSL_SOURCE"
     )
+    # Fuse the Kimi-K3 gfx950 MLA decode identity-RoPE Q, Q concat and latent KV
+    # cache write into one AITER launch; fails closed to the split chain.
+    SGLANG_OPT_HIP_K3_MLA_Q_CACHE_FUSION = EnvBool(False)
     # ROCm decode attention kernel: auto (aiter_sparse on gfx950, tilelang elsewhere) |
     # aiter_sparse | tilelang | triton | torch | comparison | unified_kv_triton
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("auto")
