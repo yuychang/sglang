@@ -5,10 +5,13 @@ import logging
 from sglang.srt.environ import envs
 from sglang.srt.managers.prefill_delayer import PrefillDelayerSinglePassExecutor
 from sglang.srt.runtime_context import (
+    get_context,
     get_disagg,
     get_exec,
     get_memory,
+    get_parallel,
     get_schedule,
+    mamba_cache_chunk_size,
 )
 from sglang.srt.utils import get_bool_env_var, is_gfx95_supported, is_hip
 
@@ -580,6 +583,18 @@ class _PrefillAdmission:
     replay_len: int
 
 
+def mamba_prefill_chunk_grid() -> int:
+    ctx = get_context()
+    if not (
+        ctx.is_config_namespace_published("exec")
+        and ctx.is_config_namespace_published("parallel")
+        and get_exec().mamba.enable_mamba_extra_buffer
+        and get_parallel().dcp_enabled
+    ):
+        return 1
+    return mamba_cache_chunk_size()
+
+
 class PrefillAdder:
     def __init__(
         self,
@@ -601,6 +616,7 @@ class PrefillAdder:
         prefill_tile_block_m: int = 64,
     ):
         self.page_size = page_size
+        self.mamba_chunk_grid = mamba_prefill_chunk_grid()
         self.prefill_tile_block_m = prefill_tile_block_m
         self.tree_cache = tree_cache
         self.token_to_kv_pool_allocator = token_to_kv_pool_allocator
@@ -830,6 +846,11 @@ class PrefillAdder:
 
     def ceil_paged_tokens(self, tokens: int) -> int:
         return -(-tokens // self.page_size) * self.page_size
+
+    def floor_chunked_tokens(self, trunc_len: int, remaining: int) -> int:
+        if self.mamba_chunk_grid <= 1 or trunc_len >= remaining:
+            return trunc_len
+        return trunc_len // self.mamba_chunk_grid * self.mamba_chunk_grid or trunc_len
 
     def budget_state(self):
         no_token = not self.memory_budget.has_capacity()
@@ -1139,7 +1160,9 @@ class PrefillAdder:
         if _rem_tokens is None:
             return req
         truncated = cand_extend_input_len > _rem_tokens
-        new_len = min(cand_extend_input_len, _rem_tokens)
+        new_len = self.floor_chunked_tokens(
+            min(cand_extend_input_len, _rem_tokens), cand_extend_input_len
+        )
         request_slot_reserve = self._request_slot_reserve_for_req(
             req, extend_input_len=new_len
         )
@@ -1312,7 +1335,9 @@ class PrefillAdder:
                 return AddReqResult.OTHER
 
             # Chunked prefill
-            trunc_len = self.rem_chunk_tokens
+            trunc_len = self.floor_chunked_tokens(
+                self.rem_chunk_tokens, cand_extend_input_len
+            )
 
             if (tile_stop := self._check_prefill_tile_budget(trunc_len)) is not None:
                 return tile_stop

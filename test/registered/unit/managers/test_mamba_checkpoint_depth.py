@@ -17,6 +17,8 @@ from unittest.mock import MagicMock, patch
 import torch
 
 from sglang.srt.managers.schedule_batch import Req, ScheduleBatch
+from sglang.srt.managers.schedule_policy import PrefillAdder, mamba_prefill_chunk_grid
+from sglang.srt.managers.scheduler import Scheduler
 from sglang.srt.runtime_context import get_context, mamba_track_grid
 from sglang.srt.sampling.sampling_params import SamplingParams
 from sglang.srt.server_args import (
@@ -122,6 +124,80 @@ class TestMambaCheckpointDepth(unittest.TestCase):
             _track_seqlen(tree_page=16, prefix_len=4253, extend_len=16384),
             20637,
         )
+
+
+class TestChunkedPrefillStaysOnTheChunkGrid(unittest.TestCase):
+    def _floor(self, trunc_len: int, remaining: int, grid: int = CHUNK) -> int:
+        adder = object.__new__(PrefillAdder)
+        adder.mamba_chunk_grid = grid
+        return adder.floor_chunked_tokens(trunc_len, remaining)
+
+    def test_cut_is_rounded_down_onto_the_grid(self):
+        self.assertEqual(self._floor(100, 8192), 64)
+        self.assertEqual(self._floor(8010, 100000), 8000)
+
+    def test_aligned_cut_is_untouched(self):
+        self.assertEqual(self._floor(8192, 100000), 8192)
+
+    def test_final_chunk_may_stop_anywhere(self):
+        self.assertEqual(self._floor(37, 37), 37)
+
+    def test_cut_shorter_than_grid_still_makes_progress(self):
+        self.assertEqual(self._floor(40, 8192), 40)
+
+    def _published_grid(self, *, dcp_size: int) -> int:
+        with get_context().override_server_args(
+            disable_radix_cache=False,
+            mamba_radix_cache_strategy="extra_buffer",
+            dcp_size=dcp_size,
+            _mamba_cache_chunk_size=CHUNK,
+        ):
+            return mamba_prefill_chunk_grid()
+
+    def test_dcp_extra_buffer_uses_the_chunk_grid(self):
+        self.assertEqual(self._published_grid(dcp_size=2), CHUNK)
+
+    def test_non_dcp_extra_buffer_leaves_the_cut(self):
+        self.assertEqual(self._published_grid(dcp_size=1), 1)
+
+    def test_non_dcp_does_not_change_truncation_alignment(self):
+        scheduler = object.__new__(Scheduler)
+        scheduler.truncation_align_size = None
+        with get_context().override_server_args(
+            disable_radix_cache=False,
+            mamba_radix_cache_strategy="extra_buffer",
+            dcp_size=1,
+            _mamba_cache_chunk_size=CHUNK,
+        ):
+            scheduler.init_mamba_truncation_align()
+        self.assertIsNone(scheduler.truncation_align_size)
+
+    def test_dcp_folds_chunk_into_truncation_alignment(self):
+        scheduler = object.__new__(Scheduler)
+        scheduler.truncation_align_size = 48
+        with get_context().override_server_args(
+            disable_radix_cache=False,
+            mamba_radix_cache_strategy="extra_buffer",
+            dcp_size=2,
+            _mamba_cache_chunk_size=CHUNK,
+        ):
+            scheduler.init_mamba_truncation_align()
+        self.assertEqual(scheduler.truncation_align_size, 192)
+
+    def test_each_cut_up_chunk_can_donate(self):
+        prefix_len, total = 0, 100_000
+        for budget in (8192, 5000, 8192, 3333, 8192, 777):
+            trunc_len = self._floor(budget, total - prefix_len)
+            self.assertIsNotNone(
+                _track_seqlen(
+                    tree_page=256,
+                    prefix_len=prefix_len,
+                    extend_len=trunc_len,
+                    dcp_enabled=True,
+                ),
+                f"no donation at {prefix_len=} {trunc_len=}",
+            )
+            prefix_len += trunc_len
 
 
 class TestMambaTrackGrid(unittest.TestCase):
