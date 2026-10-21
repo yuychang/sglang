@@ -10,6 +10,17 @@ from sglang.srt.utils import is_hip
 _HEADS = 12
 _DIM = 128
 _CHANNELS = 3 * _HEADS * _DIM
+# ROCm/aiter#6026 publishes the fused decode on this module; the vendored
+# SGLang copy is used when SGLANG_OPT_HIP_K3_FLYDSL_SOURCE=sglang.
+_AITER_MODULE = "aiter.ops.flydsl.linear_attention_kernels"
+_SGLANG_MODULE = "sglang.kernels.ops.attention.kda_flydsl.kimi_k3_kda_decode"
+# Channel-major [cache, 4608, 3], or SGLang's [cache, 3, 4608] cache viewed
+# through transpose(-1, -2). Matches linear_attention_kernels._check_dense_cache_slots.
+_CONV_SLOT_STRIDES = ((3, 1), (1, _CHANNELS))
+_STATE_SLOT_STRIDE = (_DIM * _DIM, _DIM, 1)
+# Implementations that predate the `state_dtypes` attribute (including the
+# vendored SGLang kernel) only accept an FP32 recurrent state.
+_DEFAULT_STATE_DTYPES = (torch.float32,)
 _WARMED: set[tuple[int, float, float]] = set()
 
 
@@ -21,16 +32,33 @@ def _ops():
     try:
         from sglang.kernels.ops.attention.kda_flydsl.source import load_module
 
-        module = load_module(
-            "sglang.kernels.ops.attention.kda_flydsl.kimi_k3_kda_decode",
-            "aiter.ops.flydsl.kimi_k3_kda_decode",
-        )
+        module = load_module(_SGLANG_MODULE, _AITER_MODULE)
     except (ImportError, ModuleNotFoundError):
         return None, None
-    return (
-        module.flydsl_kimi_k3_kda_decode_with_f_b,
-        module.is_flydsl_kimi_k3_kda_decode_supported,
-    )
+    # ROCm/aiter#6026 names first, then the vendored SGLang names.
+    try:
+        return module.flydsl_kda_decode_with_f_b, module.is_flydsl_kda_decode_supported
+    except AttributeError:
+        pass
+    try:
+        return (
+            module.flydsl_kimi_k3_kda_decode_with_f_b,
+            module.is_flydsl_kimi_k3_kda_decode_supported,
+        )
+    except AttributeError:
+        return None, None
+
+
+def _state_dtypes(run) -> tuple[torch.dtype, ...]:
+    try:
+        return tuple(run.state_dtypes)
+    except AttributeError:
+        return _DEFAULT_STATE_DTYPES
+
+
+def _dense_slots(tensor: torch.Tensor, layouts: tuple[tuple[int, ...], ...]) -> bool:
+    inner = tensor.shape[1:]
+    return tensor.stride()[1:] in layouts and tensor.stride(0) >= inner.numel()
 
 
 def available(device: torch.device | None = None) -> bool:
@@ -55,6 +83,7 @@ def covered(
 ) -> bool:
     if not available(f_a.device) or f_a.ndim != 2:
         return False
+    op, _ = _ops()
     batch = f_a.shape[0]
     return (
         batch > 0
@@ -69,20 +98,24 @@ def covered(
         and mixed_qkv.stride(-1) == 1
         and raw_beta.shape == (1, batch, _HEADS)
         and raw_beta.dtype == torch.bfloat16
+        and raw_beta.stride(-1) == 1
         and conv_state.ndim == 3
         and conv_state.shape[1:] == (_CHANNELS, 3)
         and conv_state.dtype == torch.bfloat16
+        and _dense_slots(conv_state, _CONV_SLOT_STRIDES)
         and state.ndim == 4
         and state.shape[1:] == (_HEADS, _DIM, _DIM)
-        and state.dtype == torch.float32
-        and state.stride()[-3:] == (_DIM * _DIM, _DIM, 1)
+        and state.dtype in _state_dtypes(op)
+        and _dense_slots(state, (_STATE_SLOT_STRIDE,))
         and state_indices.shape == (batch,)
         and state_indices.dtype == torch.int32
         and state_indices.stride(0) == 1
         and output_gate.shape == (batch, _HEADS, _DIM)
         and output_gate.dtype == torch.bfloat16
+        and output_gate.stride(-1) == 1
         and norm_weight.shape == (_DIM,)
         and norm_weight.dtype == torch.bfloat16
+        and norm_weight.stride(-1) == 1
     )
 
 
@@ -145,21 +178,30 @@ def warmup(
         return
 
     device = f_b_weight.device
-    run(
-        f_a=torch.zeros(1, _DIM, dtype=torch.bfloat16, device=device),
-        f_b_weight=f_b_weight,
-        mixed_qkv=torch.zeros(1, _CHANNELS, dtype=torch.bfloat16, device=device),
-        conv_weight=conv_weight,
-        conv_state=torch.zeros(1, _CHANNELS, 3, dtype=torch.bfloat16, device=device),
-        raw_beta=torch.zeros(1, 1, _HEADS, dtype=torch.bfloat16, device=device),
-        A_log=A_log,
-        dt_bias=dt_bias,
-        lower_bound=lower_bound,
-        state=torch.zeros(1, _HEADS, _DIM, _DIM, dtype=torch.float32, device=device),
-        state_indices=torch.zeros(1, dtype=torch.int32, device=device),
-        output_gate=torch.zeros(1, _HEADS, _DIM, dtype=torch.bfloat16, device=device),
-        norm_weight=norm_weight,
-        norm_eps=norm_eps,
-    )
+    op, _ = _ops()
+    # Each state dtype is its own JIT specialization; build every one the
+    # implementation accepts so the --mamba-ssm-dtype in use never compiles
+    # during graph capture.
+    for state_dtype in _state_dtypes(op):
+        run(
+            f_a=torch.zeros(1, _DIM, dtype=torch.bfloat16, device=device),
+            f_b_weight=f_b_weight,
+            mixed_qkv=torch.zeros(1, _CHANNELS, dtype=torch.bfloat16, device=device),
+            conv_weight=conv_weight,
+            conv_state=torch.zeros(
+                1, _CHANNELS, 3, dtype=torch.bfloat16, device=device
+            ),
+            raw_beta=torch.zeros(1, 1, _HEADS, dtype=torch.bfloat16, device=device),
+            A_log=A_log,
+            dt_bias=dt_bias,
+            lower_bound=lower_bound,
+            state=torch.zeros(1, _HEADS, _DIM, _DIM, dtype=state_dtype, device=device),
+            state_indices=torch.zeros(1, dtype=torch.int32, device=device),
+            output_gate=torch.zeros(
+                1, _HEADS, _DIM, dtype=torch.bfloat16, device=device
+            ),
+            norm_weight=norm_weight,
+            norm_eps=norm_eps,
+        )
     torch.cuda.synchronize(device)
     _WARMED.add(key)

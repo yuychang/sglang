@@ -1962,6 +1962,11 @@ class KimiK3DeltaAttention(nn.Module):
                 )
                 layer._k3_hip_fused_decode_backend = backend
                 self._kda_hip_fused_decode_ready = True
+                rank0_log(
+                    "K3 HIP fused KDA decode armed "
+                    f"(backend={backend}, "
+                    f"source={envs.SGLANG_OPT_HIP_K3_FLYDSL_SOURCE.get()})"
+                )
             return
         layer = self.attn
         w = layer.conv_weights
