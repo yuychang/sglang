@@ -1922,6 +1922,7 @@ SGLang supports various environment variables that can be used to configure its 
       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Kimi-K3 on ROCm: write the absorbed MLA decode and target-verify query and the latent KV cache in one launch, with AITER on gfx950 and the AITER Triton kernel elsewhere. Applies to AITER and Triton MLA decode without DCP; DCP keeps the split rope/concat/cache chain.</td>
       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>false</code></td>
     </tr>
+    <tr>
       <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}><code>SGLANG_OPT_HIP_K3_MOE_LATENT_MXFP4</code></td>
       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Kimi-K3 on gfx950 with AITER and no MoE all-to-all backend: retain MXFP4 copies of the BF16 latent down/up projections (7168 to 3584 and back). Use them for batches meeting the token threshold; keep the original projections for smaller batches and unsupported weights/devices. This is lossy activation and weight quantization, disabled by default.</td>
       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>false</code></td>
@@ -1930,6 +1931,11 @@ SGLang supports various environment variables that can be used to configure its 
       <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}><code>SGLANG_OPT_HIP_K3_MOE_LATENT_MXFP4_MIN_TOKENS</code></td>
       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Minimum tokens per batch for Kimi-K3 MXFP4 latent projections. Must be positive when enabled.</td>
       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>2048</code></td>
+    </tr>
+    <tr>
+      <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}><code>SGLANG_OPT_HIP_K3_QUARK_SHARED_FULL_FRONT</code></td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Kimi-K3 on ROCm with a Quark MXFP4 checkpoint: dequantize the shared experts to BF16 at load so the MoE runs the merged front (shared gate-up, router and latent down-projection in one GEMM) instead of the unfused path. Applies without an MoE all-to-all backend. At TP8 it leaves about 2.8 GB less per GPU for the KV cache and KDA state.</td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>false</code></td>
     </tr>
   </tbody>
 </table>
