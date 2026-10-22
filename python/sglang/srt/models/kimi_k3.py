@@ -122,6 +122,7 @@ from sglang.srt.models.deepseek_common.attention_forward_methods.forward_methods
     AttnForwardMethod,
 )
 from sglang.srt.models.deepseek_v2 import DeepseekV2AttentionMLA, MoEGate
+from sglang.srt.models.kimi_k3_rocm_moe import tuned_front_gemm, tuned_front_window
 from sglang.srt.models.kimi_k3_vl import (
     KimiK3MultiModalProjector,
     KimiK3VisionTower,
@@ -487,6 +488,8 @@ class KimiK3MoE(nn.Module):
             self._latent_mxfp4 = LatentMXFP4Projections(
                 min_tokens=envs.SGLANG_OPT_HIP_K3_MOE_LATENT_MXFP4_MIN_TOKENS.get()
             )
+        # Token window for AITER's tuned BF16 GEMM on the merged front, or None.
+        self._tuned_front_window = tuned_front_window() if _is_hip else None
         self.moe_hidden_size = (
             config.routed_expert_hidden_size if self.use_latent_moe else hidden_size
         )
@@ -1398,17 +1401,25 @@ class KimiK3MoE(nn.Module):
             )
 
         num_tokens, hidden_size = hidden_states.shape
+        front_dtype = torch.float32 if self._front_fp32 else None
         if self._use_latent_mxfp4(num_tokens=num_tokens):
             head_sizes = self._front_sizes[:-1]
             head = _k3_bf16_gemm(hidden_states, self._front_w[: sum(head_sizes)])
             gate_up, router_logits = torch.split(head, head_sizes, dim=-1)
             routed_input = self._latent_mxfp4.down(x=hidden_states)
         else:
-            fused = _k3_bf16_gemm(
-                hidden_states,
-                self._front_w,
-                out_dtype=torch.float32 if self._front_fp32 else None,
-            )
+            fused = None
+            if self._tuned_front_window is not None:
+                fused = tuned_front_gemm(
+                    x=hidden_states,
+                    weight=self._front_w,
+                    out_dtype=front_dtype,
+                    window=self._tuned_front_window,
+                )
+            if fused is None:
+                fused = _k3_bf16_gemm(
+                    hidden_states, self._front_w, out_dtype=front_dtype
+                )
             gate_up, router_logits, routed_input = torch.split(
                 fused, self._front_sizes, dim=-1
             )

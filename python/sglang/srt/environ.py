@@ -2007,6 +2007,11 @@ class Envs:
     # Dequantize Quark MXFP4 shared experts to BF16 at load so they join the
     # merged Kimi-K3 MoE front on ROCm; at TP8 this takes ~2.8 GB/GPU from the KV pool.
     SGLANG_OPT_HIP_K3_QUARK_SHARED_FULL_FRONT = EnvBool(False)
+    # Route the merged Kimi-K3 MoE front GEMM through AITER's tuned BF16 GEMM in this
+    # token window; measured on MI355X, its tuned rows win from M=1 up to M=192.
+    SGLANG_OPT_HIP_K3_TUNED_MOE_FRONT = EnvBool(False)
+    SGLANG_OPT_HIP_K3_TUNED_MOE_FRONT_MIN_TOKENS = EnvInt(1)
+    SGLANG_OPT_HIP_K3_TUNED_MOE_FRONT_MAX_TOKENS = EnvInt(192)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_CACHE_CAPACITY = EnvInt(2)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_MIN_HITS = EnvInt(2)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_MAX_SEQLEN = EnvInt(6144)
