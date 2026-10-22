@@ -110,7 +110,7 @@ def try_select_experts(
         or has_per_rank_fused_shared_slots(n_shared)
         or envs.SGLANG_SIMULATE_UNIFORM_EXPERTS.get()
         or envs.SGLANG_SIMULATE_ROUND_ROBIN_EXPERTS.get()
-        or envs.SGLANG_K3_RADIX4_TOPK.get()
+        or envs.SGLANG_OPT_HIP_K3_RADIX4_TOPK.get()
         or envs.SGLANG_OPT_USE_JIT_KERNEL_GROUPED_TOPK.get()
         or config.apply_routed_scaling_factor_on_output
         or config.num_expert_group is None

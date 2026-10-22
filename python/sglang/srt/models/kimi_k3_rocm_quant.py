@@ -147,7 +147,7 @@ def k3_merge_kda_inproj_fp8(
     above the token limit. Must run before ``process_weights_after_loading``,
     while weights are [out, in] and scales [out].
     """
-    if not envs.SGLANG_ROCM_K3_FUSE_KDA_INPROJ.get():
+    if not envs.SGLANG_OPT_HIP_K3_FUSE_KDA_INPROJ.get():
         return None
     mods = (qkvg_proj, f_a_proj, b_proj)
     if not all(_is_quark_channel_fp8(m) for m in (*mods, f_b_proj)):

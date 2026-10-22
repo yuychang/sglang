@@ -378,7 +378,7 @@ class TestMergeKdaInprojFp8(CustomTestCase):
         self.assertIsNone(_merge_kda_inproj(b_proj=bf16_b_proj))
 
     def test_env_disables_the_merge(self, _):
-        with envs.SGLANG_ROCM_K3_FUSE_KDA_INPROJ.override(False):
+        with envs.SGLANG_OPT_HIP_K3_FUSE_KDA_INPROJ.override(False):
             self.assertIsNone(_merge_kda_inproj())
 
 

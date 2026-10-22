@@ -519,7 +519,7 @@ class TestAiterGroupedTopkSharedFuse(CustomTestCase):
             for setting in (
                 "SGLANG_SIMULATE_UNIFORM_EXPERTS",
                 "SGLANG_SIMULATE_ROUND_ROBIN_EXPERTS",
-                "SGLANG_K3_RADIX4_TOPK",
+                "SGLANG_OPT_HIP_K3_RADIX4_TOPK",
                 "SGLANG_OPT_USE_JIT_KERNEL_GROUPED_TOPK",
             ):
                 with (
@@ -741,7 +741,7 @@ class TestAiterGroupedTopkFusionContract(CustomTestCase):
         for setting in (
             "SGLANG_SIMULATE_UNIFORM_EXPERTS",
             "SGLANG_SIMULATE_ROUND_ROBIN_EXPERTS",
-            "SGLANG_K3_RADIX4_TOPK",
+            "SGLANG_OPT_HIP_K3_RADIX4_TOPK",
             "SGLANG_OPT_USE_JIT_KERNEL_GROUPED_TOPK",
         ):
             with self.subTest(case=setting):
