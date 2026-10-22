@@ -998,6 +998,9 @@ class Envs:
     SGLANG_OPT_HIP_K3_MLA_Q_CACHE_FUSION = EnvBool(False)
     SGLANG_OPT_HIP_K3_MOE_LATENT_MXFP4 = EnvBool(False)
     SGLANG_OPT_HIP_K3_MOE_LATENT_MXFP4_MIN_TOKENS = EnvInt(2048)
+    # Requantize Quark per-channel FP8 kv_b to per-tensor FP8 so the MLA absorb
+    # BMMs run AITER's a8w8 kernel (~2.3% weight error vs dequant to BF16).
+    SGLANG_OPT_HIP_K3_MLA_ABSORB_FP8 = EnvBool(True)
     # ROCm decode attention kernel: auto (aiter_sparse on gfx950, tilelang elsewhere) |
     # aiter_sparse | tilelang | triton | torch | comparison | unified_kv_triton
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("auto")
