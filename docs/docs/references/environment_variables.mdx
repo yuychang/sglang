@@ -1977,6 +1977,11 @@ SGLang supports various environment variables that can be used to configure its 
       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Kimi-K3 on ROCm with <code>SGLANG_USE_AITER</code>: keep the checkpoint's MoE intermediate width instead of padding it for the generic AITER kernels. Replaces <code>SGLANG_AITER_K3_OPT</code>, which still works as a deprecated alias.</td>
       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>false</code></td>
     </tr>
+    <tr>
+      <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}><code>SGLANG_OPT_HIP_MLA_FP8_Q_ASM</code></td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>gfx950, 12-head FP8 MLA with both <code>SGLANG_AITER_MLA_DECODE_BACKEND</code> and <code>SGLANG_AITER_MLA_VERIFY_BACKEND</code> on <code>asm</code> and no DCP: run decode and a verify window of at most 4 tokens on the persistent FP8-query ASM kernel, even with <code>SGLANG_AITER_MLA_PERSIST=0</code>. A wider window keeps the previous routing.</td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>false</code></td>
+    </tr>
   </tbody>
 </table>
 
