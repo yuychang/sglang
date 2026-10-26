@@ -169,6 +169,32 @@ class ForwardBatchDeepSeekMHAMixin:
 
         return prefix_chunk_starts, prefix_chunk_seq_lens
 
+    # Chunk i takes keys [i * capacity, (i + 1) * capacity) of all prefixes laid
+    # end to end in request order, so a request with a short or no prefix
+    # leaves its share of the capacity to the others. With capacity 1024 and
+    # prefix lengths [256, 0, 1536]:
+    # prefix_chunk_starts = [[0, 0, 0], [256, 0, 768]]
+    # prefix_chunk_seq_lens = [[256, 0, 768], [0, 0, 768]]
+    def get_packed_prefix_chunk_seq_lens(
+        self, prefix_lens: torch.Tensor, num_prefix_chunks: int, chunk_capacity: int
+    ):
+        prefix_lens = prefix_lens.to(torch.int64)
+        offsets = torch.cumsum(prefix_lens, dim=0) - prefix_lens
+        chunk_begins = (
+            torch.arange(num_prefix_chunks, device=prefix_lens.device).unsqueeze(1)
+            * chunk_capacity
+        )
+        prefix_chunk_starts = torch.minimum(
+            (chunk_begins - offsets).clamp(min=0), prefix_lens
+        )
+        prefix_chunk_ends = torch.minimum(
+            (chunk_begins + chunk_capacity - offsets).clamp(min=0), prefix_lens
+        )
+        return (
+            prefix_chunk_starts.to(torch.int32),
+            (prefix_chunk_ends - prefix_chunk_starts).to(torch.int32),
+        )
+
     # Called before each attention module if using chunked kv cache for prefill
     # Some of the codes are adapted from https://github.com/vllm-project/vllm/blob/main/vllm/v1/attention/backends/mla/common.py
     def prepare_chunked_prefix_cache_info(
@@ -207,27 +233,25 @@ class ForwardBatchDeepSeekMHAMixin:
             # chunk_capacity. One request-major chunk gives the fused kernel the
             # same per-request layout described by prefix_chunk_cu_seq_lens[0].
             self.prefix_chunk_len = max(self.extend_prefix_lens_cpu)
+            self.num_prefix_chunks = 1
+            chunk_seq_lens_fn = self.get_prefix_chunk_seq_lens
         else:
-            self.prefix_chunk_len = chunk_capacity // self.batch_size
-
-        self.num_prefix_chunks = (
-            max(self.extend_prefix_lens_cpu) + self.prefix_chunk_len - 1
-        ) // self.prefix_chunk_len
+            self.prefix_chunk_len = chunk_capacity
+            self.num_prefix_chunks = (
+                sum(self.extend_prefix_lens_cpu) + chunk_capacity - 1
+            ) // chunk_capacity
+            chunk_seq_lens_fn = self.get_packed_prefix_chunk_seq_lens
 
         # Here we compute chunk lens twice to avoid stream sync, once on gpu and once on cpu.
-        prefix_chunk_starts_cuda, prefix_chunk_seq_lens_cuda = (
-            self.get_prefix_chunk_seq_lens(
-                self.extend_prefix_lens,
-                self.num_prefix_chunks,
-                self.prefix_chunk_len,
-            )
+        prefix_chunk_starts_cuda, prefix_chunk_seq_lens_cuda = chunk_seq_lens_fn(
+            self.extend_prefix_lens,
+            self.num_prefix_chunks,
+            self.prefix_chunk_len,
         )
-        prefix_chunk_starts_cpu, prefix_chunk_seq_lens_cpu = (
-            self.get_prefix_chunk_seq_lens(
-                torch.tensor(self.extend_prefix_lens_cpu),
-                self.num_prefix_chunks,
-                self.prefix_chunk_len,
-            )
+        prefix_chunk_starts_cpu, prefix_chunk_seq_lens_cpu = chunk_seq_lens_fn(
+            torch.tensor(self.extend_prefix_lens_cpu),
+            self.num_prefix_chunks,
+            self.prefix_chunk_len,
         )
         self.prefix_chunk_starts = prefix_chunk_starts_cuda
         self.prefix_chunk_seq_lens = prefix_chunk_seq_lens_cuda
