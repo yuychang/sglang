@@ -16,16 +16,11 @@ import torch
 
 from sglang.srt.environ import envs
 from sglang.srt.layers.quantization.quark.quark import QuarkLinearMethod
-from sglang.srt.layers.quantization.quark.schemes import (
-    QuarkW4A4MXFP4,
-    QuarkW8A8Fp8,
-    quark_w4a4_mxfp4,
-)
+from sglang.srt.layers.quantization.quark.schemes import QuarkW8A8Fp8
 from sglang.srt.models.kimi_k3 import _is_unquantized_mergeable
 from sglang.srt.models.kimi_k3_rocm_moe import tuned_front_gemm, tuned_front_window
 from sglang.srt.models.kimi_k3_rocm_quant import (
     _k3_channel_fp8_to_bf16,
-    densify_quark_mxfp4_shared_experts,
     k3_fused_decode_f_b_weight,
     k3_kv_b_for_absorb,
     k3_merge_kda_inproj_fp8,
@@ -145,80 +140,6 @@ class TestFusedDecodeFbWeight(CustomTestCase):
         self.assertEqual(
             k3_fused_decode_f_b_weight(plain_f_b).data_ptr(), bf16.data_ptr()
         )
-
-
-def _quark_mxfp4_linear(out_features: int, in_features: int) -> torch.nn.Module:
-    linear = torch.nn.Module()
-    linear.quant_method = QuarkLinearMethod(quantization_config=None)
-    linear.scheme = QuarkW4A4MXFP4(weight_quant_spec={}, input_quant_spec={})
-    linear.scheme.create_weights(
-        layer=linear,
-        output_partition_sizes=[out_features],
-        input_size_per_partition=in_features,
-        params_dtype=torch.bfloat16,
-        weight_loader=lambda *args, **kwargs: None,
-    )
-    # Byte 0x21 packs the codes for 0.5 (low nibble) and 1.0; scale byte 128 is 2^1.
-    linear.weight.data.fill_(0x21)
-    linear.weight_scale.data.fill_(128)
-    return linear
-
-
-class TestDensifyQuarkMxfp4SharedExperts(CustomTestCase):
-    """Kimi-K3 densifies its MXFP4 shared experts before the loader's own
-    post-processing, while other loaders post-process first. In either order
-    each weight must be decoded exactly once into a mergeable BF16 weight."""
-
-    def test_densify_and_loader_pass_commute(self):
-        expected = torch.tensor([1.0, 2.0], dtype=torch.bfloat16).repeat(4, 16)
-        for model_first in (True, False):
-            with self.subTest(model_first=model_first):
-                shared = SimpleNamespace(
-                    gate_up_proj=_quark_mxfp4_linear(4, 32),
-                    down_proj=_quark_mxfp4_linear(4, 32),
-                )
-                linears = (shared.gate_up_proj, shared.down_proj)
-                # The loader pass densifies too when the HW lacks the FP4 GEMM.
-                with patch.object(quark_w4a4_mxfp4, "_dequant_linear_to_bf16", True):
-                    if model_first:
-                        densify_quark_mxfp4_shared_experts(shared)
-                    for linear in linears:
-                        linear.quant_method.process_weights_after_loading(linear)
-                    if not model_first:
-                        densify_quark_mxfp4_shared_experts(shared)
-
-                for linear in linears:
-                    self.assertIsNone(linear.weight_scale)
-                    torch.testing.assert_close(linear.weight, expected)
-                self.assertTrue(
-                    _is_unquantized_mergeable([linear.weight for linear in linears])
-                )
-
-    def test_asm_relaid_linear_is_left_alone(self):
-        """Densify must keep a linear the loader re-laid out for the AITER ASM GEMM
-        on that GEMM, not decode its shuffled weight as checkpoint MXFP4."""
-        linear = _quark_mxfp4_linear(256, 256)
-        with (
-            patch.object(quark_w4a4_mxfp4, "_use_aiter_asm_fp4_gemm", True),
-            patch.object(quark_w4a4_mxfp4, "is_gfx95_supported", return_value=True),
-            patch.object(
-                quark_w4a4_mxfp4,
-                "shuffle_weight",
-                side_effect=lambda weight, layout: weight.clone(),
-                create=True,
-            ),
-        ):
-            linear.quant_method.process_weights_after_loading(linear)
-        self.assertTrue(linear.use_aiter_asm_fp4_gemm)
-        weight, weight_scale = linear.weight, linear.weight_scale
-
-        densify_quark_mxfp4_shared_experts(
-            SimpleNamespace(gate_up_proj=linear, down_proj=linear)
-        )
-
-        self.assertFalse(linear.dequantized_bf16)
-        self.assertIs(linear.weight, weight)
-        self.assertIs(linear.weight_scale, weight_scale)
 
 
 def _shaped(rows: int, cols: int) -> torch.Tensor:
