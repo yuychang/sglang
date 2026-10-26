@@ -1590,6 +1590,12 @@ def _build_mha_mla_host_pool(
         allocator_type=allocator_type,
         pool_label=pool_label,
     )
+    from sglang.srt.mem_cache.draft_dcp import dspark_draft_joins_dcp
+    from sglang.srt.runtime_context import get_parallel
+
+    if pool_label == "draft" and dspark_draft_joins_dcp():
+        kwargs["dcp_size"] = get_parallel().attn_dcp_size
+        kwargs["dcp_rank"] = get_parallel().attn_dcp_rank
     if isinstance(pool, MHATokenToKVPool):
         host_cls, host_input, host_kwargs = _mha_host_inputs(pool)
         return host_cls(host_input, **host_kwargs, **kwargs)
@@ -1625,11 +1631,19 @@ def build_full_draft_pools(
     controller = tree_cache.cache_controller
     host_pool_group = controller.mem_pool_host
 
-    # Note(kpham-sgl): DCP x DSpark draft KV is replicated and spans the virtual
-    # loc space, so match the target host's logical_size instead of physical size.
+    # A replicated draft spans the virtual loc space, so its device size already
+    # matches the target host's logical size. HIP DSpark is sharded: both device
+    # pools are physical, and the host pool applies the DCP owner rule itself.
+    from sglang.srt.mem_cache.draft_dcp import dspark_draft_joins_dcp
+
+    target_tokens = (
+        host_pool_group.size
+        if dspark_draft_joins_dcp()
+        else host_pool_group.logical_size
+    )
     draft_host_pool = _build_mha_mla_host_pool(
         pool=pool,
-        host_to_device_ratio=host_pool_group.logical_size / pool.size,
+        host_to_device_ratio=target_tokens / pool.size,
         page_size=controller.page_size,
         layout=get_memory().hicache_mem_layout,
         allocator_type=_get_allocator_type(),

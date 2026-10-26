@@ -151,6 +151,8 @@ class MHATokenToKVPoolHost(HostKVCache):
         write_back_staging: tuple[torch.Tensor, torch.Tensor] | None = None,
         pool_label: str = "kv",
         head_group_num: int = 1,
+        dcp_size: int = 1,
+        dcp_rank: int = 0,
     ):
         if _is_xpu:
             require_kvcacheio_ops(
@@ -220,6 +222,8 @@ class MHATokenToKVPoolHost(HostKVCache):
             device=device,
             allocator_type=allocator_type,
             pool_label=pool_label,
+            dcp_size=dcp_size,
+            dcp_rank=dcp_rank,
         )
         self.device_k_buffers = tuple(b for info in infos for b in info.buffers.k)
         self.device_v_buffers = tuple(b for info in infos for b in info.buffers.v)
@@ -419,6 +423,21 @@ class MHATokenToKVPoolHost(HostKVCache):
             },
         }
 
+    def _dcp_local_indices(self, host_indices, device_indices, *, already_local: bool):
+        """Widened logical slots -> this rank's physical rows.
+
+        A sharded draft pool uses the target's owner rule. A replicated draft
+        host leaves ``dcp_size`` at 1 and keeps the widened ids.
+        """
+        if already_local or self.dcp_size == 1:
+            return host_indices, device_indices
+        from sglang.srt.layers.dcp.layout import maybe_dcp_kernel_indices
+
+        return (
+            maybe_dcp_kernel_indices(host_indices, self.dcp_size, self.dcp_rank),
+            maybe_dcp_kernel_indices(device_indices, self.dcp_size, self.dcp_rank),
+        )
+
     def load_to_device_per_layer(
         self,
         device_pool,
@@ -428,9 +447,13 @@ class MHATokenToKVPoolHost(HostKVCache):
         io_backend,
         *,
         is_draft: bool = False,
+        indices_are_local: bool = False,
     ):
         if not is_draft and not 0 <= layer_id < self.target_layer_num:
             return
+        host_indices, device_indices = self._dcp_local_indices(
+            host_indices, device_indices, already_local=indices_are_local
+        )
         host_layer_id = layer_id
 
         if io_backend != "kernel_ascend":
@@ -575,8 +598,17 @@ class MHATokenToKVPoolHost(HostKVCache):
             layer_start = layer_end
 
     def backup_from_device_all_layer(
-        self, device_pool, host_indices, device_indices, io_backend
+        self,
+        device_pool,
+        host_indices,
+        device_indices,
+        io_backend,
+        *,
+        indices_are_local: bool = False,
     ):
+        host_indices, device_indices = self._dcp_local_indices(
+            host_indices, device_indices, already_local=indices_are_local
+        )
         if io_backend == "kernel_ascend":
             # NPU pools use contiguous multi-layer tensors and intentionally do
             # not build the CUDA-style k_data_ptrs/v_data_ptrs arrays.

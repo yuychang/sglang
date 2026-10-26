@@ -53,6 +53,8 @@ class MHATokenToKVPoolMXFP8Host(MHATokenToKVPoolHost):
         draft_buffer_infos: Sequence[MHABufferInfo] = (),
         write_back_staging: tuple[torch.Tensor, torch.Tensor] | None = None,
         pool_label: str = "kv",
+        dcp_size: int = 1,
+        dcp_rank: int = 0,
     ):
         if layout != "page_first":
             raise NotImplementedError(
@@ -91,6 +93,8 @@ class MHATokenToKVPoolMXFP8Host(MHATokenToKVPoolHost):
             end_layer=end_layer,
             write_back_staging=write_back_staging,
             pool_label=pool_label,
+            dcp_size=dcp_size,
+            dcp_rank=dcp_rank,
         )
         if self.page_size != buffer_info.page_size:
             raise ValueError(
@@ -170,8 +174,15 @@ class MHATokenToKVPoolMXFP8Host(MHATokenToKVPoolHost):
     def backup_from_device_all_layer(
         self, device_pool, host_indices, device_indices, io_backend
     ):
+        host_indices, device_indices = self._dcp_local_indices(
+            host_indices, device_indices, already_local=False
+        )
         super().backup_from_device_all_layer(
-            device_pool, host_indices, device_indices, io_backend
+            device_pool,
+            host_indices,
+            device_indices,
+            io_backend,
+            indices_are_local=True,
         )
         if io_backend != "kernel":
             raise NotImplementedError(
@@ -204,6 +215,9 @@ class MHATokenToKVPoolMXFP8Host(MHATokenToKVPoolHost):
         *,
         is_draft: bool = False,
     ):
+        host_indices, device_indices = self._dcp_local_indices(
+            host_indices, device_indices, already_local=False
+        )
         super().load_to_device_per_layer(
             device_pool,
             host_indices,
@@ -211,6 +225,7 @@ class MHATokenToKVPoolMXFP8Host(MHATokenToKVPoolHost):
             layer_id,
             io_backend,
             is_draft=is_draft,
+            indices_are_local=True,
         )
         if is_draft:
             raise NotImplementedError("MXFP8 KV host pool has no draft layers.")

@@ -31,6 +31,11 @@ from sglang.srt.layers.dcp import (
 )
 from sglang.srt.layers.radix_attention import AttentionType
 from sglang.srt.mem_cache.base_swa_memory_pool import BaseSWAKVPool
+from sglang.srt.mem_cache.draft_dcp import (
+    dcp_extend_kv_head_views,
+    dcp_kv_write_loc,
+    dspark_draft_joins_dcp,
+)
 from sglang.srt.mem_cache.kv_loc_plan import IdSpaceKind
 from sglang.srt.mem_cache.memory_pool import KVWriteLoc
 from sglang.srt.mem_cache.swa_memory_pool import SWAKVPool
@@ -63,7 +68,6 @@ from sglang.srt.utils import (
 )
 
 _is_cuda = is_cuda()
-_is_hip = is_hip()
 _is_gfx942 = is_gfx942_supported()
 _is_xpu = is_xpu()
 
@@ -249,14 +253,16 @@ class TritonAttnBackend(AttentionBackend):
             self.use_mla,
             self.use_verify_splitkv,
         )
-        # TODO: this logic should be fixed in non-hip platform
+        # A replicated HIP DSpark draft keeps every token and does not join
+        # the DCP group. Joining (gated in dspark_draft_joins_dcp) shards the
+        # sequence and merges partial attention.
         self.is_hip_dspark_draft = (
-            _is_hip
+            is_hip()
             and model_runner.is_draft_worker
             and model_runner.spec_algorithm.is_dspark()
+            and not dspark_draft_joins_dcp()
         )
         if self.is_hip_dspark_draft:
-            # Drafts never join the dcp group so we ignore it
             self.dcp_size = 1
             self.dcp_rank = 0
         else:
@@ -607,9 +613,20 @@ class TritonAttnBackend(AttentionBackend):
             dtype=torch.int32,
             device=self.device,
         )
-        kv_indptr = self._fill_kv_indptr_and_indices(
-            plan, bs, seq_lens, req_pool_indices, self.cuda_graph_kv_indices
-        )
+        # A joined draft (and any DCP-sharded Triton pool) stores physical
+        # rows. Verify reads the same owner shard the extend path does;
+        # widened ids past the device pool abort store_kvcache.
+        if self.dcp_size > 1:
+            kv_indptr, _, _ = self._dcp_kv_indices(
+                req_pool_indices,
+                seq_lens[:bs],
+                self.kv_indptr,
+                self.cuda_graph_kv_indices,
+            )
+        else:
+            kv_indptr = self._fill_kv_indptr_and_indices(
+                plan, bs, seq_lens, req_pool_indices, self.cuda_graph_kv_indices
+            )
         window_kv_indptr = self.window_kv_indptr
         window_kv_indices = None
         window_num_kv_splits = None
@@ -1014,20 +1031,27 @@ class TritonAttnBackend(AttentionBackend):
                 dtype=torch.int32,
                 device=self.device,
             )
-            # gpu_only: seq_lens_sum may be None; over-allocate is safe (ragged write).
-            seq_lens_sum = forward_batch.seq_lens_sum
-            if seq_lens_sum is None:
-                seq_lens_sum = bs * self.max_context_len
-            kv_indices = torch.empty(
-                seq_lens_sum, dtype=torch.int64, device=self.device
-            )
-            kv_indptr = self._fill_kv_indptr_and_indices(
-                forward_batch.kv_loc_plan,
-                bs,
-                forward_batch.seq_lens,
-                forward_batch.req_pool_indices,
-                kv_indices,
-            )
+            if self.dcp_size > 1:
+                kv_indptr, kv_indices, _ = self._dcp_kv_indices(
+                    forward_batch.req_pool_indices,
+                    forward_batch.seq_lens[:bs],
+                    self.kv_indptr,
+                )
+            else:
+                # gpu_only: seq_lens_sum may be None; over-allocate is safe (ragged write).
+                seq_lens_sum = forward_batch.seq_lens_sum
+                if seq_lens_sum is None:
+                    seq_lens_sum = bs * self.max_context_len
+                kv_indices = torch.empty(
+                    seq_lens_sum, dtype=torch.int64, device=self.device
+                )
+                kv_indptr = self._fill_kv_indptr_and_indices(
+                    forward_batch.kv_loc_plan,
+                    bs,
+                    forward_batch.seq_lens,
+                    forward_batch.req_pool_indices,
+                    kv_indices,
+                )
 
             if self.sliding_window_size is not None and self.sliding_window_size > 0:
                 # window_kv_offsets gives the start position in custom mask
@@ -1643,18 +1667,20 @@ class TritonAttnBackend(AttentionBackend):
         # dcp_size) through the masked path so each rank only stores the tokens
         # it owns. Non-DCP keeps the original write loc and plain set_kv_buffer.
         if self.dcp_size > 1:
-            # The rank-local slot of a physical loc is physical.
+            # Keep the masked writer. A missing or shorter positions tensor
+            # used to fall through to store_kvcache, which aborts on a
+            # negative CUDA-graph pad (floor-divided -1 stays -1).
+            safe, dcp_kv_mask = dcp_kv_write_loc(
+                forward_batch.out_cache_loc,
+                dcp_size=self.dcp_size,
+                dcp_rank=self.dcp_rank,
+                positions=forward_batch.positions,
+                preset_mask=forward_batch.dcp_kv_mask,
+            )
             loc = KVWriteLoc(
-                forward_batch.out_cache_loc // self.dcp_size,
+                safe,
                 physical=forward_batch.out_cache_loc_is_physical,
             )
-            if (
-                forward_batch.positions is not None
-                and forward_batch.positions.numel() == loc.loc.numel()
-            ):
-                dcp_kv_mask = forward_batch.positions % self.dcp_size == self.dcp_rank
-            else:
-                dcp_kv_mask = forward_batch.dcp_kv_mask
             kwargs = {"dcp_kv_mask": dcp_kv_mask}
         else:
             loc = loc_info
@@ -2046,23 +2072,21 @@ class TritonAttnBackend(AttentionBackend):
         )
 
         # Select the replicated K/V heads matching this rank's Q shard.
-        if k.numel() > 0:
-            if layer.tp_k_head_num > 1:
-                kv_head_start = (
-                    group.rank_in_group * layer.tp_k_head_num // group.world_size
-                )
-                kv_head_end = max(
-                    (group.rank_in_group + 1) * layer.tp_k_head_num // group.world_size,
-                    kv_head_start + 1,
-                )
-                k = k[:, kv_head_start:kv_head_end]
-                v = v[:, kv_head_start:kv_head_end]
-
+        # Prefix attention keeps the unsplit K: its group size is taken from
+        # that tensor, and the buffer still holds every KV head.
+        k_cur, v_cur, k_prefix, v_prefix = dcp_extend_kv_head_views(
+            k,
+            v,
+            tp_k_head_num=layer.tp_k_head_num,
+            dcp_rank=group.rank_in_group,
+            dcp_world=group.world_size,
+        )
+        if k_cur.numel() > 0:
             empty_kv_indptr = torch.zeros_like(kv_indptr)
             self.extend_attention_fwd(
                 q_local,
-                k.contiguous(),
-                v.contiguous(),
+                k_cur.contiguous(),
+                v_cur.contiguous(),
                 current_out,
                 k_buffer,
                 v_buffer,
@@ -2102,8 +2126,8 @@ class TritonAttnBackend(AttentionBackend):
             device=q.device,
             dtype=torch.float32,
         )
-        empty_k = k[:0].contiguous()
-        empty_v = v[:0].contiguous()
+        empty_k = k_prefix[:0].contiguous()
+        empty_v = v_prefix[:0].contiguous()
         self.extend_attention_fwd(
             q_all,
             empty_k,

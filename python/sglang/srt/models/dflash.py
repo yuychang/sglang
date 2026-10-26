@@ -22,6 +22,7 @@ from sglang.srt.layers.linear import (
     MergedColumnParallelLinear,
     QKVParallelLinear,
     ReplicatedLinear,
+    ReplicatedParallelGroup,
     RowParallelLinear,
 )
 from sglang.srt.layers.logits_processor import (
@@ -215,17 +216,35 @@ class DFlashAttention(nn.Module):
             f"total_num_heads={self.total_num_heads}, tp_size={tp_size}."
         )
         self.num_heads = self.total_num_heads // tp_size
-        if self.total_num_kv_heads >= tp_size:
-            assert self.total_num_kv_heads % tp_size == 0, (
-                f"DFlashAttention requires total_num_kv_heads divisible by tp_size when >= tp_size. "
-                f"total_num_kv_heads={self.total_num_kv_heads}, tp_size={tp_size}."
+        from sglang.srt.mem_cache.draft_dcp import (
+            draft_kv_tp_size,
+            dspark_draft_joins_dcp,
+        )
+
+        # HIP DSpark replicates KV heads inside the DCP group and shards the
+        # sequence. Query heads stay on the TP partition; the DCP kernel
+        # all-gathers them and reduce-scatters the output.
+        self._kv_parallel_group = None
+        kv_tp_size = tp_size
+        if dspark_draft_joins_dcp():
+            dcp_size = int(get_parallel().attn_dcp_size)
+            kv_tp_size = draft_kv_tp_size(tp_size=tp_size, dcp_size=dcp_size)
+            self._kv_parallel_group = ReplicatedParallelGroup(
+                group="tp", replica_size=dcp_size
+            )
+        if self.total_num_kv_heads >= kv_tp_size:
+            assert self.total_num_kv_heads % kv_tp_size == 0, (
+                "DFlashAttention requires total_num_kv_heads divisible by the "
+                f"KV partition. total_num_kv_heads={self.total_num_kv_heads}, "
+                f"kv_tp_size={kv_tp_size}."
             )
         else:
-            assert tp_size % self.total_num_kv_heads == 0, (
-                f"DFlashAttention requires tp_size divisible by total_num_kv_heads when total_num_kv_heads < tp_size. "
-                f"total_num_kv_heads={self.total_num_kv_heads}, tp_size={tp_size}."
+            assert kv_tp_size % self.total_num_kv_heads == 0, (
+                "DFlashAttention requires the KV partition divisible by "
+                f"total_num_kv_heads. total_num_kv_heads={self.total_num_kv_heads}, "
+                f"kv_tp_size={kv_tp_size}."
             )
-        self.num_kv_heads = max(1, self.total_num_kv_heads // tp_size)
+        self.num_kv_heads = max(1, self.total_num_kv_heads // kv_tp_size)
         self.head_dim = head_dim
         self.q_size = self.num_heads * head_dim
         self.kv_size = self.num_kv_heads * head_dim
@@ -337,6 +356,7 @@ class DFlashAttention(nn.Module):
             bias=bias,
             quant_config=quant_config,
             prefix=f"{prefix}.qkv_proj" if prefix else "qkv_proj",
+            kv_parallel_group=self._kv_parallel_group,
         )
 
     def forward_prepare_npu(self, positions, hidden_states):

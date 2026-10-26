@@ -14,9 +14,11 @@ from sglang.srt.distributed.communication_op import tensor_model_parallel_all_ga
 from sglang.srt.environ import envs
 from sglang.srt.layers.linear import ReplicatedLinear
 from sglang.srt.layers.logits_processor import should_apply_lm_head_quant_method
+from sglang.srt.mem_cache.draft_dcp import dcp_joined_kv_locs, dspark_draft_joins_dcp
 from sglang.srt.mem_cache.memory_pool import KVWriteLoc
 from sglang.srt.model_loader.weight_utils import default_weight_loader
 from sglang.srt.models.dflash import DFlashDraftModel
+from sglang.srt.runtime_context import get_parallel
 from sglang.srt.speculative.dflash_utils import can_dflash_slice_qkv_weight
 from sglang.srt.speculative.dspark_components.dspark_config import (
     get_dspark_sample_from_anchor,
@@ -660,7 +662,10 @@ class DSparkDraftMixin:
             else self.project_target_hidden(target_hidden)
         )
 
-        bundle = self._fused_kv_write_bundle(pool)
+        # The fused writer stores every widened id. A joined draft's device
+        # pool only holds this rank's rows, so that path would abort once the
+        # allocator walks past the physical size.
+        bundle = None if dspark_draft_joins_dcp() else self._fused_kv_write_bundle(pool)
         if bundle is not None:
             from sglang.kernels.ops.speculative.dspark.fused_kv_write import (
                 fused_kv_norm_rope_write,
@@ -709,7 +714,30 @@ class DSparkDraftMixin:
                 k = attn.apply_k_rope(positions, k)
                 k = k.view(-1, attn.num_kv_heads, attn.head_dim)
                 v = v.view(-1, attn.num_kv_heads, attn.head_dim)
-            if cache_loc_2d is not None and commit_lens is not None:
+            if dspark_draft_joins_dcp():
+                # Injector ids are the allocator's widened slots. Collapse
+                # them onto this rank's physical rows before the store.
+                parallel = get_parallel()
+                raw = cache_loc if cache_loc_2d is None else cache_loc_2d.reshape(-1)
+                row_width = None if cache_loc_2d is None else cache_loc_2d.shape[1]
+                safe, owned = dcp_joined_kv_locs(
+                    raw,
+                    dcp_size=parallel.attn_dcp_size,
+                    dcp_rank=parallel.attn_dcp_rank,
+                    positions=positions,
+                    commit_lens=commit_lens,
+                    row_width=row_width,
+                )
+                pool.set_kv_buffer(
+                    attn.attn,
+                    KVWriteLoc(safe, physical=True),
+                    k,
+                    v,
+                    attn.attn.k_scale,
+                    attn.attn.v_scale,
+                    dcp_kv_mask=owned,
+                )
+            elif cache_loc_2d is not None and commit_lens is not None:
                 pool.set_kv_buffer_prefix_valid(
                     attn.attn,
                     cache_loc_2d,
@@ -720,8 +748,7 @@ class DSparkDraftMixin:
                     attn.attn.v_scale,
                 )
             else:
-                # `cache_loc` comes from `TargetHiddenKvInjector.ids_for`,
-                # already in the ids the draft pool indexes.
+                # A replicated draft indexes the allocator's widened locs raw.
                 pool.set_kv_buffer(
                     attn.attn,
                     KVWriteLoc(cache_loc, physical=True),
