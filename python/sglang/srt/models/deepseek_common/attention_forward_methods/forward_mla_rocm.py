@@ -24,6 +24,7 @@ from sglang.srt.layers import deep_gemm_wrapper
 from sglang.srt.layers.dcp import (
     all_gather_kv_cache_for_mla_extend,
     all_gather_q_for_mla_decode,
+    all_gather_q_fp8_for_mla_verify,
     cp_lse_ag_out_rs_mla,
     dcp_a2a_lse_reduce,
 )
@@ -46,7 +47,10 @@ from sglang.srt.lora.deepseek_mla_correction import (
 from sglang.srt.mem_cache.hisparse_memory_pool import HiSparseDSATokenToKVPool
 from sglang.srt.mem_cache.memory_pool import KVWriteLoc
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
-from sglang.srt.model_executor.forward_context import get_token_to_kv_pool
+from sglang.srt.model_executor.forward_context import (
+    get_attn_backend,
+    get_token_to_kv_pool,
+)
 from sglang.srt.model_executor.runner_backend_utils.tc_piecewise_cuda_graph import (
     is_in_tc_piecewise_cuda_graph,
 )
@@ -873,13 +877,23 @@ class DeepseekMLARocmForwardMixin:
             q_pe, k_pe = self.rotary_emb(positions, q_pe, k_pe)
 
         # all_gather q_pe, q_nope_out,take tp8 as an example， q_pe [B, H, ROPE_DIM], q_nope_out [B, H, NOPE_DIM] gathered to [B, H * dcp_world_size, ROPE_DIM] [B, H * dcp_world_size, NOPE_DIM] for decode batch, and all gather k_pe, k_nope for extend batch.
+        dcp_verify_q_fp8 = None
         if self.dcp_size > 1:
             if self.is_dcp_mla_decode_phase(forward_batch):
                 if not q_replicate_active:
-                    q_nope_out, q_pe = all_gather_q_for_mla_decode(
-                        q_nope_out=q_nope_out,
-                        q_pe=q_pe,
-                    )
+                    if (
+                        forward_batch.forward_mode.is_target_verify()
+                        and llama_4_scaling is None
+                        and get_attn_backend().takes_fp8_dcp_verify_q()
+                    ):
+                        dcp_verify_q_fp8 = all_gather_q_fp8_for_mla_verify(
+                            q_nope_out=q_nope_out, q_pe=q_pe, fp8_dtype=fp8_dtype
+                        )
+                    else:
+                        q_nope_out, q_pe = all_gather_q_for_mla_decode(
+                            q_nope_out=q_nope_out,
+                            q_pe=q_pe,
+                        )
             elif forward_batch.forward_mode.is_extend():
                 # Assemble the full sequence into dcp_kv_buffer, which the
                 # backend attends over instead of the sharded local cache.
@@ -915,6 +929,7 @@ class DeepseekMLARocmForwardMixin:
             llama_4_scaling,
             q_nope if fuse_bmm_rope_cache else None,
             rocm_projection_plan,
+            dcp_verify_q_fp8,
         )
 
     def forward_absorb_rocm_core(
@@ -930,6 +945,7 @@ class DeepseekMLARocmForwardMixin:
         llama_4_scaling,
         q_nope_unabsorbed=None,
         rocm_projection_plan: Optional[RocmMlaProjectionFusionPlan] = None,
+        dcp_verify_q_fp8: Optional[torch.Tensor] = None,
     ):
         save_kv_cache = True
 
@@ -1087,16 +1103,22 @@ class DeepseekMLARocmForwardMixin:
             )
             and self.dcp_size > 1
         ):
-            q = torch.cat([q_nope_out, q_pe], dim=-1)
-            if llama_4_scaling is not None:
-                q[..., : self.kv_lora_rank] *= llama_4_scaling
+            if dcp_verify_q_fp8 is not None:
+                q = dcp_verify_q_fp8
+            else:
+                q = torch.cat([q_nope_out, q_pe], dim=-1)
+                if llama_4_scaling is not None:
+                    q[..., : self.kv_lora_rank] *= llama_4_scaling
             get_token_to_kv_pool().set_mla_kv_buffer(
                 self.attn_mqa,
                 KVWriteLoc.for_batch(forward_batch),
                 k_nope,
                 k_pe,
             )
-            if forward_batch.forward_mode.is_target_verify():
+            if (
+                forward_batch.forward_mode.is_target_verify()
+                and dcp_verify_q_fp8 is None
+            ):
                 k_window = torch.cat([k_nope, k_pe], dim=-1)
                 v_window = k_nope
             else:
