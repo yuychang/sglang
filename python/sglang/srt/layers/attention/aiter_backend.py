@@ -170,7 +170,7 @@ def _asm_cprr_kernel_heads(gathered_heads: int, q_len: int) -> int:
 # aiter/csrc/kernels/mla/reduce.cu. See https://github.com/ROCm/aiter/blob/7915f53a4225b3f9cb632a97a23369dbebcf1be0/csrc/kernels/mla/reduce.cu#L923
 _MLA_REDUCE_V1_HEADS = {
     64: frozenset({64}),
-    128: frozenset({1, 2, 4, 8, 10, 16, 32, 40, 64, 128}),
+    128: frozenset({1, 2, 4, 8, 10, 12, 16, 32, 40, 64, 128}),
     512: frozenset({8, 16, 32, 48, 64, 80, 96, 112, 128}),
 }
 
