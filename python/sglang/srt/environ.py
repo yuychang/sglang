@@ -2031,9 +2031,6 @@ class Envs:
     # front reads hidden_states once, and run the top-k plus the bf16 cast in one
     # epilogue kernel. See kernels/ops/moe/moe_front.py. Default on.
     SGLANG_K3_FUSED_FRONT = EnvBool(True)
-    # Dequantize Quark MXFP4 shared experts to BF16 at load so they join the
-    # merged Kimi-K3 MoE front on ROCm; at TP8 this takes ~2.8 GB/GPU from the KV pool.
-    SGLANG_OPT_HIP_K3_QUARK_SHARED_FULL_FRONT = EnvBool(False)
     # Route the merged Kimi-K3 MoE front GEMM through AITER's tuned BF16 GEMM in this
     # token window; measured on MI355X, its tuned rows win from M=1 up to M=192.
     SGLANG_OPT_HIP_K3_TUNED_MOE_FRONT = EnvBool(False)
@@ -2209,6 +2206,12 @@ _DEPRECATED_ENVS: Dict[str, _DeprecatedEnv] = {
     ),
     "SGLANG_PREFILL_DELAYER_TOKEN_USAGE_LOW_WATERMARK": _DeprecatedEnv(
         note="Please use '--prefill-delayer-token-usage-low-watermark' instead."
+    ),
+    "SGLANG_OPT_HIP_K3_QUARK_SHARED_FULL_FRONT": _DeprecatedEnv(
+        note="Shared experts are BF16 in the checkpoint. Load-time MXFP4 densify has been removed."
+    ),
+    "SGLANG_ROCM_K3_QUARK_SHARED_FULL_FRONT": _DeprecatedEnv(
+        note="Shared experts are BF16 in the checkpoint. Load-time MXFP4 densify has been removed."
     ),
 }
 
