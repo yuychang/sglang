@@ -14,6 +14,7 @@ from sglang.srt.configs.inkling import (
     InklingConvStateShape,
     InklingStateDType,
 )
+from sglang.srt.environ import envs
 from sglang.srt.mem_cache.base_prefix_cache import CacheRequestHandle
 from sglang.srt.mem_cache.device_pool_info import DevicePoolInfo, MambaStateBufferInfo
 from sglang.srt.mem_cache.hicache_storage import PoolHitPolicy, PoolName, PoolTransfer
@@ -32,6 +33,7 @@ from sglang.srt.mem_cache.hybrid_cache.hybrid_pool_assembler import (
     _MambaStrategy,
     _MambaSwaStrategy,
     _require_single_row_dsv4_swa_pages,
+    _split_hicache_size_with_mamba,
     _SwaStrategy,
     _uses_unified_page_envelope_host,
     build_full_draft_pools,
@@ -1635,6 +1637,29 @@ class TestMtpMhaPhysicalConstruction(CustomTestCase):
                     for host in allocated:
                         host.destroy()
                     allocated.clear()
+
+
+class TestMambaHostShare(CustomTestCase):
+    @staticmethod
+    def _pool(nbytes):
+        return SimpleNamespace(get_kv_size_bytes=lambda: nbytes)
+
+    def test_pinned_mamba_share_ignores_device_kv_growth(self):
+        mamba = self._pool(6 << 30)
+        with envs.SGLANG_HICACHE_MAMBA_HOST_GB.override(70.0):
+            for kv_bytes in (8 << 30, 12 << 30):
+                kv_gb, mamba_gb = _split_hicache_size_with_mamba(
+                    hicache_size=192, kv_pools=(self._pool(kv_bytes),), mamba_pool=mamba
+                )
+                self.assertEqual((kv_gb, mamba_gb), (122.0, 70.0))
+
+    def test_unset_keeps_proportional_split(self):
+        kv_gb, mamba_gb = _split_hicache_size_with_mamba(
+            hicache_size=192,
+            kv_pools=(self._pool(10 << 30),),
+            mamba_pool=self._pool(6 << 30),
+        )
+        self.assertEqual((kv_gb, mamba_gb), (120.0, 72.0))
 
 
 if __name__ == "__main__":
