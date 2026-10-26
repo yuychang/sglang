@@ -1015,6 +1015,12 @@ class MambaPool:
                     f"conv_state size: {get_tensor_size_bytes(conv_state) / GB:.2f}GB, "
                     f"ssm_state size: {get_tensor_size_bytes(temporal_state) / GB:.2f}GB "
                 )
+            # HiCache transfers only the persistent conv and temporal checkpoint.
+            # Verify scratch and ReplaySSM rings never leave the device, so they
+            # must not shrink the KV host-pool share.
+            self.host_capacity_bytes = self.State(
+                conv=conv_state, temporal=temporal_state
+            ).mem_usage_bytes()
             if _replayssm_on:
                 logger.info(
                     f"GDN ReplaySSM ring buffers allocated "

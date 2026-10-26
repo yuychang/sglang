@@ -164,6 +164,28 @@ class TestHybridStageLayerMappings(CustomTestCase):
 
 
 class TestMambaInfoRouting(CustomTestCase):
+    def test_host_capacity_excludes_speculative_scratch(self):
+        pool = MambaPool(
+            size=8,
+            spec_state_size=8,
+            cache_params=InklingConvCacheParams(
+                shape=InklingConvStateShape(conv=[(2, 2)], temporal=(2, 2, 2)),
+                layers=[0],
+                dtype=InklingStateDType(
+                    conv=torch.float32, temporal=torch.float32
+                ),
+            ),
+            mamba_layer_ids=[0],
+            speculative_num_draft_tokens=4,
+            device="cpu",
+        )
+
+        self.assertEqual(
+            pool.host_capacity_bytes,
+            pool.mamba_cache.conv[0].nbytes + pool.mamba_cache.temporal.nbytes,
+        )
+        self.assertLess(pool.host_capacity_bytes, pool.get_kv_size_bytes())
+
     def test_checkpoint_axis_routes_stage_layers_for_both_stacks(self):
         for tri_pool in (False, True):
             for start_layer in (0, 8):
