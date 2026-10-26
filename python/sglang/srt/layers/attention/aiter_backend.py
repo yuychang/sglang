@@ -27,6 +27,7 @@ from sglang.kernels.ops.attention.kv_indices import (
 )
 from sglang.kernels.ops.attention.utils import assert_buffer_fits
 from sglang.srt.layers.attention.base_attn_backend import AttentionBackend
+from sglang.srt.mem_cache.draft_dcp import dspark_mha_uses_unified_attention
 from sglang.srt.layers.dcp import update_local_kv_lens_for_dcp
 from sglang.srt.layers.dcp.planner import plan_dcp_decode_metadata
 from sglang.srt.layers.dp_attention import is_dp_attention_enabled
@@ -561,6 +562,22 @@ class AiterAttnBackend(AttentionBackend):
             self.use_triton_unified_attention = get_bool_env_var(
                 "SGLANG_USE_AITER_UNIFIED_ATTN"
             )
+
+        # The 4D unified view cannot address a SHUFFLE 5D pool. Those drafts
+        # stay on the vectorized AITER path.
+        spec_algorithm = getattr(model_runner, "spec_algorithm", None)
+        self._dspark_mha_unified = (
+            dspark_mha_uses_unified_attention(
+                is_draft_worker=bool(getattr(model_runner, "is_draft_worker", False)),
+                is_dspark=bool(
+                    spec_algorithm is not None and spec_algorithm.is_dspark()
+                ),
+                use_mla=self.use_mla,
+            )
+            and not self.kv_cache_is_vectorized_5d
+        )
+        if self._dspark_mha_unified:
+            self.use_triton_unified_attention = True
 
         # Decode metadata format. unified_attention and pa_decode_gluon (the
         # SHUFFLE 5D decode kernel) both read kv_indices as a 2-D
@@ -3461,8 +3478,12 @@ class AiterAttnBackend(AttentionBackend):
     def _use_fused_fp8_kv_write(self, layer: RadixAttention) -> bool:
         # Fused write reuses K's num_heads/head_dim for V, so it needs FP8,
         # non-MLA, non-SWA, and matching K/V head count + head_dim.
+        # The DSpark draft keeps set_kv_buffer. The fused paged writer is a
+        # different store than the one this pool was scored with, and the
+        # attention change is the unified kernel, not the write.
         return (
-            self.kv_cache_dtype == fp8_dtype
+            not self._dspark_mha_unified
+            and self.kv_cache_dtype == fp8_dtype
             and not self.use_mla
             and not self.use_sliding_window_kv_pool
             and layer.tp_k_head_num == layer.tp_v_head_num

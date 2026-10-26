@@ -79,6 +79,21 @@ def _estimate_hicache_bytes(
     return total + sum(_draft_bytes(pool, draft) for draft in drafts)
 
 
+def _meet_then_rank_budget() -> int:
+    """This rank's HiCache allowance, sampled after every rank has arrived.
+
+    A late rank that reads psutil after the others have pinned their pools
+    divides that leftover by ``ranks_per_host`` again and rejects a pool the
+    machine still fits.
+    """
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        arrived = torch.zeros(1, dtype=torch.int64)
+        torch.distributed.all_reduce(
+            arrived, group=get_parallel().world_group.cpu_group
+        )
+    return host_memory_budget_bytes()
+
+
 @contextmanager
 def auto_size_hicache(
     params: CacheInitParams, draft_plan: HiCacheDraftPlan | None, *, enabled: bool
@@ -86,10 +101,22 @@ def auto_size_hicache(
     """Reduce the default HiCache ratio until this machine's host pools fit.
 
     Resolution nulls the fraction for an explicit --hicache-ratio/--hicache-size.
+    That path still books every host pool against one pre-allocation snapshot.
     """
-    fraction = get_memory().hicache_host_memory_fraction
-    if not enabled or fraction is None:
+    if not enabled:
         yield
+        return
+    fraction = get_memory().hicache_host_memory_fraction
+    if fraction is None:
+        budget = _meet_then_rank_budget()
+        logger.info(
+            "HiCache explicit size: %.1f GiB host memory per rank "
+            "(%d ranks on this host).",
+            budget / 1024**3,
+            ranks_per_host(),
+        )
+        with host_memory_budget_scope(budget):
+            yield
         return
     requested = get_memory().hicache_ratio
     device_bytes = _estimate_hicache_bytes(params, draft_plan)

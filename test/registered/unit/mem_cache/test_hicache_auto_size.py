@@ -160,6 +160,46 @@ class TestHiCacheAutoSize(CustomTestCase):
             resolution_result(explicit, "hicache_host_memory_fraction", 0.8)
         )
 
+    def test_explicit_size_books_one_snapshot_after_ranks_meet(self):
+        # A fixed --hicache-size opts out of ratio shrinking, but each pool
+        # must still book the allowance sampled before any rank pins memory.
+        # Re-reading psutil per pool divides the leftover by the rank count.
+        rank_budget = 50_000
+        host_free = base.HICACHE_HOST_MEMORY_RESERVE_BYTES + 8 * rank_budget
+        order = []
+
+        def sample(*, allow_cgroup_fallback=False):
+            order.append("sample")
+            return host_free
+
+        def barrier(tensor, group=None):
+            order.append("barrier")
+            return tensor
+
+        memory = Mock(
+            hicache_host_memory_fraction=None,
+            hicache_ratio=2.0,
+        )
+        with (
+            patch.object(sizing, "get_memory", return_value=memory),
+            patch.object(base, "ranks_per_host", return_value=8),
+            patch.object(base, "available_host_memory_bytes", side_effect=sample),
+            patch.object(torch.distributed, "is_initialized", return_value=True),
+            patch.object(torch.distributed, "all_reduce", side_effect=barrier),
+            patch.object(
+                sizing,
+                "get_parallel",
+                return_value=Mock(world_group=Mock(cpu_group="cpu")),
+            ),
+            sizing.auto_size_hicache(Mock(), None, enabled=True),
+        ):
+            self.assertEqual(order, ["barrier", "sample"])
+            self.assertEqual(base.host_memory_budget_bytes(1_000), rank_budget)
+            self.assertEqual(
+                base.host_memory_budget_bytes(1_000), rank_budget - 1_000
+            )
+        self.assertIsNone(base._host_memory_budget.get())
+
 
 if __name__ == "__main__":
     unittest.main()

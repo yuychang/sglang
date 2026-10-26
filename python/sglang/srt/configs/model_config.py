@@ -1676,11 +1676,16 @@ class ModelConfig:
         """Number of KV heads per GPU.
 
         DCP ranks replicate KV, so heads shard across ``tp // dcp`` groups.
-        Drafts never join the group and ignore ``dcp_size``. With fewer heads
-        than groups, each GPU keeps one.
+        A replicated draft ignores ``dcp_size``. HIP DSpark joins the group
+        and uses the same rule as the target. With fewer heads than groups,
+        each GPU keeps one.
         """
         total_num_kv_heads = self.get_total_num_kv_heads()
-        if self.is_draft_model:
+        from sglang.srt.mem_cache.draft_dcp import dspark_draft_joins_dcp
+
+        if self.is_draft_model and not (
+            dspark_draft_joins_dcp() and is_dspark_draft(self.hf_config)
+        ):
             dcp_size = 1
         kv_tensor_parallel_size = tensor_parallel_size // dcp_size
         return max(1, total_num_kv_heads // kv_tensor_parallel_size)

@@ -510,11 +510,16 @@ class KVCacheConfigurator:
     # Note(kpham-sgl):
     # 1. A replicated draft indexes the allocator's virtual locs raw, so its pools
     #    span and page that space; the sharded target translates and stays per-rank.
+    #    HIP DSpark joins DCP, so its pool is per-rank like the target.
     # 2. A pool must page as its allocator does, or its last page falls short.
     @property
     def loc_space_scale(self) -> int:
+        from sglang.srt.mem_cache.draft_dcp import dspark_draft_joins_dcp
+
         dcp_size = get_parallel().attn_dcp_size
-        return dcp_size if (self.is_draft_worker and dcp_size > 1) else 1
+        if self.is_draft_worker and dcp_size > 1 and not dspark_draft_joins_dcp():
+            return dcp_size
+        return 1
 
     @property
     def pool_page_size(self) -> int:
