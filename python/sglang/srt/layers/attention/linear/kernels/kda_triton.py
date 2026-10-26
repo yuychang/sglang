@@ -1,3 +1,4 @@
+import logging
 from typing import Optional
 
 import torch
@@ -6,6 +7,12 @@ from sglang.srt.layers.attention.linear.kernels.kernel_backend import (
     LinearAttnKernelBase,
 )
 from sglang.srt.utils import is_cpu, is_npu, is_xpu
+
+logger = logging.getLogger(__name__)
+
+# gfx950 Gluon chunk_kda is the measured prefill path. Empty string means the
+# arch probe already failed and must not be retried on every extend.
+_AITER_KDA_ARCH: Optional[str] = None
 
 if not is_cpu():
     from sglang.kernels.ops.attention.fla.fused_recurrent import (
@@ -20,6 +27,141 @@ if not is_cpu():
     )
 
 
+def _aiter_kda_arch() -> str:
+    global _AITER_KDA_ARCH
+    if _AITER_KDA_ARCH is None:
+        try:
+            from aiter.ops.triton.utils._triton import arch_info
+
+            _AITER_KDA_ARCH = arch_info.get_arch()
+        except Exception:
+            _AITER_KDA_ARCH = ""
+    return _AITER_KDA_ARCH
+
+
+def _dense_head(x: torch.Tensor, head_dim: int) -> bool:
+    return (
+        x.ndim == 4
+        and x.shape[0] == 1
+        and x.shape[-1] == head_dim
+        and x.stride()[-2:] == (head_dim, 1)
+        and x.stride(1) % 8 == 0
+    )
+
+
+def _aiter_chunk_kda_applies(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    g: torch.Tensor,
+    beta: torch.Tensor,
+    *,
+    ssm_states: torch.Tensor,
+    query_start_loc: torch.Tensor,
+    A_log: Optional[torch.Tensor],
+    dt_bias: Optional[torch.Tensor],
+    lower_bound: Optional[float],
+    beta_is_raw: bool,
+    return_intermediate_states: bool,
+    track_state: Optional[torch.Tensor],
+) -> bool:
+    """True when the gfx950 Gluon prefill matches this extend.
+
+    The Gluon kernel fuses L2-norm, the safe gate, and beta sigmoid, and it
+    writes one final state per sequence. Interior chunk snapshots and an
+    already-activated beta stay on Triton chunk_kda.
+    """
+    if _aiter_kda_arch() != "gfx950":
+        return False
+    if (
+        not beta_is_raw
+        or return_intermediate_states
+        or track_state is not None
+        or lower_bound is None
+        or A_log is None
+        or dt_bias is None
+    ):
+        return False
+    if not (-5.5 <= float(lower_bound) < 0):
+        return False
+    if query_start_loc is None or query_start_loc.dtype not in (
+        torch.int32,
+        torch.int64,
+    ):
+        return False
+    head_dim = 128
+    if not _dense_head(q, head_dim):
+        return False
+    if k.shape != q.shape or v.shape != q.shape or g.shape != q.shape:
+        return False
+    if not (
+        _dense_head(k, head_dim)
+        and _dense_head(v, head_dim)
+        and _dense_head(g, head_dim)
+    ):
+        return False
+    num_heads = q.shape[2]
+    if beta.shape != (1, q.shape[1], num_heads) or beta.stride(-1) != 1:
+        return False
+    if A_log.numel() != num_heads or dt_bias.numel() != num_heads * head_dim:
+        return False
+    if ssm_states.ndim != 4 or tuple(ssm_states.shape[1:]) != (
+        num_heads,
+        head_dim,
+        head_dim,
+    ):
+        return False
+    return True
+
+
+def _aiter_chunk_kda_extend(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    g: torch.Tensor,
+    beta: torch.Tensor,
+    *,
+    ssm_states: torch.Tensor,
+    cache_indices: torch.Tensor,
+    query_start_loc: torch.Tensor,
+    A_log: torch.Tensor,
+    dt_bias: torch.Tensor,
+    lower_bound: float,
+) -> torch.Tensor:
+    """Gather the indexed bf16/fp32 slots, run Gluon, scatter the final state."""
+    from aiter.ops.triton.attention.chunk_kda import chunk_kda as aiter_chunk_kda
+
+    slots = cache_indices
+    if slots.dtype not in (torch.int32, torch.int64):
+        slots = slots.to(torch.int64)
+    # A negative slot is padding. Clamp only for the gather address; the
+    # stored value for that row is the original slot 0, so the copy is a no-op
+    # unless a real sequence also owns slot 0.
+    dest = torch.where(slots >= 0, slots, torch.zeros_like(slots)).to(torch.long)
+    gathered = ssm_states.index_select(0, dest)
+    valid = (slots >= 0).view(-1, 1, 1, 1)
+    initial = torch.where(
+        valid, gathered.float(), torch.zeros_like(gathered, dtype=torch.float32)
+    )
+    out, final = aiter_chunk_kda(
+        q,
+        k,
+        v,
+        g,
+        beta,
+        A_log.reshape(-1).contiguous(),
+        dt_bias.reshape(-1).contiguous(),
+        float(lower_bound),
+        query_start_loc.contiguous(),
+        initial_state=initial,
+        output_final_state=True,
+    )
+    current = ssm_states.index_select(0, dest)
+    written = torch.where(valid, final.to(dtype=ssm_states.dtype), current)
+    ssm_states.index_copy_(0, dest, written)
+    return out
+
+
 class TritonKDAKernel(LinearAttnKernelBase):
     """Triton-based kernel for KDA (Kimi Delta Attention) linear attention."""
 
@@ -29,6 +171,7 @@ class TritonKDAKernel(LinearAttnKernelBase):
     supports_packed_decode: bool = not is_cpu() and not is_npu() and not is_xpu()
     supports_fused_chain_verify: bool = not is_cpu() and not is_npu()
     supports_track_state_snapshot: bool = True
+    _logged_aiter_extend: bool = False
 
     def packed_decode(
         self,
@@ -236,6 +379,37 @@ class TritonKDAKernel(LinearAttnKernelBase):
         return_intermediate_states: bool = False,
         **kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        if _aiter_chunk_kda_applies(
+            q,
+            k,
+            v,
+            g,
+            beta,
+            ssm_states=ssm_states,
+            query_start_loc=query_start_loc,
+            A_log=A_log,
+            dt_bias=dt_bias,
+            lower_bound=lower_bound,
+            beta_is_raw=beta_is_raw,
+            return_intermediate_states=return_intermediate_states,
+            track_state=kwargs.get("track_state"),
+        ):
+            if not TritonKDAKernel._logged_aiter_extend:
+                TritonKDAKernel._logged_aiter_extend = True
+                logger.info("KDA prefill extend: aiter chunk_kda")
+            return _aiter_chunk_kda_extend(
+                q,
+                k,
+                v,
+                g,
+                beta,
+                ssm_states=ssm_states,
+                cache_indices=cache_indices,
+                query_start_loc=query_start_loc,
+                A_log=A_log,
+                dt_bias=dt_bias,
+                lower_bound=lower_bound,
+            )
         return chunk_kda(
             q=q,
             k=k,
