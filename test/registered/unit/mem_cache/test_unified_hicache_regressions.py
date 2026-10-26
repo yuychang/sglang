@@ -48,6 +48,17 @@ class TestHiCacheIndexDomains(unittest.TestCase):
         ]
         self.assertEqual(_split_hicache_size(10, tuple(pools)), (6, 3, 1))
 
+    def test_mamba_host_split_excludes_device_only_verify_scratch(self):
+        # Mamba HiCache transfers persistent conv/temporal checkpoints, not
+        # speculative rollback scratch. Its device allocation can be much
+        # larger than the host mirror, so split by host_capacity_bytes.
+        kv = SimpleNamespace(host_capacity_bytes=None, get_kv_size_bytes=lambda: 600)
+        mamba = SimpleNamespace(
+            host_capacity_bytes=300,
+            get_kv_size_bytes=lambda: 1500,
+        )
+        self.assertEqual(_split_hicache_size(12, (kv, mamba)), (8, 4))
+
 
 class TestHostGateCapacity(unittest.TestCase):
     def test_schedulable_memo_tracks_gate_without_allocator_mutation(self):
