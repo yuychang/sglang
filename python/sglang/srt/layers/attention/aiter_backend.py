@@ -761,9 +761,16 @@ class AiterAttnBackend(AttentionBackend):
             self.fix_max_split_per_batch = self.max_split_per_batch
 
     def pad_heads(self, x: torch.Tensor, padded: int) -> torch.Tensor:
+        # Padded heads are sliced off after mla_reduce_v1, so a zero tail suffices.
         num_head = x.shape[1]
-        reps = -(-padded // num_head)  # ceil(padded / num_head)
-        return x.repeat(1, reps, 1)[:, :padded, :].contiguous()
+        if num_head == padded:
+            return x if x.is_contiguous() else x.contiguous()
+        if num_head > padded:
+            return x[:, :padded].contiguous()
+        out = x.new_empty((x.shape[0], padded, *x.shape[2:]))
+        out[:, :num_head].copy_(x)
+        out[:, num_head:].zero_()
+        return out
 
     def check_fp8_prefill_num_head(
         self, *, num_head: int, num_kv_head: int, v_head_dim: int
