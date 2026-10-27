@@ -43,6 +43,18 @@ def _select_recurrent_launch_config(
     ):
         return (8, 4) if n == 1 else (16, 2)
     if (
+        _is_hip
+        and _is_gfx95
+        and is_kda
+        and 0 < n <= 4
+        and h == hv == 12
+        and k == 128
+        and v == 128
+    ):
+        # Kimi-K3 TP8 verify measured on MI355X: 12 heads give 48 CTAs at BV=32;
+        # BV=8 is 15.2 vs 19.9 us at n=1, T=8. One warp keeps it bit-exact.
+        return 8, 1
+    if (
         target_verify
         and not _is_hip
         and not is_kda

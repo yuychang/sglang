@@ -236,6 +236,78 @@ def test_qwen35_tp4_launch_config_is_narrow():
     assert _select_recurrent_launch_config(3, 4, 16, 128, 128, True) == (32, 1)
 
 
+_requires_gfx95 = pytest.mark.skipif(
+    not (torch.version.hip and is_gfx95_supported()), reason="requires AMD gfx95"
+)
+
+
+@_requires_gfx95
+def test_kimi_k3_tp8_kda_launch_config_is_narrow():
+    assert _select_recurrent_launch_config(1, 12, 12, 128, 128, True, True) == (8, 1)
+    assert _select_recurrent_launch_config(4, 12, 12, 128, 128, True, True) == (8, 1)
+    assert _select_recurrent_launch_config(5, 12, 12, 128, 128, True, True) == (32, 1)
+    assert _select_recurrent_launch_config(1, 12, 12, 128, 128, False, True) == (32, 1)
+
+
+@_requires_gfx95
+@pytest.mark.skipif(not KERNELS_AVAILABLE, reason="Kernels not available")
+@pytest.mark.parametrize("N", [1, 4])
+@pytest.mark.parametrize("T", [4, 8])
+def test_kimi_k3_tp8_kda_verify_launch_is_bit_exact(N: int, T: int, monkeypatch):
+    """The narrow KDA verify launch matches BV=32, ReplaySSM rings included."""
+    H = HV = 12
+    K = V = 128
+    slots, ring_len = 8, 16
+    torch.manual_seed(2025)
+    tokens = N * T
+    inputs = dict(
+        A_log=torch.randn(HV, device="cuda") * 0.1,
+        a=torch.randn(1, tokens, HV * K, dtype=torch.bfloat16, device="cuda"),
+        dt_bias=torch.randn(HV * K, device="cuda") * 0.1,
+        softplus_beta=1.0,
+        softplus_threshold=20.0,
+        q=torch.randn(1, tokens, H, K, dtype=torch.bfloat16, device="cuda"),
+        k=torch.randn(1, tokens, H, K, dtype=torch.bfloat16, device="cuda"),
+        v=torch.randn(1, tokens, HV, V, dtype=torch.bfloat16, device="cuda"),
+        b=torch.randn(1, tokens, HV, dtype=torch.bfloat16, device="cuda"),
+        initial_state_source=(torch.randn(slots, HV, V, K, device="cuda") * 0.05).to(
+            torch.bfloat16
+        ),
+        initial_state_indices=torch.randperm(slots, device="cuda")[:N].to(torch.int32),
+        cu_seqlens=torch.arange(0, tokens + 1, T, dtype=torch.int32, device="cuda"),
+        use_qk_l2norm_in_kernel=True,
+        is_kda=True,
+        disable_state_update=True,
+        cache_steps=T,
+        lower_bound=-5.0,
+        cache_ring=True,
+    )
+    ring_shapes = dict(
+        replayssm_rawv=((slots, HV, ring_len, V), torch.bfloat16),
+        replayssm_rawk=((slots, H, ring_len, K), torch.bfloat16),
+        replayssm_g=((slots, HV, ring_len, K), torch.float32),
+        replayssm_beta=((slots, HV, ring_len), torch.float32),
+    )
+
+    def run(launch_config):
+        monkeypatch.setattr(
+            recurrent_module, "_select_recurrent_launch_config", launch_config
+        )
+        rings = {
+            name: torch.zeros(shape, dtype=dtype, device="cuda")
+            for name, (shape, dtype) in ring_shapes.items()
+        }
+        out = fused_sigmoid_gating_delta_rule_update(**inputs, **rings)
+        return out, rings
+
+    out_tuned, rings_tuned = run(_select_recurrent_launch_config)
+    out_default, rings_default = run(lambda *args, **kwargs: (32, 1))
+
+    assert torch.equal(out_tuned, out_default)
+    for name in ring_shapes:
+        assert torch.equal(rings_tuned[name], rings_default[name]), name
+
+
 _requires_sm90 = pytest.mark.skipif(
     torch.version.hip is not None or not is_sm90_supported(), reason="requires SM90"
 )
