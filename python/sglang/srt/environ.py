@@ -1065,6 +1065,10 @@ class Envs:
     # gfx950 h12 fp8 MLA: run decode and a verify window of at most 4 tokens on
     # the persistent fp8-Q asm kernel, even with SGLANG_AITER_MLA_PERSIST=0.
     SGLANG_OPT_HIP_MLA_FP8_Q_ASM = EnvBool(False)
+    # Widest verify window SGLANG_OPT_HIP_MLA_FP8_Q_ASM takes, at most 8. aiter folds
+    # 5-8 tokens onto its 32-head qlen-4 kernel: on MI355X that beats Gluon from
+    # about 128K tokens of context, and loses to it below.
+    SGLANG_OPT_HIP_MLA_FP8_Q_ASM_MAX_QLEN = EnvInt(4)
     # Run gfx942 block-FP8 linears with the AITER CK blockscale GEMM instead of Triton.
     SGLANG_AITER_GFX942_BLOCKSCALE_USE_CK = EnvBool(False)
 
