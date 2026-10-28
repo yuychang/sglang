@@ -4,7 +4,6 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, NamedTuple, Optional
 
-from sglang.srt.environ import envs
 from sglang.srt.mem_cache.hicache_storage import (
     PoolHitPolicy,
     PoolName,
@@ -248,15 +247,17 @@ def _split_hicache_size(
 
 
 def _split_hicache_size_with_mamba(
-    hicache_size: int, kv_pools: tuple[Any, ...], mamba_pool: Any
+    *,
+    hicache_size: int,
+    hicache_mamba_size: int,
+    kv_pools: tuple[Any, ...],
+    mamba_pool: Any,
 ) -> tuple[float, ...]:
     # A proportional split shrinks the Mamba host pool whenever the device KV pool grows.
-    mamba_host_gb = envs.SGLANG_HICACHE_MAMBA_HOST_GB.get()
-    if mamba_host_gb is None:
+    if hicache_mamba_size == 0:
         return _split_hicache_size(hicache_size, (*kv_pools, mamba_pool))
-    mamba_host_gb = min(mamba_host_gb, hicache_size)
-    kv_host_sizes = _split_hicache_size(hicache_size - mamba_host_gb, kv_pools)
-    return (*kv_host_sizes, mamba_host_gb)
+    kv_host_sizes = _split_hicache_size(hicache_size - hicache_mamba_size, kv_pools)
+    return (*kv_host_sizes, hicache_mamba_size)
 
 
 def build_pool_entry(
@@ -1324,6 +1325,7 @@ def build_hybrid_mamba_stack(
     if get_memory().hicache_size > 0:
         kv_host_size, mamba_host_size = _split_hicache_size_with_mamba(
             hicache_size=get_memory().hicache_size,
+            hicache_mamba_size=get_memory().hicache_mamba_size,
             kv_pools=(kv_pool,),
             mamba_pool=mamba_pool,
         )
@@ -1464,6 +1466,7 @@ def build_hybrid_mamba_swa_stack(
     if get_memory().hicache_size > 0:
         kv_host_size, swa_host_size, mamba_host_size = _split_hicache_size_with_mamba(
             hicache_size=get_memory().hicache_size,
+            hicache_mamba_size=get_memory().hicache_mamba_size,
             kv_pools=(full_kv_pool, swa_kv_pool),
             mamba_pool=mamba_pool,
         )

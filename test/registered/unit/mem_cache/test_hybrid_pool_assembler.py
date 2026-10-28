@@ -14,7 +14,6 @@ from sglang.srt.configs.inkling import (
     InklingConvStateShape,
     InklingStateDType,
 )
-from sglang.srt.environ import envs
 from sglang.srt.mem_cache.base_prefix_cache import CacheRequestHandle
 from sglang.srt.mem_cache.device_pool_info import DevicePoolInfo, MambaStateBufferInfo
 from sglang.srt.mem_cache.hicache_storage import PoolHitPolicy, PoolName, PoolTransfer
@@ -173,9 +172,7 @@ class TestMambaInfoRouting(CustomTestCase):
             cache_params=InklingConvCacheParams(
                 shape=InklingConvStateShape(conv=[(2, 2)], temporal=(2, 2, 2)),
                 layers=[0],
-                dtype=InklingStateDType(
-                    conv=torch.float32, temporal=torch.float32
-                ),
+                dtype=InklingStateDType(conv=torch.float32, temporal=torch.float32),
             ),
             mamba_layer_ids=[0],
             speculative_num_draft_tokens=4,
@@ -1646,16 +1643,19 @@ class TestMambaHostShare(CustomTestCase):
 
     def test_pinned_mamba_share_ignores_device_kv_growth(self):
         mamba = self._pool(6 << 30)
-        with envs.SGLANG_HICACHE_MAMBA_HOST_GB.override(70.0):
-            for kv_bytes in (8 << 30, 12 << 30):
-                kv_gb, mamba_gb = _split_hicache_size_with_mamba(
-                    hicache_size=192, kv_pools=(self._pool(kv_bytes),), mamba_pool=mamba
-                )
-                self.assertEqual((kv_gb, mamba_gb), (122.0, 70.0))
+        for kv_bytes in (8 << 30, 12 << 30):
+            kv_gb, mamba_gb = _split_hicache_size_with_mamba(
+                hicache_size=192,
+                hicache_mamba_size=70,
+                kv_pools=(self._pool(kv_bytes),),
+                mamba_pool=mamba,
+            )
+            self.assertEqual((kv_gb, mamba_gb), (122, 70))
 
     def test_unset_keeps_proportional_split(self):
         kv_gb, mamba_gb = _split_hicache_size_with_mamba(
             hicache_size=192,
+            hicache_mamba_size=0,
             kv_pools=(self._pool(10 << 30),),
             mamba_pool=self._pool(6 << 30),
         )
