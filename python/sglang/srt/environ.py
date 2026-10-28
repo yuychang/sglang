@@ -999,12 +999,12 @@ class Envs:
     )
     # Set to "aiter" to run the fused ROCm KDA decode boundary (f_b projection,
     # gate and recurrent update in one AITER call). Unset keeps the split path.
-    SGLANG_OPT_HIP_K3_KDA_FUSED_BACKEND = EnvStrWithAlias(
+    SGLANG_USE_HIP_K3_KDA_FUSED_BACKEND = EnvStrWithAlias(
         "", deprecated_name="SGLANG_ROCM_K3_KDA_FUSED_BACKEND"
     )
     # Which FlyDSL implementation backs the Kimi-K3 KDA kernels: "auto" prefers
     # SGLang's vendored copy and falls back to AITER, "sglang" or "aiter" pin one.
-    SGLANG_OPT_HIP_K3_FLYDSL_SOURCE = EnvStrWithAlias(
+    SGLANG_USE_HIP_K3_FLYDSL_SOURCE = EnvStrWithAlias(
         "auto", deprecated_name="SGLANG_K3_FLYDSL_SOURCE"
     )
     # Use the ROCm radix-4 router for covered K3 top-k workloads.
