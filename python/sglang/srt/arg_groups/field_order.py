@@ -361,7 +361,6 @@ POSITIONAL_FIELD_ORDER = (
     "hicache_host_memory_mode",
     "hicache_ratio",
     "hicache_size",
-    "hicache_mamba_size",
     "hicache_write_policy",
     "hicache_io_backend",
     "hicache_mem_layout",
@@ -550,5 +549,6 @@ POSITIONAL_FIELD_ORDER = (
     "enable_megamoe_for_layernorm_sp",
     "enable_http_worker_reuseport",
     "prefill_decode_interval_min_bs",
+    "hicache_mamba_size",
 )
 # fmt: on
