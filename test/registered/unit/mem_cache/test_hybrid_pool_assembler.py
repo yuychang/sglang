@@ -32,6 +32,7 @@ from sglang.srt.mem_cache.hybrid_cache.hybrid_pool_assembler import (
     _MambaStrategy,
     _MambaSwaStrategy,
     _require_single_row_dsv4_swa_pages,
+    _split_hicache_size_with_mamba,
     _SwaStrategy,
     build_full_draft_pools,
     build_host_pool_group,
@@ -1708,6 +1709,53 @@ class TestMambaSwaStackMatchesOtherStacks(CustomTestCase):
                 ),
             ):
                 self.assertEqual(hybrid_pool_assembler._state_host_layout(), expected)
+
+
+class TestMambaHostShare(CustomTestCase):
+    @staticmethod
+    def _pool(nbytes):
+        return SimpleNamespace(get_kv_size_bytes=lambda: nbytes)
+
+    def test_pinned_mamba_share_ignores_device_kv_growth(self):
+        mamba = self._pool(6 << 30)
+        for kv_bytes in (8 << 30, 12 << 30):
+            kv_gb, mamba_gb = _split_hicache_size_with_mamba(
+                hicache_size=192,
+                hicache_mamba_size=70,
+                kv_pools=(self._pool(kv_bytes),),
+                mamba_pool=mamba,
+            )
+            self.assertEqual((kv_gb, mamba_gb), (122, 70))
+
+    def test_unset_keeps_proportional_split(self):
+        kv_gb, mamba_gb = _split_hicache_size_with_mamba(
+            hicache_size=192,
+            hicache_mamba_size=0,
+            kv_pools=(self._pool(10 << 30),),
+            mamba_pool=self._pool(6 << 30),
+        )
+        self.assertEqual((kv_gb, mamba_gb), (120.0, 72.0))
+
+    def test_host_capacity_excludes_speculative_scratch(self):
+        """Spec verify scratch is device-only; counting it inflated the Mamba host share."""
+        pool = MambaPool(
+            size=8,
+            spec_state_size=8,
+            cache_params=InklingConvCacheParams(
+                shape=InklingConvStateShape(conv=[(2, 2)], temporal=(2, 2, 2)),
+                layers=[0],
+                dtype=InklingStateDType(conv=torch.float32, temporal=torch.float32),
+            ),
+            mamba_layer_ids=[0],
+            speculative_num_draft_tokens=4,
+            device="cpu",
+        )
+
+        self.assertEqual(
+            pool.host_capacity_bytes,
+            pool.mamba_cache.conv[0].nbytes + pool.mamba_cache.temporal.nbytes,
+        )
+        self.assertLess(pool.host_capacity_bytes, pool.get_kv_size_bytes())
 
 
 if __name__ == "__main__":
