@@ -2247,8 +2247,6 @@ class Envs:
     # front reads hidden_states once, and run the top-k plus the bf16 cast in one
     # epilogue kernel. See kernels/ops/moe/moe_front.py. Default on.
     SGLANG_K3_FUSED_FRONT = EnvBool(True)
-    # Use the ROCm radix-4 router for covered K3 top-k workloads.
-    SGLANG_K3_RADIX4_TOPK = EnvBool(False)
     # Merged Kimi-K3 MoE front GEMM on AITER's tuned BF16 GEMM within the token window;
     # engages only for the TP8 front shape (6016, 7168) on gfx950.
     SGLANG_OPT_HIP_K3_TUNED_MOE_FRONT = EnvBool(False)
@@ -2257,6 +2255,30 @@ class Envs:
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_CACHE_CAPACITY = EnvInt(2)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_MIN_HITS = EnvInt(2)
     SGLANG_KIMI_K3_VIT_CUDA_GRAPH_MAX_SEQLEN = EnvInt(6144)
+
+    # ===================================================================
+    # Kimi-K3 on ROCm (HIP)
+    # ===================================================================
+    # Pad the AITER MXFP4 MoE intermediate to 128, not 256 (Quark W4A4 keeps the
+    # checkpoint width), and skip the router-logits contiguous copy on HIP.
+    SGLANG_OPT_HIP_K3_AITER = EnvBoolWithAlias(
+        False, deprecated_name="SGLANG_AITER_K3_OPT"
+    )
+    # Use the radix-4 HIP router for K3 top-k on the AITER path; other routing
+    # shapes keep AITER's kernel.
+    SGLANG_OPT_HIP_K3_RADIX4_TOPK = EnvBoolWithAlias(
+        False, deprecated_name="SGLANG_K3_RADIX4_TOPK"
+    )
+    # Fused KDA decode kernel: "gfx950" (SGLang HIP kernel) or "aiter" (AITER
+    # FlyDSL boundary); any other value keeps the unfused KDA decode.
+    SGLANG_USE_HIP_K3_KDA_FUSED_BACKEND = EnvStrWithAlias(
+        "gfx950", deprecated_name="SGLANG_ROCM_K3_KDA_FUSED_BACKEND"
+    )
+    # FlyDSL module behind the "aiter" fused KDA decode: "auto" prefers SGLang's
+    # vendored copy and falls back to AITER, "sglang" or "aiter" pin one.
+    SGLANG_USE_HIP_K3_FLYDSL_SOURCE = EnvStrWithAlias(
+        "auto", deprecated_name="SGLANG_K3_FLYDSL_SOURCE"
+    )
 
     # ===================================================================
     # Symmetric memory

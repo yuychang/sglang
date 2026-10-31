@@ -478,11 +478,13 @@ def test_f_b_api_rejects_invalid_projection_inputs() -> None:
 
 def test_fused_kda_backend_is_opt_in(monkeypatch):
     from sglang.kernels.ops.attention import kda_fused_decode_aiter_hip
+    from sglang.srt.environ import envs
 
+    monkeypatch.delenv("SGLANG_USE_HIP_K3_KDA_FUSED_BACKEND", raising=False)
     monkeypatch.delenv("SGLANG_ROCM_K3_KDA_FUSED_BACKEND", raising=False)
     assert not kda_fused_decode_aiter_hip.enabled()
-    monkeypatch.setenv("SGLANG_ROCM_K3_KDA_FUSED_BACKEND", "aiter")
-    assert kda_fused_decode_aiter_hip.enabled()
+    with envs.SGLANG_USE_HIP_K3_KDA_FUSED_BACKEND.override("aiter"):
+        assert kda_fused_decode_aiter_hip.enabled()
 
 
 def _select_fused_backend(monkeypatch, source: str):
