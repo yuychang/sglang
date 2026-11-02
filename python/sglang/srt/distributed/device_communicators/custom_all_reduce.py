@@ -3,6 +3,8 @@
 # Adapted from https://github.com/vllm-project/vllm/blob/v0.6.4.post1/vllm/distributed/device_communicators/custom_all_reduce.py
 
 import ctypes
+import functools
+import inspect
 import logging
 from contextlib import contextmanager
 from functools import partial
@@ -452,3 +454,23 @@ def _use_amd_deterministic_impl() -> bool:
         return envs.SGLANG_USE_1STAGE_ALLREDUCE.get()
     else:
         return envs.SGLANG_ENABLE_DETERMINISTIC_INFERENCE.get()
+
+
+@functools.cache
+def get_aiter_allreduce_with_rmsnorm_rows() -> Optional[type]:
+    """AITER's CustomAllreduce when its fused all-reduce + RMSNorm takes the
+    ``num_norm_rows`` and ``skip_residual`` row options and it reports its
+    all-reduce stage through ``uses_1stage_ar`` (both ROCm/aiter#6270)."""
+    try:
+        from aiter.dist.device_communicators.custom_all_reduce import (
+            CustomAllreduce as AiterCustomAllreduce,
+        )
+    except ImportError:
+        return None
+    # Feature detection of the installed AITER version.
+    if not hasattr(AiterCustomAllreduce, "uses_1stage_ar"):
+        return None
+    params = inspect.signature(AiterCustomAllreduce.custom_fused_ar_rms).parameters
+    if "num_norm_rows" in params and "skip_residual" in params:
+        return AiterCustomAllreduce
+    return None

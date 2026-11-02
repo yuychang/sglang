@@ -23,7 +23,9 @@ from sglang.srt.configs.kimi_k3 import KimiK3Config
 from sglang.srt.configs.kimi_linear import KimiLinearConfig
 from sglang.srt.distributed import (
     divide,
+    get_tp_group,
     tensor_model_parallel_all_reduce,
+    tensor_model_parallel_fused_allreduce_rmsnorm_rows,
 )
 from sglang.srt.distributed.device_communicators.pynccl_allocator import (
     use_symmetric_memory,
@@ -143,7 +145,7 @@ from sglang.srt.runtime_context import (
     get_spec,
 )
 from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
-from sglang.srt.utils import is_hip, is_npu, make_pp_layers
+from sglang.srt.utils import is_hip, is_npu, make_pp_layers, print_warning_once
 from sglang.srt.utils.common import (
     BumpAllocator,
     add_prefix,
@@ -160,6 +162,32 @@ _EXPERT_WEIGHT_NAME = re.compile(r"experts\.\d+\.w[123]\.")
 _is_hip = is_hip()
 _is_npu = is_npu()
 _aiter_k3_opt = get_bool_env_var("SGLANG_AITER_K3_OPT")
+
+
+def _hip_fused_ar_norm_tokens(
+    *, tp_size: int, rows_per_token: int, dtype: torch.dtype
+) -> Optional[range]:
+    """Batch sizes (tokens) whose [latent | shared] MoE all-reduce takes the fused
+    latent RMSNorm on ROCm; None, with a warning naming why, when it cannot run."""
+    max_tokens = envs.SGLANG_OPT_HIP_K3_FUSED_AR_RMSNORM_MAX_TOKENS.get()
+    group = get_tp_group()
+    if tp_size != 8:
+        reason = f"its token cap is measured on TP8, not TP{tp_size}"
+    elif get_exec().deterministic.enable_deterministic_inference:
+        reason = "deterministic inference needs the batch-invariant RMSNorm"
+    else:
+        reason = group.fused_allreduce_rmsnorm_rows_unsupported
+    if reason is None:
+        min_rows = group.fused_allreduce_rmsnorm_rows_min_rows(
+            row_width=k3_ar_fusion.NORM_DIM,
+            dtype=dtype,
+            max_rows=rows_per_token * max_tokens,
+        )
+        if min_rows is not None:
+            return range(_cdiv(min_rows, rows_per_token), max_tokens + 1)
+        reason = f"AITER all-reduces every batch up to {max_tokens} tokens in 1 stage"
+    print_warning_once(f"SGLANG_OPT_HIP_K3_FUSED_AR_RMSNORM has no effect: {reason}.")
+    return None
 
 
 def _cdiv(a: int, b: int) -> int:
@@ -700,6 +728,19 @@ class KimiK3MoE(nn.Module):
             and self.moe_hidden_size == k3_ar_fusion.NORM_DIM
             and hidden_size == 2 * k3_ar_fusion.NORM_DIM
         )
+        # ROCm counterpart on AITER: batch sizes that fuse the norm into the AR.
+        self._hip_fuse_ar_norm_tokens = (
+            _hip_fused_ar_norm_tokens(
+                tp_size=self.tp_size,
+                rows_per_token=(self.moe_hidden_size + hidden_size)
+                // k3_ar_fusion.NORM_DIM,
+                dtype=self.routed_expert_norm.weight.dtype,
+            )
+            if _is_hip
+            and self.fuse_ar_norm
+            and envs.SGLANG_OPT_HIP_K3_FUSED_AR_RMSNORM.get()
+            else None
+        )
         # Static eligibility for the column-parallel up_proj tail (gemm_ag):
         # 1/8-column GEMV + multicast all-gather + spin-add3 replaces the
         # replicated [3584, 7168] GEMM (~1.5-2x at decode). Dims fixed to
@@ -1040,6 +1081,28 @@ class KimiK3MoE(nn.Module):
     def _reduce_latent_and_shared(self, buf: torch.Tensor) -> torch.Tensor:
         """The fused front's [latent | shared] pair in one collective."""
         return tensor_model_parallel_all_reduce(buf)
+
+    def _reduce_latent_and_shared_norm(
+        self, buf: torch.Tensor, *, num_tokens: int
+    ) -> Tuple[Optional[torch.Tensor], torch.Tensor]:
+        """``(normed latent, reduced buf)`` with the norm fused into the ROCm
+        all-reduce, or ``(None, reduced buf)`` when the norm is still owed."""
+        if (
+            not torch.compiler.is_compiling()
+            and self._hip_fuse_ar_norm_tokens is not None
+            and num_tokens in self._hip_fuse_ar_norm_tokens
+        ):
+            weight, eps = self._get_fused_norm_params()
+            fused = tensor_model_parallel_fused_allreduce_rmsnorm_rows(
+                buf.view(-1, k3_ar_fusion.NORM_DIM),
+                weight,
+                eps,
+                num_norm_rows=num_tokens,
+            )
+            if fused is not None:
+                normed_latent, reduced = fused
+                return normed_latent, reduced.view(-1)
+        return None, self._reduce_latent_and_shared(buf)
 
     def _reduce_latent(self, latent: torch.Tensor) -> torch.Tensor:
         """Unfused-front latent tail: TP-partial routed sums must be reduced
@@ -1435,6 +1498,7 @@ class KimiK3MoE(nn.Module):
         latent = buf[:latent_numel].view(num_tokens, self.moe_hidden_size)
         shared_output = buf[latent_numel:].view(num_tokens, hidden_size)
         fused_norm = False
+        normed_latent = None
         if self.alt_stream is not None and k3_ar_fusion.enabled():
             defer_finalize = (
                 self._defer_moe_finalize
@@ -1503,11 +1567,15 @@ class KimiK3MoE(nn.Module):
             elif k3_ar_fusion.enabled():
                 k3_ar_fusion.all_reduce(buf)
             else:
-                buf = self._reduce_latent_and_shared(buf)
+                normed_latent, buf = self._reduce_latent_and_shared_norm(
+                    buf, num_tokens=num_tokens
+                )
 
         latent = buf[:latent_numel].view(num_tokens, self.moe_hidden_size)
         shared_output = buf[latent_numel:].view(num_tokens, hidden_size)
-        if not fused_norm:
+        if normed_latent is not None:
+            latent = normed_latent
+        elif not fused_norm:
             latent = self._latent_norm(latent)
         out, _ = self.routed_expert_up_proj(latent)
 

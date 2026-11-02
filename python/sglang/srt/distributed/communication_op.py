@@ -43,6 +43,22 @@ def tensor_model_parallel_fused_allreduce_rmsnorm(
     return get_tp_group().fused_allreduce_rmsnorm(input_, residual_inp_, weight_, eps)
 
 
+def tensor_model_parallel_fused_allreduce_rmsnorm_rows(
+    input_: torch.Tensor,
+    weight_: torch.Tensor,
+    eps: float,
+    *,
+    num_norm_rows: int,
+) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
+    """TP all-reduce with RMSNorm on only the first ``num_norm_rows`` rows, or None.
+
+    See GroupCoordinator.fused_allreduce_rmsnorm_rows (ROCm/AITER).
+    """
+    return get_tp_group().fused_allreduce_rmsnorm_rows(
+        input_, weight_, eps, num_norm_rows=num_norm_rows
+    )
+
+
 def tensor_model_parallel_fused_allreduce_rmsnorm_quant_per_group(
     input_: torch.Tensor,
     residual_inp_: torch.Tensor,

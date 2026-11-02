@@ -19,7 +19,7 @@ from sglang.test.ci.ci_register import register_amd_ci
 from sglang.test.communicator_patch import patch_communicator
 from sglang.test.test_utils import CustomTestCase, publish_build_topology
 
-register_amd_ci(est_time=240, suite="stage-c-test-large-8-gpu-amd")
+register_amd_ci(est_time=300, suite="stage-c-test-large-8-gpu-amd")
 
 HIDDEN_DIMS = [2880, 4096, 5120, 6144, 7168, 8192]
 
@@ -159,6 +159,121 @@ def _run_residual_accuracy_check():
                 "FAILED: fused residual output diverges beyond 1 ULP from unfused path."
             )
         sys.exit(0 if all_pass else 1)
+
+
+def _bf16_mismatch(got, ref):
+    """(max |got - ref| in units of eps * |ref|, about one bf16 ulp; fraction differing)."""
+    ulp = torch.finfo(torch.bfloat16).eps * ref.float().abs().clamp_min(2**-14)
+    diff = (got.float() - ref.float()).abs()
+    return (diff / ulp).max().item(), (diff > 0).float().mean().item()
+
+
+def _run_k3_leading_rows_check():
+    """Distributed entry point: Kimi-K3 [latent | shared] fused AR + RMSNorm.
+
+    GroupCoordinator.fused_allreduce_rmsnorm_rows must match the split path the
+    model runs (plain all-reduce, then its RMSNorm module on the bf16 result),
+    eagerly and under graph replay, and decline AITER's 1-stage sizes. Must be
+    launched via torchrun on 8 GPUs.
+    """
+    import torch.distributed as dist
+
+    from sglang.srt.distributed.communication_op import (
+        tensor_model_parallel_all_reduce,
+        tensor_model_parallel_fused_allreduce_rmsnorm_rows,
+    )
+    from sglang.srt.distributed.parallel_state import (
+        destroy_distributed_environment,
+        destroy_model_parallel,
+        graph_capture,
+        init_distributed_environment,
+        initialize_model_parallel,
+        set_custom_all_reduce,
+    )
+    from sglang.srt.layers.layernorm import RMSNorm
+
+    rank = int(os.environ["RANK"])
+    world_size = int(os.environ["WORLD_SIZE"])
+    local_rank = int(os.environ["LOCAL_RANK"])
+    torch.cuda.set_device(local_rank)
+    device = torch.device(f"cuda:{local_rank}")
+
+    set_custom_all_reduce(True)
+    init_distributed_environment(
+        world_size=world_size,
+        rank=rank,
+        local_rank=local_rank,
+        distributed_init_method="env://",
+        backend="nccl",
+    )
+    publish_build_topology(tp_size=world_size, world_rank=rank)
+    initialize_model_parallel()
+
+    norm_dim, eps = 3584, 1e-6
+    norm = RMSNorm(norm_dim, eps=eps).to(device=device, dtype=torch.bfloat16)
+    with torch.no_grad():
+        norm.weight.copy_(1 + 0.1 * torch.randn(norm_dim, device=device))
+
+    def fused(buf, num_tokens):
+        return tensor_model_parallel_fused_allreduce_rmsnorm_rows(
+            buf, norm.weight, eps, num_norm_rows=num_tokens
+        )
+
+    failures = []
+    for num_tokens in (1, 3, 4, 8, 16, 24, 64):
+        gen = torch.Generator(device=device).manual_seed(1000 * num_tokens + rank)
+        buf = torch.randn(3 * num_tokens, norm_dim, generator=gen, device=device).to(
+            torch.bfloat16
+        )
+        buf_ref = buf.clone()
+        # The split path: plain all-reduce, then the model's norm on bf16 rows.
+        reduced_ref = tensor_model_parallel_all_reduce(buf.clone())
+        normed_ref = norm(reduced_ref[:num_tokens].clone())
+
+        eager = fused(buf, num_tokens)
+        # 3 tokens are 63 KiB, inside AITER's TP8 1-stage all-reduce range.
+        expect_fused = num_tokens >= 4
+        if (eager is not None) != expect_fused:
+            failures.append(f"tokens={num_tokens}: fused={eager is not None}")
+            continue
+        if eager is None:
+            continue
+
+        graph_buf = buf.clone()
+        with graph_capture() as ctx:
+            with torch.cuda.stream(ctx.stream):
+                fused(graph_buf, num_tokens)
+                graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(graph, stream=ctx.stream):
+                    replayed = fused(graph_buf, num_tokens)
+        graph.replay()
+        torch.cuda.synchronize()
+
+        if not (torch.equal(buf, buf_ref) and torch.equal(graph_buf, buf_ref)):
+            failures.append(f"tokens={num_tokens}: input was modified")
+        for mode, (normed, reduced) in (("eager", eager), ("graph", replayed)):
+            # Both sides round the fp32 sum to bf16; only the summation order may
+            # differ, flipping a rare last bit.
+            for name, got, ref in (
+                ("reduced", reduced, reduced_ref),
+                ("normed latent", normed, normed_ref),
+            ):
+                max_ulp, frac = _bf16_mismatch(got, ref)
+                # Normalizing the unrounded fp32 sum flips ~10% of output bits.
+                if max_ulp > 1 or frac > 0.01:
+                    failures.append(
+                        f"tokens={num_tokens} {mode} {name}: "
+                        f"max {max_ulp:.2f} ulp, {frac:.2%} differ"
+                    )
+
+    gathered = [None] * world_size
+    dist.all_gather_object(gathered, failures)
+    destroy_model_parallel()
+    destroy_distributed_environment()
+    if rank == 0:
+        all_failures = [f"rank {r}: {f}" for r, fs in enumerate(gathered) for f in fs]
+        print("\n".join(all_failures) or "ALL PASSED")
+        sys.exit(1 if all_failures else 0)
 
 
 class TestAiterAllreduceFusionAmd(unittest.TestCase):
@@ -351,6 +466,45 @@ class TestAiterAllreduceFusionAmd(unittest.TestCase):
         )
 
 
+class TestK3FusedAllreduceRmsnormRowsAmd(CustomTestCase):
+    def test_k3_fused_ar_rmsnorm_leading_rows(self):
+        """Kimi-K3 [latent | shared] fused AR + RMSNorm matches the split path (TP8)."""
+        if torch.cuda.device_count() < 8:
+            self.skipTest("This test requires at least 8 GPUs.")
+        from sglang.srt.distributed.device_communicators.custom_all_reduce import (
+            get_aiter_allreduce_with_rmsnorm_rows,
+        )
+        from sglang.srt.environ import envs
+
+        if get_aiter_allreduce_with_rmsnorm_rows() is None:
+            self.skipTest(
+                "Needs AITER with ROCm/aiter#6270 (custom_fused_ar_rms row options "
+                "and uses_1stage_ar); the installed AITER lacks them."
+            )
+        cmd = [
+            sys.executable,
+            "-m",
+            "torch.distributed.run",
+            "--standalone",
+            "--nproc_per_node=8",
+            __file__,
+            "--k3-leading-rows",
+        ]
+        # The model's RMSNorm runs on AITER in the Kimi-K3 ROCm recipe.
+        with envs.SGLANG_USE_AITER.override(True):
+            result = subprocess.run(
+                cmd,
+                cwd=str(Path(__file__).resolve().parents[3]),
+                env=os.environ.copy(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=600,
+            )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("ALL PASSED", result.stdout)
+
+
 def _fake_forward_batch(batch_size=8, forward_mode=ForwardMode.DECODE):
     return types.SimpleNamespace(
         input_ids=types.SimpleNamespace(shape=(batch_size,)),
@@ -496,5 +650,7 @@ class TestAiterAllreduceFusionGate(CustomTestCase):
 if __name__ == "__main__":
     if "--residual-accuracy" in sys.argv:
         _run_residual_accuracy_check()
+    elif "--k3-leading-rows" in sys.argv:
+        _run_k3_leading_rows_check()
     else:
         unittest.main()

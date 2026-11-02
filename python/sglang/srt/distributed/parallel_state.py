@@ -862,11 +862,7 @@ class GroupCoordinator:
             total_bytes = input_.numel() * input_.element_size()
             use_1stage_ar = total_bytes <= 128 * 1024
 
-        if (
-            getattr(ca_comm, "_IS_CAPTURING", False)
-            and not torch.cuda.is_current_stream_capturing()
-            and is_in_tc_piecewise_cuda_graph()
-        ):
+        if self._ca_in_piecewise_capture():
             if not hasattr(ca_comm, "fused_ar_rms"):
                 return None
             return ca_comm.fused_ar_rms(
@@ -885,6 +881,82 @@ class GroupCoordinator:
             use_1stage_ar,
         )
         return fused_outputs
+
+    def _ca_in_piecewise_capture(self) -> bool:
+        return (
+            getattr(self.ca_comm, "_IS_CAPTURING", False)
+            and not torch.cuda.is_current_stream_capturing()
+            and is_in_tc_piecewise_cuda_graph()
+        )
+
+    @functools.cached_property
+    def fused_allreduce_rmsnorm_rows_unsupported(self) -> Optional[str]:
+        """Why ``fused_allreduce_rmsnorm_rows`` has no kernel on this group, or None."""
+        from sglang.srt.distributed.device_communicators.custom_all_reduce import (
+            get_aiter_allreduce_with_rmsnorm_rows,
+        )
+
+        if self.ca_comm is None or self.ca_comm.disabled:
+            return "custom all-reduce is off for this group"
+        aiter_ca_cls = get_aiter_allreduce_with_rmsnorm_rows()
+        if aiter_ca_cls is None:
+            return "the installed AITER is missing or predates ROCm/aiter#6270"
+        if not isinstance(self.ca_comm, aiter_ca_cls):
+            return (
+                "custom all-reduce is sglang's, not AITER's "
+                "(SGLANG_USE_AITER_AR=0, SGLANG_USE_1STAGE_ALLREDUCE or deterministic mode)"
+            )
+        return None
+
+    def fused_allreduce_rmsnorm_rows_min_rows(
+        self, *, row_width: int, dtype: torch.dtype, max_rows: int
+    ) -> Optional[int]:
+        """Fewest rows, up to ``max_rows``, of a ``[rows, row_width]`` buffer that
+        AITER all-reduces in 2 stages, so ``fused_allreduce_rmsnorm_rows`` may take it."""
+        assert self.fused_allreduce_rmsnorm_rows_unsupported is None
+        for rows in range(1, max_rows + 1):
+            # uses_1stage_ar reads only the byte size, which a meta tensor carries.
+            shape_only = torch.empty((rows, row_width), dtype=dtype, device="meta")
+            if not self.ca_comm.uses_1stage_ar(shape_only):
+                return rows
+        return None
+
+    def fused_allreduce_rmsnorm_rows(
+        self,
+        input_: torch.Tensor,
+        weight_: torch.Tensor,
+        eps: float,
+        *,
+        num_norm_rows: int,
+    ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
+        """``(RMSNorm(AR(input_)[:num_norm_rows]), AR(input_))`` with no residual
+        add, or None when the caller must all-reduce and normalize separately.
+
+        The row options exist only on AITER's 2-stage kernel, which loses to the
+        1-stage all-reduce + RMSNorm, so this fuses only where the plain
+        all-reduce would run AITER's 2-stage kernel too. Under torch.compile and
+        piecewise graphs it declines, leaving the plain all-reduce's custom op
+        in charge. ROCm/HIP only.
+        """
+        if (
+            torch.compiler.is_compiling()
+            or self.fused_allreduce_rmsnorm_rows_unsupported is not None
+            or self._resolve_outplace_all_reduce_method(input_) != "ca"
+            or self.ca_comm.uses_1stage_ar(input_)
+            or self._ca_in_piecewise_capture()
+        ):
+            return None
+        # skip_residual never reads the residual input.
+        return self.ca_comm.custom_fused_ar_rms(
+            input_,
+            input_,
+            weight_,
+            eps,
+            False,
+            out=input_.new_empty((num_norm_rows, input_.shape[-1])),
+            num_norm_rows=num_norm_rows,
+            skip_residual=True,
+        )
 
     def fused_allreduce_rmsnorm_quant_per_group(
         self,

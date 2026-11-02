@@ -393,6 +393,195 @@ def test_parallel_group_construction_tp8_moe_ep4_cp2():
             parallel_state.destroy_model_parallel()
 
 
+_K3_NORM_DIM = 3584
+
+
+def _k3_latent_shared(num_tokens):
+    # Kimi-K3 MoE [latent | shared] buffer: one latent and two shared rows per token.
+    return torch.zeros(3 * num_tokens, _K3_NORM_DIM, dtype=torch.bfloat16)
+
+
+class _FakeAiterAllreduce:
+    """CPU stand-in for AITER's custom all-reduce (ROCm/aiter#6270) that records
+    the fused all-reduce + RMSNorm calls instead of computing them."""
+
+    disabled = False
+    _IS_CAPTURING = False
+
+    def __init__(self):
+        self.calls = []
+
+    def should_custom_ar(self, inp):
+        return True
+
+    def uses_1stage_ar(self, inp):
+        # TP8 crossover of AITER's select_ar_stage.
+        return inp.numel() * inp.element_size() < 80 * 1024
+
+    def custom_fused_ar_rms(self, inp, res_inp, weight, eps, use_1stage, **kwargs):
+        self.calls.append(dict(kwargs, use_1stage=use_1stage))
+        return kwargs["out"], inp
+
+
+def _rows_coordinator(*, ca_comm, unsupported=None, pymscclpp_comm=None):
+    coordinator = parallel_state.GroupCoordinator.__new__(
+        parallel_state.GroupCoordinator
+    )
+    coordinator.ca_comm = ca_comm
+    coordinator.pymscclpp_comm = pymscclpp_comm
+    coordinator.pcie_ipc_comm = None
+    coordinator.qr_comm = None
+    coordinator.torch_symm_mem_comm = None
+    if unsupported != "probe":
+        coordinator.__dict__["fused_allreduce_rmsnorm_rows_unsupported"] = unsupported
+    return coordinator
+
+
+def _fuse_rows(coordinator, num_tokens):
+    return coordinator.fused_allreduce_rmsnorm_rows(
+        _k3_latent_shared(num_tokens),
+        torch.ones(_K3_NORM_DIM, dtype=torch.bfloat16),
+        1e-6,
+        num_norm_rows=num_tokens,
+    )
+
+
+def test_fused_allreduce_rmsnorm_rows_kernel_contract():
+    """AITER takes the row options only on its 2-stage kernel without a residual
+    add, and the normed output holds exactly the latent rows."""
+    ca_comm = _FakeAiterAllreduce()
+    with patch.object(
+        parallel_state, "is_in_tc_piecewise_cuda_graph", return_value=False
+    ):
+        _fuse_rows(_rows_coordinator(ca_comm=ca_comm), num_tokens=8)
+    (call,) = ca_comm.calls
+    assert call["use_1stage"] is False
+    assert call["skip_residual"] is True
+    assert call["num_norm_rows"] == 8
+    assert call["out"].shape == (8, _K3_NORM_DIM)
+
+
+def _mscclpp_taking_everything():
+    return Mock(should_mscclpp_allreduce=Mock(return_value=True))
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        # 3 K3 tokens are 63 KiB: AITER's 1-stage all-reduce + RMSNorm is faster.
+        dict(num_tokens=3),
+        dict(num_tokens=8, unsupported="AITER predates ROCm/aiter#6270"),
+        dict(num_tokens=8, should_custom_ar=False),
+        dict(num_tokens=8, pymscclpp=True),
+        dict(num_tokens=8, compiling=True),
+        dict(num_tokens=8, piecewise_capture=True),
+    ],
+    ids=[
+        "1stage-size",
+        "unsupported",
+        "not-custom-ar",
+        "mscclpp",
+        "compiling",
+        "piecewise-capture",
+    ],
+)
+def test_fused_allreduce_rmsnorm_rows_follows_the_plain_all_reduce(monkeypatch, case):
+    """Row options run only where the plain all-reduce takes AITER's 2-stage
+    custom all-reduce outside torch.compile; everything else keeps the split path."""
+    ca_comm = _FakeAiterAllreduce()
+    if not case.get("should_custom_ar", True):
+        monkeypatch.setattr(ca_comm, "should_custom_ar", lambda inp: False)
+    ca_comm._IS_CAPTURING = case.get("piecewise_capture", False)
+    coordinator = _rows_coordinator(
+        ca_comm=ca_comm,
+        unsupported=case.get("unsupported"),
+        pymscclpp_comm=_mscclpp_taking_everything() if case.get("pymscclpp") else None,
+    )
+    with (
+        patch.object(
+            parallel_state.torch.compiler,
+            "is_compiling",
+            return_value=case.get("compiling", False),
+        ),
+        patch.object(
+            parallel_state,
+            "is_in_tc_piecewise_cuda_graph",
+            return_value=case.get("piecewise_capture", False),
+        ),
+        patch.object(
+            parallel_state.torch.cuda, "is_current_stream_capturing", return_value=False
+        ),
+    ):
+        fused = _fuse_rows(coordinator, num_tokens=case["num_tokens"])
+    assert fused is None
+    assert ca_comm.calls == []
+
+
+def test_fused_allreduce_rmsnorm_rows_min_rows_matches_the_runtime_gate():
+    """The static lower bound callers skip below must agree with the per-call
+    stage check for every buffer size."""
+    coordinator = _rows_coordinator(ca_comm=_FakeAiterAllreduce())
+    min_rows = coordinator.fused_allreduce_rmsnorm_rows_min_rows(
+        row_width=_K3_NORM_DIM, dtype=torch.bfloat16, max_rows=96
+    )
+    for rows in range(1, 97):
+        buf = torch.zeros(rows, _K3_NORM_DIM, dtype=torch.bfloat16)
+        assert (rows >= min_rows) == (not coordinator.ca_comm.uses_1stage_ar(buf))
+
+
+def test_aiter_without_row_options_cannot_fuse_rows():
+    """CI images pin an AITER older than ROCm/aiter#6270; neither it nor another
+    custom all-reduce (sglang's, in deterministic AMD mode) may take the row path."""
+    from sglang.srt.distributed.device_communicators import custom_all_reduce
+
+    probe = custom_all_reduce.get_aiter_allreduce_with_rmsnorm_rows
+
+    class _OldAiterAllreduce:
+        def custom_fused_ar_rms(self, input, residual_inp, weight, eps, use_1stage):
+            pass
+
+    class _RowOptionsOnlyAiterAllreduce:
+        def custom_fused_ar_rms(
+            self,
+            input,
+            residual_inp,
+            weight,
+            eps,
+            use_1stage,
+            num_norm_rows=-1,
+            skip_residual=False,
+        ):
+            pass
+
+    class _NewAiterAllreduce(_RowOptionsOnlyAiterAllreduce):
+        disabled = False
+
+        def uses_1stage_ar(self, inp):
+            pass
+
+    def unsupported(aiter_cls, ca_comm):
+        aiter_module = Mock(CustomAllreduce=aiter_cls)
+        probe.cache_clear()
+        try:
+            with patch.dict(
+                sys.modules,
+                {"aiter.dist.device_communicators.custom_all_reduce": aiter_module},
+            ):
+                coordinator = _rows_coordinator(ca_comm=ca_comm, unsupported="probe")
+                return coordinator.fused_allreduce_rmsnorm_rows_unsupported
+        finally:
+            probe.cache_clear()
+
+    assert unsupported(_NewAiterAllreduce, _NewAiterAllreduce()) is None
+    for aiter_cls, ca_comm in (
+        (_OldAiterAllreduce, _NewAiterAllreduce()),
+        (_RowOptionsOnlyAiterAllreduce, _NewAiterAllreduce()),
+        (_NewAiterAllreduce, _FakeAiterAllreduce()),
+        (_NewAiterAllreduce, None),
+    ):
+        assert unsupported(aiter_cls, ca_comm) is not None
+
+
 def _read_group_descs(group_name):
     """Build a real ``GroupCoordinator`` over a single-rank gloo world and read the
     ``group_desc`` back off the live ProcessGroup objects it created.
