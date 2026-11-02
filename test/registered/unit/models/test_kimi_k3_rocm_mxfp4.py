@@ -9,6 +9,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from sglang.kernels.ops.gemm import latent_mxfp4_aiter_hip
+from sglang.kernels.ops.quantization import mxfp4_preshuffle_aiter_hip
 from sglang.srt.models import kimi_k3
 from sglang.srt.models.kimi_k3_rocm_mxfp4 import LatentMXFP4Projections
 from sglang.srt.runtime_context import get_context, get_parallel
@@ -127,7 +128,11 @@ class TestLatentMXFP4Runtime(CustomTestCase):
                             actual = method(x, prefix_sum=None)
                             torch.testing.assert_close(actual, expected)
 
-    def test_prepare_and_reload_invalidate_stale_copies(self):
+    def test_prepare_and_reload_keep_buffers_or_invalidate(self):
+        """A reload refreshes the MXFP4 copies in place, because captured CUDA
+        graphs keep reading those buffers; unsupported weights drop them."""
+        from sglang.srt.models import kimi_k3_rocm_mxfp4
+
         projections = LatentMXFP4Projections(min_tokens=2048)
         self.assertFalse(projections.can_run(num_tokens=2048))
         down = torch.empty((3584, 7168), dtype=torch.bfloat16, device="meta")
@@ -135,21 +140,32 @@ class TestLatentMXFP4Runtime(CustomTestCase):
         with (
             mock.patch.object(latent_mxfp4_aiter_hip, "supported", return_value=True),
             mock.patch.object(
-                latent_mxfp4_aiter_hip,
+                mxfp4_preshuffle_aiter_hip, "available", return_value=True
+            ),
+            mock.patch.object(
+                mxfp4_preshuffle_aiter_hip,
                 "pack",
                 side_effect=[
                     (torch.ones(1), torch.ones(1)),
                     (torch.ones(1), torch.ones(1)),
+                    (torch.full((1,), 2.0), torch.full((1,), 3.0)),
+                    (torch.full((1,), 4.0), torch.full((1,), 5.0)),
                 ],
             ),
         ):
             projections.prepare(down_weight=down, up_weight=up)
+            buffers = (projections.down_weight, projections.up_scale)
+            projections.prepare(down_weight=down, up_weight=up)
+        self.assertIs(projections.down_weight, buffers[0])
+        self.assertIs(projections.up_scale, buffers[1])
+        self.assertEqual(projections.down_weight.item(), 2.0)
+        self.assertEqual(projections.up_scale.item(), 5.0)
         self.assertFalse(projections.can_run(num_tokens=2047))
         self.assertTrue(projections.can_run(num_tokens=2048))
-        self.assertTrue(projections.can_run(num_tokens=2049))
         self.assertEqual(dict(projections.state_dict()), {})
-        with self.assertLogs("sglang.srt.models.kimi_k3_rocm_mxfp4", level="WARNING"):
+        with mock.patch.object(kimi_k3_rocm_mxfp4, "print_warning_once") as warn:
             projections.prepare(down_weight=down.to(torch.float16), up_weight=up)
+        warn.assert_called_once()
         self.assertFalse(projections.can_run(num_tokens=2048))
         self.assertIsNone(projections.up_weight)
         with self.assertRaisesRegex(RuntimeError, "has not been prepared"):

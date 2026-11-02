@@ -18,6 +18,15 @@ if TYPE_CHECKING:
 
 register_kernel(
     KernelSpec(
+        op="quantization.mxfp4_preshuffle_pack",
+        backend=KernelBackend.AITER,
+        target="sglang.kernels.ops.quantization.mxfp4_preshuffle_aiter_hip:pack",
+        capabilities=frozenset({CapabilityRequirement.HIP}),
+    )
+)
+
+register_kernel(
+    KernelSpec(
         op="quantization.sgl_per_token_quant_fp8",
         backend=KernelBackend.JIT,
         target="sglang.kernels.ops.quantization.per_token_quant_fp8:per_token_quant_fp8",

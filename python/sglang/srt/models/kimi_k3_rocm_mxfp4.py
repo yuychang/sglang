@@ -6,6 +6,8 @@ import torch
 from torch import nn
 
 from sglang.kernels.ops.gemm import latent_mxfp4_aiter_hip
+from sglang.kernels.ops.quantization import mxfp4_preshuffle_aiter_hip
+from sglang.srt.utils import print_warning_once
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +31,15 @@ class LatentMXFP4Projections(nn.Module):
         self.register_buffer("up_weight", None, persistent=False)
         self.register_buffer("up_scale", None, persistent=False)
 
-    def prepare(self, *, down_weight: torch.Tensor, up_weight: torch.Tensor) -> None:
+    def mark_unavailable(self) -> None:
+        """Keep the original latent projections, e.g. for quantized ones."""
         self.down_weight = self.down_scale = self.up_weight = self.up_scale = None
+        print_warning_once(
+            "Kimi-K3 latent MXFP4 is unavailable for these weights/device; "
+            "keeping the original latent projections"
+        )
+
+    def prepare(self, *, down_weight: torch.Tensor, up_weight: torch.Tensor) -> None:
         if (
             down_weight.shape != (3584, 7168)
             or up_weight.shape != (7168, 3584)
@@ -38,16 +47,25 @@ class LatentMXFP4Projections(nn.Module):
             or up_weight.dtype != torch.bfloat16
             or down_weight.device != up_weight.device
             or not latent_mxfp4_aiter_hip.supported(device=down_weight.device)
+            or not mxfp4_preshuffle_aiter_hip.available()
         ):
-            logger.warning(
-                "Kimi-K3 latent MXFP4 is unavailable for these weights/device; "
-                "keeping the original latent projections"
-            )
+            self.mark_unavailable()
             return
-        down, down_scale = latent_mxfp4_aiter_hip.pack(weight=down_weight)
-        up, up_scale = latent_mxfp4_aiter_hip.pack(weight=up_weight)
-        self.down_weight, self.down_scale = down, down_scale
-        self.up_weight, self.up_scale = up, up_scale
+        down, down_scale = mxfp4_preshuffle_aiter_hip.pack(weight=down_weight)
+        up, up_scale = mxfp4_preshuffle_aiter_hip.pack(weight=up_weight)
+        if self.down_weight is None:
+            self.down_weight, self.down_scale = down, down_scale
+            self.up_weight, self.up_scale = up, up_scale
+            return
+        # A reload refreshes the copies in place: captured CUDA graphs keep
+        # reading these buffers.
+        for old, new in (
+            (self.down_weight, down),
+            (self.down_scale, down_scale),
+            (self.up_weight, up),
+            (self.up_scale, up_scale),
+        ):
+            old.copy_(new)
 
     def can_run(self, *, num_tokens: int) -> bool:
         return self.down_weight is not None and num_tokens >= self.min_tokens

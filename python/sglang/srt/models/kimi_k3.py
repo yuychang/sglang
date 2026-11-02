@@ -92,6 +92,7 @@ from sglang.srt.layers.moe.utils import (
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
 from sglang.srt.layers.quantization.fp8_utils import block_quant_dequant
 from sglang.srt.layers.quantization.modelslim.modelslim import ModelSlimConfig
+from sglang.srt.layers.quantization.unquant import UnquantizedLinearMethod
 from sglang.srt.layers.radix_linear_attention import RadixLinearAttention
 from sglang.srt.layers.utils import PPMissingLayer, get_layer_id
 from sglang.srt.layers.vocab_parallel_embedding import (
@@ -143,7 +144,7 @@ from sglang.srt.runtime_context import (
     get_spec,
 )
 from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
-from sglang.srt.utils import is_hip, is_npu, make_pp_layers
+from sglang.srt.utils import is_gfx95_supported, is_hip, is_npu, make_pp_layers
 from sglang.srt.utils.common import (
     BumpAllocator,
     add_prefix,
@@ -485,6 +486,8 @@ class KimiK3MoE(nn.Module):
         self._latent_mxfp4 = None
         if (
             _is_hip
+            and is_gfx95_supported()
+            and envs.SGLANG_USE_AITER.get()
             and self.use_latent_moe
             and get_moe_a2a_backend().is_none()
             and envs.SGLANG_OPT_HIP_K3_MOE_LATENT_MXFP4.get()
@@ -1431,7 +1434,11 @@ class KimiK3MoE(nn.Module):
         num_tokens, hidden_size = hidden_states.shape
         if self._use_latent_mxfp4(num_tokens=num_tokens):
             head_sizes = self._front_sizes[:-1]
-            head = _k3_bf16_gemm(hidden_states, self._front_w[: sum(head_sizes)])
+            head = _k3_bf16_gemm(
+                hidden_states,
+                self._front_w[: sum(head_sizes)],
+                out_dtype=torch.float32 if self._front_fp32 else None,
+            )
             gate_up, router_logits = torch.split(head, head_sizes, dim=-1)
             routed_input = self._latent_mxfp4.down(x=hidden_states)
         else:
@@ -3488,10 +3495,17 @@ class KimiK3LinearForCausalLM(nn.Module):
             if isinstance(layer.mlp, KimiK3MoE):
                 layer.mlp._merge_front_weights()
                 if layer.mlp._latent_mxfp4 is not None:
-                    layer.mlp._latent_mxfp4.prepare(
-                        down_weight=layer.mlp.routed_expert_down_proj.weight,
-                        up_weight=layer.mlp.routed_expert_up_proj.weight,
-                    )
+                    down_proj = layer.mlp.routed_expert_down_proj
+                    up_proj = layer.mlp.routed_expert_up_proj
+                    # Quantized latent projections (e.g. GGUF) have no BF16 weight.
+                    if isinstance(
+                        down_proj.quant_method, UnquantizedLinearMethod
+                    ) and isinstance(up_proj.quant_method, UnquantizedLinearMethod):
+                        layer.mlp._latent_mxfp4.prepare(
+                            down_weight=down_proj.weight, up_weight=up_proj.weight
+                        )
+                    else:
+                        layer.mlp._latent_mxfp4.mark_unavailable()
                 # Convert the correction bias to fp32 once so the per-call
                 # .to(float32) in topk is a no-op, not one upcast kernel per
                 # MoE layer per step.

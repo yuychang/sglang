@@ -5,6 +5,7 @@ import unittest
 import torch
 
 from sglang.kernels.ops.gemm import latent_mxfp4_aiter_hip
+from sglang.kernels.ops.quantization import mxfp4_preshuffle_aiter_hip
 from sglang.test.ci.ci_register import register_amd_ci
 from sglang.test.test_utils import CustomTestCase
 
@@ -27,7 +28,7 @@ class TestKimiK3LatentMXFP4(CustomTestCase):
                 )
                 * 0.02
             )
-            packed, scale = latent_mxfp4_aiter_hip.pack(weight=weight)
+            packed, scale = mxfp4_preshuffle_aiter_hip.pack(weight=weight)
             cls.projections.append((weight, packed, scale))
 
     def _assert_matches_bf16(self, *, actual, x, weight):
@@ -81,11 +82,11 @@ class TestKimiK3LatentMXFP4(CustomTestCase):
                 self._assert_matches_bf16(actual=out, x=x, weight=weight)
 
     def test_rejects_invalid_weight_layout(self):
-        for shape in ((7168,), (17, 64), (16, 32), (16, 0)):
+        for shape in ((7168,), (16, 256), (256, 64), (256, 0)):
             with self.subTest(shape=shape):
                 weight = torch.empty(shape, dtype=torch.bfloat16, device=self.device)
-                with self.assertRaisesRegex(ValueError, "aligned to 16/64"):
-                    latent_mxfp4_aiter_hip.pack(weight=weight)
+                with self.assertRaisesRegex(ValueError, "aligned to 256"):
+                    mxfp4_preshuffle_aiter_hip.pack(weight=weight)
 
     def test_rejects_incompatible_activations(self):
         _, packed, scale = self.projections[0]
