@@ -106,6 +106,7 @@ from sglang.srt.configs.model_config import AttentionArch, ModelConfig
 from sglang.srt.environ import envs
 from sglang.srt.layers.attention.aiter_mla_gluon import (
     log_mla_gluon_capability,
+    mla_gluon_dcp_unsupported_reason,
     mla_gluon_decode,
     prefer_mla_gluon_decode,
 )
@@ -115,7 +116,7 @@ from sglang.srt.layers.attention.aiter_utils import (
 )
 from sglang.srt.mem_cache.kv.alloc.id_space import IdSpaceKind
 from sglang.srt.mem_cache.memory_pool import KVWriteLoc, window_write_locs
-from sglang.srt.utils import get_bool_env_var
+from sglang.srt.utils import get_bool_env_var, print_info_once, print_warning_once
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +257,22 @@ def _asm_cprr_kernel_heads(gathered_heads: int, supports: Callable[[int], bool])
         if heads >= gathered_heads and supports(heads):
             return heads
     return 0
+
+
+def _mla_dcp_asm_selected(
+    *, use_mla: bool, dcp_world_size: int, decode_backend: str, kv_cache_dtype
+) -> bool:
+    """Whether DCP decode runs on aiter's asm MLA kernel.
+
+    That kernel is a8w8: it casts the query to fp8 and reads the KV cache with its
+    fp8 scale. Any other cache decodes on Gluon.
+    """
+    return (
+        use_mla
+        and dcp_world_size > 1
+        and decode_backend == "asm"
+        and kv_cache_dtype == fp8_dtype
+    )
 
 
 # (v_head_dim -> query head counts) that aiter's mla_reduce_v1 has an
@@ -618,10 +635,11 @@ class AiterAttnBackend(AttentionBackend):
                 "SGLANG_AITER_MLA_DECODE_BACKEND must be 'gluon' or 'asm', "
                 f"got {self.mla_decode_backend!r}"
             )
-        self.use_mla_dcp_asm = (
-            self.use_mla
-            and self.dcp_world_size > 1
-            and self.mla_decode_backend == "asm"
+        self.use_mla_dcp_asm = _mla_dcp_asm_selected(
+            use_mla=self.use_mla,
+            dcp_world_size=self.dcp_world_size,
+            decode_backend=self.mla_decode_backend,
+            kv_cache_dtype=self.kv_cache_dtype,
         )
         self.mla_verify_backend = envs.SGLANG_AITER_MLA_VERIFY_BACKEND.get().lower()
         if self.mla_verify_backend not in ("gluon", "asm"):
@@ -892,7 +910,6 @@ class AiterAttnBackend(AttentionBackend):
             self.mla_kernel_num_head_padded = (
                 16 if _gathered_num_head < 16 else _gathered_num_head
             )
-
             self.attn_dp_enabled = is_dp_attention_enabled()
             self.qo_indptr_ = torch.zeros(
                 (max_bs + 1,), dtype=torch.int32, device=model_runner.device
@@ -956,6 +973,14 @@ class AiterAttnBackend(AttentionBackend):
                     envs.SGLANG_OPT_HIP_MLA_FP8_Q_ASM_MAX_QLEN.get(),
                 )
 
+            # After the persist settings above: they decide the DCP verify kernel.
+            if self.dcp_world_size > 1 and may_run_mla_decode:
+                self._check_mla_dcp_gluon(
+                    gathered_num_head=_gathered_num_head,
+                    kv_lora_rank=model_runner.model_config.kv_lora_rank,
+                    qk_rope_head_dim=model_runner.model_config.qk_rope_head_dim,
+                )
+
             use_any_mla_persist = self._mla_ps_kernel_enabled() or self.use_mla_dcp_asm
             self.max_split_per_batch = 32 if use_any_mla_persist else None
 
@@ -1011,6 +1036,48 @@ class AiterAttnBackend(AttentionBackend):
             return None
         larger = [h for h in supported if h > num_head]
         return min(larger) if larger else None
+
+    def _check_mla_dcp_gluon(
+        self, *, gathered_num_head: int, kv_lora_rank: int, qk_rope_head_dim: int
+    ) -> None:
+        """Fail at startup if DCP decode or verify falls to a Gluon that cannot run it."""
+        gluon_decode = not self.use_mla_dcp_asm
+        gluon_verify = (
+            self.num_draft_tokens is not None
+            and not self._asm_cprr_supports_verify_shape(self.num_draft_tokens)
+        )
+        if not (gluon_decode or gluon_verify):
+            return
+        if gluon_decode and self.mla_decode_backend == "asm":
+            msg = (
+                "aiter MLA DCP decode runs on Gluon: the asm kernel needs an fp8 "
+                f"KV cache, and this one is {self.kv_cache_dtype}."
+            )
+            if envs.SGLANG_AITER_MLA_DECODE_BACKEND.is_set():
+                print_warning_once(msg)
+            else:
+                print_info_once(msg)
+        reason = mla_gluon_dcp_unsupported_reason(
+            gathered_num_head=gathered_num_head,
+            q_dtype=self.input_dtype,
+            kv_cache_dtype=self.kv_cache_dtype,
+            kv_lora_rank=kv_lora_rank,
+            qk_rope_head_dim=qk_rope_head_dim,
+        )
+        if reason is None:
+            return
+        if gluon_decode:
+            route, asm_needs = "decode", "SGLANG_AITER_MLA_DECODE_BACKEND=asm"
+        else:
+            route, asm_needs = (
+                "target verify",
+                "SGLANG_AITER_MLA_VERIFY_BACKEND=asm and a draft-token count its "
+                "cp kernel supports",
+            )
+        raise ValueError(
+            f"aiter MLA DCP {route} runs on Gluon here, and Gluon cannot run it: "
+            f"{reason}. The asm kernel needs --kv-cache-dtype fp8_e4m3 with {asm_needs}."
+        )
 
     def may_run_mla_decode_kernel(
         self,
