@@ -1973,6 +1973,16 @@ SGLang supports various environment variables that can be used to configure its 
       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>false</code></td>
     </tr>
     <tr>
+      <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}><code>SGLANG_OPT_HIP_K3_AITER</code></td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Kimi-K3 MoE layout on ROCm. With <code>SGLANG_USE_AITER</code>, the MXFP4 MoE pads the per-rank expert intermediate size to a multiple of 128 instead of 256. On the AITER path (<code>SGLANG_USE_AITER</code>, or always on gfx950 / gfx1250), the Quark W4A4 MXFP4 MoE keeps the checkpoint width instead of padding it for the generic AITER kernels. Independently of <code>SGLANG_USE_AITER</code>, the Kimi-K3 MoE front on HIP skips the contiguous copy of the router logits. Deprecated alias: <code>SGLANG_AITER_K3_OPT</code>.</td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>false</code></td>
+    </tr>
+    <tr>
+      <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}><code>SGLANG_OPT_HIP_K3_RADIX4_TOPK</code></td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>On the <code>SGLANG_USE_AITER</code> top-k path, route with the radix-4 HIP kernel when the routing is Kimi-K3's (896 experts, top-16, ungrouped) and the batch is at most 1024 tokens; anything else keeps AITER's kernel. Deprecated alias: <code>SGLANG_K3_RADIX4_TOPK</code>.</td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>false</code></td>
+    </tr>
+    <tr>
       <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}><code>SGLANG_OPT_HIP_K3_MLA_ABSORB_FP8</code></td>
       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Kimi-K3 on gfx950 with AITER: requantize a Quark per-channel FP8 <code>kv_b_proj</code> to per-tensor FP8 so the MLA absorb BMMs run AITER's a8w8 kernel. Set to <code>false</code> to dequantize it to BF16 instead (about 0.12% vs 2.3% weight error, at BF16 BMM speed). Other ROCm targets always use the BF16 dequant.</td>
       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>true</code></td>

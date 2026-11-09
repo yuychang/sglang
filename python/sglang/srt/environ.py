@@ -1129,7 +1129,7 @@ class Envs:
     # Enable dual-stream MoE (shared experts vs routed experts) on the
     # ROCm/AITER path. Requires GPU_MAX_HW_QUEUES>=5 to avoid HW-queue serialization.
     SGLANG_ROCM_USE_MULTI_STREAM = EnvBool(False)
-    # With the Kimi-K3 radix-4 router on (SGLANG_K3_RADIX4_TOPK), also emit
+    # With the Kimi-K3 radix-4 router on (SGLANG_OPT_HIP_K3_RADIX4_TOPK), also emit
     # AITER's BM=16 MoE sort from its launch for decode-sized M (needs
     # ROCm/aiter#6484).
     SGLANG_OPT_HIP_K3_RADIX4_FUSE_SORT = EnvBool(True)
@@ -1151,7 +1151,7 @@ class Envs:
     # Fold the KDA [f_a|b] tail into the wide [q,k,v,g] projection so the whole
     # in-proj is one GEMM. Decode is bandwidth bound there, so the 144 extra
     # output columns ride along nearly free.
-    SGLANG_OPT_HIP_K3_FUSE_KDA_INPROJ = EnvBoolWithAlias(
+    SGLANG_OPT_HIP_K3_FUSE_KDA_INPROJ =EnvBoolWithAlias(
         True, deprecated_name="SGLANG_ROCM_K3_FUSE_KDA_INPROJ"
     )
     # Largest batch (tokens) that takes the merged in-proj GEMM for BF16 weights;
@@ -1165,6 +1165,16 @@ class Envs:
     # Kimi-K3 MLA decode: write the identity-RoPE Q and latent KV cache in one launch,
     # AITER on gfx950 and AITER Triton elsewhere, instead of the split chain.
     SGLANG_OPT_HIP_K3_MLA_Q_CACHE_FUSION = EnvBool(False)
+    # Pad the AITER MXFP4 MoE intermediate to 128, not 256 (Quark W4A4 keeps the
+    # checkpoint width), and skip the router-logits contiguous copy on HIP.
+    SGLANG_OPT_HIP_K3_AITER = EnvBoolWithAlias(
+        False, deprecated_name="SGLANG_AITER_K3_OPT"
+    )
+    # Use the radix-4 HIP router for K3 top-k on the AITER path; other routing
+    # shapes keep AITER's kernel.
+    SGLANG_OPT_HIP_K3_RADIX4_TOPK = EnvBoolWithAlias(
+        False, deprecated_name="SGLANG_K3_RADIX4_TOPK"
+    )
     # On gfx95x with SGLANG_USE_AITER=1, quantize the BF16 Qwen3.5/3.8 GDN
     # in_proj_qkvz and out_proj to MXFP4 after loading. 0 keeps them BF16.
     SGLANG_ROCM_GDN_ONLINE_MXFP4 = EnvBool(True)
@@ -2353,8 +2363,6 @@ class Envs:
     # and the latent up_proj tail above the fused-GEMV range (k3_ar_fusion
     # gemm_ag_up_fits). Online weight updates are rejected while on.
     SGLANG_K3_SHARDED_MOE = EnvBool(True)
-    # Use the ROCm radix-4 router for covered K3 top-k workloads.
-    SGLANG_K3_RADIX4_TOPK = EnvBool(False)
     # Merged Kimi-K3 MoE front GEMM on AITER's tuned BF16 GEMM within the token window;
     # engages only for the TP8 front shape (6016, 7168) on a 256-CU gfx950.
     SGLANG_OPT_HIP_K3_TUNED_MOE_FRONT = EnvBool(False)
