@@ -1188,6 +1188,10 @@ class Envs:
     # (AITER gemm_a4w4) for batches of at least _MIN_TOKENS tokens.
     SGLANG_OPT_HIP_K3_MOE_LATENT_MXFP4 = EnvBool(False)
     SGLANG_OPT_HIP_K3_MOE_LATENT_MXFP4_MIN_TOKENS = EnvInt(2048)
+    # Kimi-K3 on HIP: fold the latent MoE RMSNorm weight into the BF16 up projection
+    # so the fused-front tail drops the norm launch (bf16-rounding-level change).
+    # Online weight updates are rejected while it is on.
+    SGLANG_OPT_HIP_K3_FOLD_MOE_LATENT_NORM = EnvBool(False)
     # ROCm decode attention kernel: auto (aiter_sparse on gfx950, tilelang elsewhere) |
     # aiter_sparse | tilelang | triton | torch | comparison | unified_kv_triton
     SGLANG_HACK_FLASHMLA_BACKEND = EnvStr("auto")

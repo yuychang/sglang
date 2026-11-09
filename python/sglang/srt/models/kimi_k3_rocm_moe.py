@@ -11,10 +11,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Kimi-K3 ROCm dispatch for the merged MoE front GEMM.
+"""Kimi-K3 ROCm helpers for the latent MoE.
 
 ``KimiK3MoE`` builds a ``TunedFrontGemm`` once after merging its front weight,
 and runs its own BF16 GEMM when there is none or the batch is outside the window.
+``fold_latent_norm_into_up_proj`` moves the latent RMSNorm weight into the up
+projection, so the fused-front tail can finish the norm in ``rstd_scale_add3``.
 """
 
 import functools
@@ -127,3 +129,20 @@ def build_tuned_front_gemm(*, weight: torch.Tensor) -> Optional[TunedFrontGemm]:
             "129-192 tokens)."
         )
     return TunedFrontGemm(mm=tgemm.mm, min_tokens=min_tokens, max_tokens=max_tokens)
+
+
+@torch.no_grad()
+def fold_latent_norm_into_up_proj(
+    *, norm_weight: torch.Tensor, up_weight: torch.Tensor
+) -> None:
+    """In place: ``up_weight <- bf16(up_weight * norm_weight)``, ``norm_weight <- 1``.
+
+    ``RMSNorm(x; g) @ W^T == rstd(x) * (x @ (W * g)^T)``, so every reader of the
+    pair still computes the same product, and a second fold multiplies by ones.
+    """
+    gain = norm_weight.float()
+    # Row chunks bound the fp32 temporary (14 MB for K3's 7168 x 3584 up weight).
+    for start in range(0, up_weight.shape[0], 1024):
+        rows = up_weight[start : start + 1024]
+        rows.copy_(rows.float() * gain)
+    norm_weight.fill_(1.0)
