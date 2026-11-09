@@ -1157,7 +1157,7 @@ class Envs:
     # Fold the KDA [f_a|b] tail into the wide [q,k,v,g] projection so the whole
     # in-proj is one GEMM. Decode is bandwidth bound there, so the 144 extra
     # output columns ride along nearly free.
-    SGLANG_OPT_HIP_K3_FUSE_KDA_INPROJ =EnvBoolWithAlias(
+    SGLANG_OPT_HIP_K3_FUSE_KDA_INPROJ = EnvBoolWithAlias(
         True, deprecated_name="SGLANG_ROCM_K3_FUSE_KDA_INPROJ"
     )
     # Largest batch (tokens) that takes the merged in-proj GEMM for BF16 weights;
