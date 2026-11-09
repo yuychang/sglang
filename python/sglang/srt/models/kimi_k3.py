@@ -1532,9 +1532,7 @@ class KimiK3MoE(nn.Module):
             routed_input = self._latent_mxfp4.down(x=hidden_states)
         else:
             # The tuned GEMM writes bf16; _front_fp32 is always False on HIP.
-            if self._tuned_front is not None and self._tuned_front.covers(
-                num_tokens
-            ):
+            if self._tuned_front is not None and self._tuned_front.covers(num_tokens):
                 fused = self._tuned_front(hidden_states, self._front_w)
             else:
                 fused = _k3_bf16_gemm(
