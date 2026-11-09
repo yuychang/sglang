@@ -2124,6 +2124,7 @@ class KimiK3DeltaAttention(nn.Module):
         self.attn._k3_fused_decode_args = None
         self._kda_fused_decode_ready = False
         self._kda_hip_fused_decode_ready = False
+        self._kda_hip_fused_verify_ready = False
         if sp_moe:
             _route_sp_o_proj_output(self.o_proj)
 
@@ -2316,11 +2317,13 @@ class KimiK3DeltaAttention(nn.Module):
             )
 
             layer = self.attn
-            # A re-run that fails to arm must not leave the previous f_b serving decode.
+            # A failed re-run must not leave the previous f_b serving decode or verify.
             self._kda_hip_fused_decode_ready = False
+            self._kda_hip_fused_verify_ready = False
             layer._k3_hip_fused_decode_args = None
             layer._k3_hip_fused_decode_backend = ""
             layer._k3_hip_fused_decode_ops = None
+            layer._k3_hip_fused_verify_args = None
             w = layer.conv_weights
             backend = envs.SGLANG_USE_HIP_K3_KDA_FUSED_BACKEND.get().lower()
             fused_ops = {
@@ -2370,6 +2373,8 @@ class KimiK3DeltaAttention(nn.Module):
                 layer._k3_hip_fused_decode_backend = backend
                 layer._k3_hip_fused_decode_ops = fused_ops
                 self._kda_hip_fused_decode_ready = True
+                if backend == "aiter":
+                    self._prepare_fused_verify_hip(state_dtype=state_dtype)
             return
         layer = self.attn
         w = layer.conv_weights
@@ -2427,6 +2432,47 @@ class KimiK3DeltaAttention(nn.Module):
         else:
             layer._k3_fused_decode_args = fused_decode_args
         self._kda_fused_decode_ready = True
+
+    def _prepare_fused_verify_hip(self, *, state_dtype: torch.dtype) -> None:
+        """Arm the AITER fused KDA verify over the decode kernel's static inputs."""
+        from sglang.kernels.ops.attention import kda_fused_verify_aiter_hip
+
+        # Only the full-rank gate projection can hand f_a over unprojected.
+        if not self.use_full_rank_gate:
+            return
+        num_draft_tokens = get_spec().speculative_num_draft_tokens or 0
+        layer = self.attn
+        f_b_weight, norm_weight, norm_eps, a_log = layer._k3_hip_fused_decode_args
+        if not kda_fused_verify_aiter_hip.available(
+            device=f_b_weight.device,
+            state_dtype=state_dtype,
+            num_draft_tokens=num_draft_tokens,
+        ):
+            return
+        if (get_spec().speculative_eagle_topk or 1) > 1:
+            print_warning_once(
+                "Kimi-K3 fused KDA verify stays off: it covers chain verify only, "
+                "not tree speculative decoding (speculative_eagle_topk > 1)"
+            )
+            return
+        kda_fused_verify_aiter_hip.warmup(
+            f_b_weight=f_b_weight,
+            conv_weight=layer.conv_weights,
+            A_log=a_log,
+            dt_bias=layer.dt_bias,
+            lower_bound=float(layer.lower_bound),
+            norm_weight=norm_weight,
+            norm_eps=norm_eps,
+            state_dtype=state_dtype,
+            num_draft_tokens=num_draft_tokens,
+            replay_ring=get_exec().mamba.enable_linear_replayssm_spec,
+        )
+        # The warmed draft-token count is the only one the verify may run.
+        layer._k3_hip_fused_verify_args = (
+            *layer._k3_hip_fused_decode_args,
+            num_draft_tokens,
+        )
+        self._kda_hip_fused_verify_ready = True
 
     def forward_qkvbfg_fused(
         self, hidden_states: torch.Tensor, defer_f_b: bool = False
@@ -2529,8 +2575,9 @@ class KimiK3DeltaAttention(nn.Module):
         # gathered rank-major; the recurrence needs sequence order.
         gathered_rows = hidden_states.shape[0]
         hidden_states = cp_interleave_to_sequence_order(hidden_states, forward_batch)
-        defer_f_b = (
-            self._kda_hip_fused_decode_ready and forward_batch.forward_mode.is_decode()
+        mode = forward_batch.forward_mode
+        defer_f_b = (self._kda_hip_fused_decode_ready and mode.is_decode()) or (
+            self._kda_hip_fused_verify_ready and mode.is_target_verify()
         )
         if self.do_fuse_qkvbfg or self.use_full_rank_gate:
             mixed_qkv, beta, forget_gate, g_proj_states = self.forward_qkvbfg_fused(
@@ -2541,7 +2588,8 @@ class KimiK3DeltaAttention(nn.Module):
                 hidden_states
             )
 
-        if not forward_batch.logical_forward_mode.is_decode():
+        # A deferred f_b leaves f_a [tokens, head_dim], which the backend takes as is.
+        if not forward_batch.logical_forward_mode.is_decode() and not defer_f_b:
             forget_gate = forget_gate.unflatten(-1, (-1, self.head_dim))
             forget_gate = forget_gate.unsqueeze(0)
         beta = beta.unsqueeze(0)

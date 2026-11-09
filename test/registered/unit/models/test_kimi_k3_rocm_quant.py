@@ -14,7 +14,10 @@ from unittest.mock import patch
 
 import torch
 
-from sglang.kernels.ops.attention import kda_fused_decode_aiter_hip
+from sglang.kernels.ops.attention import (
+    kda_fused_decode_aiter_hip,
+    kda_fused_verify_aiter_hip,
+)
 from sglang.srt.environ import envs
 from sglang.srt.layers.quantization import unquant
 from sglang.srt.layers.quantization.quark.quark import QuarkLinearMethod
@@ -175,16 +178,19 @@ class TestHipFusedDecodeArming(CustomTestCase):
 
     def test_failed_rearm_drops_the_previous_arming(self):
         """A re-run that cannot arm (here the backend reports unavailable) must not
-        leave the previous f_b serving the fused decode."""
+        leave the previous f_b serving the fused decode or verify."""
+        stale = ("stale f_b", None, 1e-5, None)
         layer = SimpleNamespace(
             conv_weights=None,
-            _k3_hip_fused_decode_args=("stale f_b", None, 1e-5, None),
+            _k3_hip_fused_decode_args=stale,
             _k3_hip_fused_decode_backend="aiter",
             _k3_hip_fused_decode_ops=kda_fused_decode_aiter_hip,
+            _k3_hip_fused_verify_args=stale,
         )
         attention = SimpleNamespace(
             attn=layer,
             _kda_hip_fused_decode_ready=True,
+            _kda_hip_fused_verify_ready=True,
             f_b_proj=SimpleNamespace(weight=torch.empty(12 * 128, 128)),
             config=SimpleNamespace(
                 mamba2_cache_params=SimpleNamespace(
@@ -203,8 +209,49 @@ class TestHipFusedDecodeArming(CustomTestCase):
             KimiK3DeltaAttention._prepare_fused_decode(attention)
 
         self.assertFalse(attention._kda_hip_fused_decode_ready)
+        self.assertFalse(attention._kda_hip_fused_verify_ready)
         self.assertIsNone(layer._k3_hip_fused_decode_args)
         self.assertIsNone(layer._k3_hip_fused_decode_ops)
+        self.assertIsNone(layer._k3_hip_fused_verify_args)
+
+    def test_fused_verify_arms_for_chain_speculation_only(self):
+        """The fused verify covers chain verify only: tree speculative decoding must
+        not arm or warm it, and an armed layer records the warmed draft-token count."""
+        decode_args = (torch.empty(12, 128, 128), None, 1e-5, None)
+        layer = SimpleNamespace(
+            conv_weights=None,
+            dt_bias=None,
+            lower_bound=-5.0,
+            _k3_hip_fused_decode_args=decode_args,
+            _k3_hip_fused_verify_args=None,
+        )
+        attention = SimpleNamespace(
+            attn=layer, use_full_rank_gate=True, _kda_hip_fused_verify_ready=False
+        )
+        for topk, armed in ((4, False), (1, True)):
+            spec = SimpleNamespace(
+                speculative_num_draft_tokens=5, speculative_eagle_topk=topk
+            )
+            exec_bag = SimpleNamespace(
+                mamba=SimpleNamespace(enable_linear_replayssm_spec=True)
+            )
+            with (
+                self.subTest(topk=topk),
+                mock.patch.object(kimi_k3, "get_spec", return_value=spec),
+                mock.patch.object(kimi_k3, "get_exec", return_value=exec_bag),
+                mock.patch.object(
+                    kda_fused_verify_aiter_hip, "available", return_value=True
+                ),
+                mock.patch.object(kda_fused_verify_aiter_hip, "warmup") as warmup,
+                mock.patch.object(kimi_k3, "print_warning_once") as warn,
+            ):
+                KimiK3DeltaAttention._prepare_fused_verify_hip(
+                    attention, state_dtype=torch.bfloat16
+                )
+                self.assertEqual(attention._kda_hip_fused_verify_ready, armed)
+                self.assertEqual(warmup.called, armed)
+                self.assertEqual(warn.called, not armed)
+        self.assertEqual(layer._k3_hip_fused_verify_args, (*decode_args, 5))
 
     def test_block_fp8_f_b_arms_from_the_merged_bf16_copy(self):
         """A block-FP8 f_b_proj holds FP8 with no Quark scheme; the fused decode must
