@@ -1973,6 +1973,16 @@ SGLang supports various environment variables that can be used to configure its 
       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>false</code></td>
     </tr>
     <tr>
+      <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}><code>SGLANG_OPT_HIP_MLA_FP8_Q_ASM</code></td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>gfx950, 12-head FP8 MLA with both <code>SGLANG_AITER_MLA_DECODE_BACKEND</code> and <code>SGLANG_AITER_MLA_VERIFY_BACKEND</code> on <code>asm</code> and no DCP: cast the query to FP8 and run decode and a verify window of up to <code>SGLANG_OPT_HIP_MLA_FP8_Q_ASM_MAX_QLEN</code> tokens on the persistent FP8-query ASM kernel. Under <code>SGLANG_AITER_MLA_PERSIST=0</code> this turns persistence on for that decode and verify only, with the <code>SGLANG_AITER_MLA_PERSIST=1</code> schedule; the draft model and other attention backends keep <code>PERSIST=0</code>. KV splits follow <code>SGLANG_AITER_MLA_AUTO_KV_SPLITS</code>. A wider window keeps the previous routing. A 2-4 token verify window also keeps the previous routing: on current AITER those FP8-query kernels return wrong output (<a href="https://github.com/ROCm/aiter/issues/7007">ROCm/aiter#7007</a>). Decode and 5-8 token windows are correct.</td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>false</code></td>
+    </tr>
+    <tr>
+      <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}><code>SGLANG_OPT_HIP_MLA_FP8_Q_ASM_MAX_QLEN</code></td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Widest verify window, in tokens (1 to 8), that <code>SGLANG_OPT_HIP_MLA_FP8_Q_ASM</code> takes. AITER folds a 5-8 token window onto its 32-head qlen-4 kernel, which on MI355X beats Gluon only from about 128K tokens of context.</td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>4</code></td>
+    </tr>
+    <tr>
       <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}><code>SGLANG_OPT_HIP_K3_AITER</code></td>
       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Kimi-K3 MoE layout on ROCm. With <code>SGLANG_USE_AITER</code>, the MXFP4 MoE pads the per-rank expert intermediate size to a multiple of 128 instead of 256. On the AITER path (<code>SGLANG_USE_AITER</code>, or always on gfx950 / gfx1250), the Quark W4A4 MXFP4 MoE keeps the checkpoint width instead of padding it for the generic AITER kernels. Independently of <code>SGLANG_USE_AITER</code>, the Kimi-K3 MoE front on HIP skips the contiguous copy of the router logits. Deprecated alias: <code>SGLANG_AITER_K3_OPT</code>.</td>
       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>false</code></td>
