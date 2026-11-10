@@ -2032,6 +2032,11 @@ SGLang supports various environment variables that can be used to configure its 
       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Minimum tokens per batch for Kimi-K3 MXFP4 latent projections. Must be positive when enabled.</td>
       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>2048</code></td>
     </tr>
+    <tr>
+      <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}><code>SGLANG_OPT_HIP_K3_FOLD_MOE_LATENT_NORM</code></td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Kimi-K3 on ROCm with the fused MoE front and BF16 latent projections: after load, multiply the latent RMSNorm weight into <code>routed_expert_up_proj</code> and set the norm weight to 1, so the fused-front tail runs the up GEMM on the raw latent and applies the row rstd together with the shared and residual adds (one launch fewer per MoE layer). Changes results at bf16 rounding level; with <code>SGLANG_OPT_HIP_K3_MOE_LATENT_MXFP4</code> the MXFP4 up copy quantizes the folded weight. Online weight updates are rejected while it is on.</td>
+      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>false</code></td>
+    </tr>
   </tbody>
 </table>
 

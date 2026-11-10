@@ -18,6 +18,7 @@ import torch
 from torch import nn
 
 from sglang.kernels.ops.attention.fla.fused_norm_gate import FusedRMSNormGated
+from sglang.kernels.ops.layernorm.rstd_scale_add3 import rstd_scale_add3
 from sglang.srt.configs.kimi_k3 import KimiK3Config
 from sglang.srt.configs.kimi_linear import KimiLinearConfig
 from sglang.srt.configs.model_config import is_kimi_k31
@@ -98,6 +99,7 @@ from sglang.srt.layers.moe.utils import (
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
 from sglang.srt.layers.quantization.fp8_utils import block_quant_dequant
 from sglang.srt.layers.quantization.modelslim.modelslim import ModelSlimConfig
+from sglang.srt.layers.quantization.unquant import UnquantizedLinearMethod
 from sglang.srt.layers.radix_linear_attention import RadixLinearAttention
 from sglang.srt.layers.utils import PPMissingLayer, get_layer_id
 from sglang.srt.layers.utils.common import add_prefix, set_weight_attrs
@@ -127,7 +129,11 @@ from sglang.srt.models.deepseek_common.attention_forward_methods.forward_methods
     AttnForwardMethod,
 )
 from sglang.srt.models.deepseek_v2 import DeepseekV2AttentionMLA, MoEGate
-from sglang.srt.models.kimi_k3_rocm_moe import TunedFrontGemm, build_tuned_front_gemm
+from sglang.srt.models.kimi_k3_rocm_moe import (
+    TunedFrontGemm,
+    build_tuned_front_gemm,
+    fold_latent_norm_into_up_proj,
+)
 from sglang.srt.models.kimi_k3_vl import (
     KimiK3MultiModalProjector,
     KimiK3VisionTower,
@@ -517,6 +523,8 @@ class KimiK3MoE(nn.Module):
         # a2a pair) rather than the three-way fused-front weight.
         self._front_is_ep_pair = False
         self._latent_mxfp4 = None
+        # routed_expert_up_proj carries the latent norm weight; set at post-load.
+        self._latent_norm_folded = False
         # AITER tuned BF16 GEMM for the three-way merged front; set at merge time.
         self._tuned_front: Optional[TunedFrontGemm] = None
         self.moe_hidden_size = (
@@ -831,6 +839,32 @@ class KimiK3MoE(nn.Module):
         # _fused_front is the only reader; skip the AITER probe when it never runs.
         if _is_hip and self._eligible_for_fused_front:
             self._tuned_front = build_tuned_front_gemm(weight=self._front_w)
+
+    def _fold_latent_norm(self) -> None:
+        """SGLANG_OPT_HIP_K3_FOLD_MOE_LATENT_NORM: move routed_expert_norm's weight
+        into the unquantized routed_expert_up_proj, for the fused-front rstd tail."""
+        norm, up = self.routed_expert_norm, self.routed_expert_up_proj
+        self._latent_norm_folded = (
+            _is_hip
+            and envs.SGLANG_OPT_HIP_K3_FOLD_MOE_LATENT_NORM.get()
+            and self._eligible_for_fused_front
+            and type(norm) is RMSNorm
+            and not norm.cast_x_before_out_mul
+            and isinstance(up.quant_method, UnquantizedLinearMethod)
+        )
+        if not self._latent_norm_folded:
+            return
+        fold_latent_norm_into_up_proj(
+            norm_weight=norm.weight.data, up_weight=up.weight.data
+        )
+        if self._derived_weight_cache_error is None:
+            self._derived_weight_cache_error = (
+                "Online weight updates are not supported while "
+                "SGLANG_OPT_HIP_K3_FOLD_MOE_LATENT_NORM is on: each MoE layer's "
+                "routed_expert_up_proj holds its product with routed_expert_norm, "
+                "which in-place weight writes do not refresh. Restart with "
+                "SGLANG_OPT_HIP_K3_FOLD_MOE_LATENT_NORM=0 to allow online updates."
+            )
 
     def _use_latent_mxfp4(self, *, num_tokens: int) -> bool:
         return self._latent_mxfp4 is not None and self._latent_mxfp4.can_run(
@@ -1532,9 +1566,7 @@ class KimiK3MoE(nn.Module):
             routed_input = self._latent_mxfp4.down(x=hidden_states)
         else:
             # The tuned GEMM writes bf16; _front_fp32 is always False on HIP.
-            if self._tuned_front is not None and self._tuned_front.covers(
-                num_tokens
-            ):
+            if self._tuned_front is not None and self._tuned_front.covers(num_tokens):
                 fused = self._tuned_front(hidden_states, self._front_w)
             else:
                 fused = _k3_bf16_gemm(
@@ -1720,6 +1752,21 @@ class KimiK3MoE(nn.Module):
 
         latent = buf[:latent_numel].view(num_tokens, self.moe_hidden_size)
         shared_output = buf[latent_numel:].view(num_tokens, hidden_size)
+        if (
+            self._latent_norm_folded
+            and not fused_norm
+            and not use_mxfp4
+            and (prefix_sum is None or prefix_sum.stride(-1) == 1)
+        ):
+            # up_proj carries the norm weight; the row rstd completes the norm.
+            out, _ = self.routed_expert_up_proj(latent)
+            return rstd_scale_add3(
+                out,
+                latent,
+                shared_output,
+                prefix_sum,
+                eps=self.routed_expert_norm.variance_epsilon,
+            )
         if not fused_norm:
             latent = self._latent_norm(latent)
         if use_mxfp4:
@@ -4026,11 +4073,15 @@ class KimiK3LinearForCausalLM(nn.Module):
 
         # Post-load: merge the horizontally-fused decode weights (views of the
         # merged buffers, ~0 extra memory); must run before cuda graph capture.
+        num_norm_folded = 0
         for layer in self.model.layers:
             if isinstance(layer, PPMissingLayer):
                 continue
             if isinstance(layer.mlp, KimiK3MoE):
                 layer.mlp._merge_front_weights()
+                # Before the MXFP4 copy, which must quantize the folded up weight.
+                layer.mlp._fold_latent_norm()
+                num_norm_folded += layer.mlp._latent_norm_folded
                 if layer.mlp._latent_mxfp4 is not None:
                     layer.mlp._latent_mxfp4.prepare(
                         down_weight=layer.mlp.routed_expert_down_proj.weight,
@@ -4051,6 +4102,11 @@ class KimiK3LinearForCausalLM(nn.Module):
             if isinstance(layer.self_attn, KimiK3DeltaAttention):
                 layer.self_attn._merge_bfa_weights()
                 layer.self_attn._prepare_fused_decode()
+        if envs.SGLANG_OPT_HIP_K3_FOLD_MOE_LATENT_NORM.get():
+            rank0_log(
+                "SGLANG_OPT_HIP_K3_FOLD_MOE_LATENT_NORM: latent MoE norm folded "
+                f"into up_proj on {num_norm_folded} layers."
+            )
 
         for layer in self.model.layers:
             if isinstance(layer, PPMissingLayer) or not isinstance(

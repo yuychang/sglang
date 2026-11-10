@@ -817,6 +817,7 @@ def _verify_backend(state, slots: torch.Tensor, steps: int):
     backend.verify_intermediate_state_indices = torch.arange(
         state.temporal.shape[1], device=_DEVICE, dtype=torch.int32
     )
+    backend.pp_spec_stable_rows = False
     backend.accept_lens_pool = None
     backend.kernel_dispatcher = KDAKernelDispatcher(
         LinearAttnKernelBackend.TRITON,

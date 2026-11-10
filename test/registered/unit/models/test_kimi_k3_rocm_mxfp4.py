@@ -1,4 +1,5 @@
-"""Latent MXFP4 selection, reload lifecycle, and fused/unfused MoE plumbing."""
+"""Latent MXFP4 selection, reload lifecycle, latent norm fold, and fused/unfused
+MoE plumbing."""
 
 import unittest
 from contextlib import nullcontext
@@ -10,6 +11,8 @@ from torch.nn import functional as F
 
 from sglang.kernels.ops.gemm import latent_mxfp4_aiter_hip
 from sglang.srt.environ import envs
+from sglang.srt.layers.layernorm import RMSNorm
+from sglang.srt.layers.quantization.unquant import UnquantizedLinearMethod
 from sglang.srt.models import kimi_k3
 from sglang.srt.models.kimi_k3_rocm_mxfp4 import (
     LatentMXFP4Projections,
@@ -65,6 +68,9 @@ def _moe(*, prepared: bool | None):
     moe._front_fp32 = False
     moe._moe_front_needs_dense_bf16 = True
     moe._route_quant_fuse_eligible = False
+    moe._tuned_front = None
+    moe._latent_norm_folded = False
+    moe._derived_weight_cache_error = None
     moe.gate = nn.Linear(4, 1, bias=False)
     moe.routed_expert_down_proj = _Linear(4, 2, bias=False)
     moe.routed_expert_up_proj = _Linear(2, 4, bias=False)
@@ -200,6 +206,78 @@ class TestLatentMXFP4Runtime(CustomTestCase):
             with self.subTest(min_tokens=min_tokens):
                 with self.assertRaisesRegex(ValueError, "must be positive"):
                     LatentMXFP4Projections(min_tokens=min_tokens)
+
+
+def _rstd_scale_add3_reference(a, x, b, c=None, *, eps):
+    y = a * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps) + b
+    return y if c is None else y + c
+
+
+class TestLatentNormFold(CustomTestCase):
+    def _folding_moe(self):
+        moe = _moe(prepared=None)
+        moe._eligible_for_fused_front = True
+        moe.routed_expert_norm = RMSNorm(2, eps=1e-5)
+        moe.routed_expert_norm.weight.data = torch.tensor([0.5, 3.0])
+        # CustomOp would dispatch on the host GPU platform; the math is the contract.
+        moe.routed_expert_norm.forward = moe.routed_expert_norm.forward_native
+        moe.routed_expert_up_proj.quant_method = UnquantizedLinearMethod()
+        return moe
+
+    @torch.inference_mode()
+    def test_folded_tail_keeps_the_fused_front_output(self):
+        """After the fold, the fused front must hand the pre-norm latent, the norm
+        eps and the shared and prefix rows to the rstd tail, and reject online
+        weight updates, which would overwrite only one half of the product."""
+        with (
+            get_context().override_server_args(tp_size=1),
+            get_parallel().override(tp_group=None),
+            mock.patch.object(
+                kimi_k3,
+                "use_symmetric_memory",
+                side_effect=lambda *args, **kwargs: nullcontext(),
+            ),
+            mock.patch.object(
+                kimi_k3, "tensor_model_parallel_all_reduce", side_effect=lambda x: x
+            ),
+            mock.patch.object(
+                kimi_k3, "rstd_scale_add3", side_effect=_rstd_scale_add3_reference
+            ) as tail,
+            mock.patch.object(kimi_k3, "_is_hip", True),
+            envs.SGLANG_OPT_HIP_K3_FOLD_MOE_LATENT_NORM.override(True),
+        ):
+            moe = self._folding_moe()
+            x, prefix = torch.randn(3, 4), torch.randn(3, 4)
+            expected = moe._forward_fused(x, prefix_sum=prefix)
+            moe._fold_latent_norm()
+            self.assertTrue(moe._latent_norm_folded)
+            self.assertIsNotNone(moe._derived_weight_cache_error)
+            for prefix_sum in (prefix, None):
+                with self.subTest(prefix=prefix_sum is not None):
+                    actual = moe._forward_fused(x, prefix_sum=prefix_sum)
+                    torch.testing.assert_close(
+                        actual,
+                        expected if prefix_sum is not None else expected - prefix,
+                    )
+            self.assertEqual(tail.call_count, 2)
+
+    def test_fold_skips_quantized_up_proj_and_the_default(self):
+        """Multiplying the norm into a quantized (packed) up weight would corrupt
+        it, and the fold is opt-in."""
+        for quantized, enabled in ((True, True), (False, False)):
+            with (
+                self.subTest(quantized=quantized, enabled=enabled),
+                mock.patch.object(kimi_k3, "_is_hip", True),
+                envs.SGLANG_OPT_HIP_K3_FOLD_MOE_LATENT_NORM.override(enabled),
+            ):
+                moe = self._folding_moe()
+                if quantized:
+                    moe.routed_expert_up_proj.quant_method = mock.Mock()
+                up = moe.routed_expert_up_proj.weight.detach().clone()
+                moe._fold_latent_norm()
+                self.assertFalse(moe._latent_norm_folded)
+                self.assertTrue(torch.equal(moe.routed_expert_up_proj.weight, up))
+                self.assertEqual(moe.routed_expert_norm.weight.tolist(), [0.5, 3.0])
 
 
 if __name__ == "__main__":
