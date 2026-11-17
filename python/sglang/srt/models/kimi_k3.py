@@ -68,7 +68,9 @@ from sglang.srt.layers.layer_boundary.residual.attn_bank import (
     AttnBank,
     AttnBankOutputRead,
     AttnBankState,
+    _bank_rows,
 )
+from sglang.srt.layers.layer_boundary.residual.attn_bank_hip import gather_row_shards
 from sglang.srt.layers.layernorm import RMSNorm
 from sglang.srt.layers.linear import (
     ColumnParallelBatchedLinear,
@@ -3509,13 +3511,23 @@ class KimiK3LinearModel(nn.Module):
             score_proj = self.output_attn_res_proj
             score_norm = self.output_attn_res_norm
             nvb = _cdiv(self.end_layer, self.config.attn_res_block_size)
-        return aggregate_stream(
+        bank = self.attn_bank.require()
+        rows = _bank_rows(bank, hidden_states)
+        mixed = aggregate_stream(
             hidden_states,
-            self.attn_bank.require().block_residual,
+            bank.block_residual if rows is None else bank.block_residual[rows],
             nvb,
             score_proj,
             score_norm,
         )
+        # The draft reads every row. A stream left on attention-TP row shards (a
+        # reduce-scatter, or SGLANG_ENABLE_ROCM_K3_ROW_SHARDED_STREAM's short or
+        # empty last shards) is gathered here; the bank itself stays sharded.
+        if rows is not None:
+            if _is_hip and envs.SGLANG_ENABLE_ROCM_K3_ROW_SHARDED_STREAM.get():
+                return gather_row_shards(mixed, bank.block_residual.shape[0])
+            return get_parallel().attn_tp_group.all_gather(mixed, dim=0)
+        return mixed
 
 
 class KimiK3LinearForCausalLM(nn.Module):
