@@ -19,6 +19,18 @@ if TYPE_CHECKING:
     from sglang.srt.model_executor.model_runner import ModelRunner
 
 
+def _is_dflash_mla_draft(hf_config) -> bool:
+    """Whether this config is a DFLASH draft (it has a dflash_config) whose layers are MLA.
+
+    A target model with MLA layers has no dflash_config and is not one.
+    """
+    if not getattr(hf_config, "dflash_config", None):
+        return False
+    from sglang.srt.speculative.dflash_utils import parse_dflash_draft_config
+
+    return parse_dflash_draft_config(draft_hf_config=hf_config).is_mla
+
+
 def init_draft_backend(backend: TritonAttnBackend, model_runner: ModelRunner) -> None:
     """Configure a ROCm draft worker's Triton backend once its DCP size is final."""
     algorithm = model_runner.spec_algorithm
@@ -37,7 +49,7 @@ def init_draft_backend(backend: TritonAttnBackend, model_runner: ModelRunner) ->
         and backend.topk == 1
         and is_gfx95_supported()
         and get_exec().kernel.enable_amd_monokernel
-        and model_runner.model_config.is_dflash_mla_draft
+        and _is_dflash_mla_draft(model_runner.model_config.hf_config)
     ):
         from sglang.kernels.ops.attention.verify_mla import verify_mla_draft_fwd
 
