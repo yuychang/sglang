@@ -146,6 +146,8 @@ def _charges_dflash_draft_kv_per_token(kvc: KVCacheConfigurator) -> bool:
     return (
         not kvc.is_draft_worker
         and kvc.spec_algorithm.is_dflash_family()
+        # DFLASH and DSPARK only build the draft on the final PP stage.
+        and (kvc.pp_size == 1 or kvc.pp_group.is_last_rank)
         and not get_spec().speculative_dflash_draft_kv_ring
     )
 
@@ -689,7 +691,9 @@ class DefaultPoolConfigurator(MemoryPoolConfigurator):
         index_head_dim = get_dsa_index_head_dim(kvc.model_config.hf_config)
         indexer_size_per_token = ceil_div(
             DSATokenToKVPool.index_bytes_per_token_for(
-                index_head_dim, get_exec().kernel.enable_fp4_indexer
+                index_head_dim,
+                get_exec().kernel.enable_fp4_indexer
+                or get_exec().kernel.enable_dsa_fp4_indexer,
             ),
             get_dsa_index_kpool(kvc.model_config.hf_config),
         )

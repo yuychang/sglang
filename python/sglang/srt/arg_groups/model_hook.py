@@ -10,6 +10,7 @@ from typing import Any
 
 from sglang.srt.arg_groups.model_override_base import (
     attention_backends_of,
+    decode_state_free_radix_of,
     mamba_extra_buffer_of,
     model_config_of,
     resolved_view,
@@ -253,6 +254,10 @@ def handle_model_specific_adjustments(server_args: Any):
 
         apply_kimi_k3_linear_attn_defaults(server_args)
         apply_kimi_k3_spec_backend_defaults(server_args)
+        if model_arch == "KimiK31ForConditionalGeneration" and get_platform().is_hip:
+            from sglang.srt.models.kimi_k3_amd import env_defaults
+
+            env_defaults.apply_kimi_k31_rocm_env_defaults()
 
     if model_arch == "Glm5NextForConditionalGeneration":
         from sglang.srt.arg_groups.glm5_next_hook import (
@@ -1068,7 +1073,8 @@ def handle_mamba_radix_cache(server_args: Any, hf_config: Any):
             hf_config,
             mamba_cache_chunk_size_of=lambda: mamba_cache_chunk_size(server_args),
         )
-    else:
+    elif not decode_state_free_radix_of(view):
+        # A state-free decode tree caches no state, so no_buffer's limits do not apply.
         validate_mamba_no_buffer(view, hf_config.architectures[0])
 
 

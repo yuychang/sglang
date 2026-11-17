@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import collections
 import logging
+import time
 from enum import Enum
 from typing import TYPE_CHECKING, Callable, Iterable, List, Optional
 
@@ -88,6 +89,12 @@ if _use_aiter:
     from aiter.ops.shuffle import shuffle_weight
     from aiter.ops.triton.gemm_a16w16 import gemm_a16w16 as _aiter_triton_a16w16
     from aiter.tuned_gemm import tgemm
+
+    from sglang.srt.layers.quantization.unquant_hip import (
+        a16w16_into,
+        a16w16_is_tuned,
+        prefer_hipblaslt,
+    )
 
 if _is_gfx95:
     from sglang.kernels.ops.gemm.bf16_tiled_small_m_gemm import (
@@ -705,6 +712,47 @@ def bf16_gemm_dispatch(
     return _bf16_gemm_dispatch_impl(x, weight, bias)
 
 
+def warmup_bf16_gemms(model: torch.nn.Module, max_m: int) -> None:
+    from sglang.srt.layers.linear import LinearBase
+
+    weights = {}
+    for module in model.modules():
+        if not isinstance(module, LinearBase) or not isinstance(
+            module.quant_method, UnquantizedLinearMethod
+        ):
+            continue
+        w = module.weight
+        if w.dim() == 2 and w.dtype == torch.bfloat16:
+            weights.setdefault((tuple(w.shape), w.stride()), w)
+    ms = set()
+    p = 1
+    while p <= max_m:
+        # cuBLASLt picks kernels per M, including by M alignment.
+        ms.update((p, p + 1, p * 3 // 2, p * 3 // 2 + 7))
+        p *= 2
+    ms = sorted(m for m in ms if m <= max_m)
+    tic = time.perf_counter()
+    with torch.inference_mode():
+        for w in weights.values():
+            n, k = w.shape
+            x = torch.zeros((max_m, k), dtype=torch.bfloat16, device=w.device)
+            for m in ms:
+                _bf16_gemm_dispatch_impl(x[:m], w, None)
+                _bf16_gemm_dispatch_impl(
+                    x[:m],
+                    w,
+                    None,
+                    addend=torch.zeros((m, n), dtype=w.dtype, device=w.device),
+                )
+            del x
+        torch.cuda.synchronize()
+    torch.cuda.empty_cache()
+    logger.info(
+        f"bf16 GEMM warmup: {len(weights)} weight shapes x {len(ms)} M values "
+        f"(max {max_m}) in {time.perf_counter() - tic:.1f}s"
+    )
+
+
 def _can_accumulate_into_addend(
     *,
     weight: torch.Tensor,
@@ -964,7 +1012,15 @@ class UnquantizedLinearMethod(LinearMethodBase):
             and not _skip_aiter_unquant
             and type(layer.weight.data) is torch.Tensor
         ):
-            if _is_gfx95 and _prefer_triton_a16w16(x, layer.weight):
+            if x.dim() == 2 and prefer_hipblaslt(x.shape[0], *layer.weight.shape):
+                return F.linear(x, layer.weight, bias)
+            if (
+                _is_gfx95
+                and _prefer_triton_a16w16(x, layer.weight)
+                and not a16w16_is_tuned(
+                    x.shape[0], layer.weight.shape[0], x.shape[1], bias is not None
+                )
+            ):
                 return _aiter_triton_a16w16(x, layer.weight, bias, dtype=x.dtype)
             return tgemm.mm(x, layer.weight, bias, otype=x.dtype)
 
@@ -1071,6 +1127,8 @@ class UnquantizedLinearMethod(LinearMethodBase):
                 f"linear output has shape {output.shape}, expected "
                 f"{(x.shape[0], layer.weight.shape[0])}"
             )
+        if _use_aiter and bias is None and a16w16_into(x, layer.weight, output):
+            return output
         torch.mm(x, layer.weight.t(), out=output)
         if bias is not None:
             output.add_(bias)

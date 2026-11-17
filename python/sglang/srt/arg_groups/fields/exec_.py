@@ -352,6 +352,19 @@ class ExecKernel(msgspec.Struct):
             resolvable=True,
         ),
     ] = None
+    enable_flashmla_prefill_token_packing: A[
+        Optional[bool],
+        Arg(
+            help="Pack adjacent Kimi-K3.1 prefill tokens into one FlashMLA query tile. "
+            "Requires SM100/SM103, FP8 V32 KV cache and at most 32 heads per TP rank. "
+            "Supports DCP prefill after KV gathering, without separate prefill CP. "
+            "Disabled during deterministic inference. On by default for Kimi-K3.1 "
+            "(it only reorders the sparse-key sum); use "
+            "--no-enable-flashmla-prefill-token-packing to disable.",
+            action=argparse.BooleanOptionalAction,
+            resolvable=True,
+        ),
+    ] = None
     dsv4_prefill_backend: A[
         str,
         Arg(
@@ -484,6 +497,12 @@ class ExecKernel(msgspec.Struct):
         bool,
         "Use FP4 queries and index-K cache in the DSA lightning indexer of DeepSeek-V3.2-style sparse attention, ERNIE 5.5 Flash's MLA layers included; requires SM100. DeepSeek V4's C4 indexer has its own switch, --enable-deepseek-v4-fp4-indexer. Default keeps the FP8 indexer.",
     ] = False
+    enable_dsa_fp4_indexer: A[
+        bool,
+        "Store the DSA indexer keys in MXFP4 and score them with AITER's FP4 MQA-logits kernels "
+        "(Kimi-K3.1 on gfx950 with DCP): the row-group kernel in decode and target verify, the "
+        "prefill kernel over the DCP-gathered keys in prefill.",
+    ] = False
     enable_dsa_fused_indexer: A[
         Optional[bool],
         Arg(
@@ -519,6 +538,11 @@ class ExecMamba(msgspec.Struct):
         fn="sglang.srt.arg_groups.model_override_base.mamba_extra_buffer_of",
         doc="Whether the hybrid-mamba radix cache keeps its extra state "
         "buffer: the radix cache is on and the strategy asks for one.",
+    )
+    decode_state_free_radix = Derived(
+        fn="sglang.srt.arg_groups.model_override_base.decode_state_free_radix_of",
+        doc="Whether a PD decode server's radix cache holds FULL KV only and "
+        "each request keeps its own single Mamba state slot.",
     )
     enable_mamba_extra_buffer_lazy = Derived(
         fn="sglang.srt.arg_groups.overrides.mamba_extra_buffer_lazy_of",
@@ -590,6 +614,15 @@ class ExecMamba(msgspec.Struct):
             help="(Derived) whether the model routes through the hybrid-mamba "
             "radix cache handling; resolved from the model architecture, no "
             "CLI surface.",
+            no_cli=True,
+            resolvable=True,
+        ),
+    ] = False
+    decode_state_free_radix_default: A[
+        bool,
+        Arg(
+            help="(Resolved) the model's default for SGLANG_DECODE_STATE_FREE_RADIX; "
+            "set by model overrides, no CLI surface.",
             no_cli=True,
             resolvable=True,
         ),
