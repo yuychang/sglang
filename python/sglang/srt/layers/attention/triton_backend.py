@@ -82,6 +82,7 @@ if TYPE_CHECKING:
     from sglang.srt.layers.radix_attention import RadixAttention
     from sglang.srt.mem_cache.kv.alloc.iteration_ids import IterationIds
     from sglang.srt.model_executor.model_runner import ModelRunner
+    from sglang.srt.speculative.dflash_draft_ring import DFlashDraftKVRing
     from sglang.srt.speculative.spec_info import SpecInput
 
 
@@ -188,6 +189,8 @@ class TritonAttnBackend(AttentionBackend):
     verify_mla_draft_fwd: Optional[Callable[..., bool]] = None
     runs_decode: bool = True
     mla_dcp_window_verify: Optional[MlaDcpWindowVerify] = None
+    # A DFLASH draft's per-request KV ring, set by the DFLASH worker after the backends exist.
+    draft_kv_ring: Optional[DFlashDraftKVRing] = None
     # Every window rail this backend builds: the sub-pool the window layers
     # read, with the window they attend over; set per instance in __init__.
     window_lengths: Mapping[str, int] = MappingProxyType({})
@@ -1034,6 +1037,11 @@ class TritonAttnBackend(AttentionBackend):
                 out_cache_loc=out_cache_locs.get(name),
             )
         return rails
+
+    def set_draft_kv_ring(self, ring: DFlashDraftKVRing) -> None:
+        """Read a DFLASH draft's sliding-window keys from its per-request KV ring
+        instead of the request table (MlaDcpWindowVerify on ROCm)."""
+        self.draft_kv_ring = ring
 
     def init_forward_metadata(self, forward_batch: ForwardBatch):
         """Init auxiliary variables for triton attention backend."""
