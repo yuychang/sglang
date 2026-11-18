@@ -590,12 +590,8 @@ class ExecMamba(msgspec.Struct):
             "sliding-window layers still checkpoint every chunk. 3: every "
             "prefill chunk and decode tracking boundary.",
             choices=[2, 3],
-            resolvable=True,
         ),
     ] = 2
-    # The value alone cannot tell the default from an explicit 2, which a
-    # model-specific default (Kimi-K3.1's 3) must preserve.
-    _hybrid_cache_checkpoints_level_explicitly_set: A[bool, Arg(no_cli=True)] = False
     enable_mamba_cache_stochastic_rounding: A[
         bool,
         "Enable stochastic rounding when writing FP16 Mamba SSM cache states. Requires --mamba-ssm-dtype float16 and CUDA. With --mamba-backend triton, requires SM100.",

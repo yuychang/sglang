@@ -247,13 +247,6 @@ def _kimi_k31_overrides(server_args: Any, hf_config: Any) -> dict:
         logger.info("Kimi-K3.1 enables FlashMLA prefill token packing by default.")
         overrides["enable_flashmla_prefill_token_packing"] = True
     overrides["decode_state_free_radix_default"] = True
-    if not cfg._hybrid_cache_checkpoints_level_explicitly_set:
-        # Agentic multi-turn traffic resumes long prefixes; with level 2 (fork
-        # points and request ends only) each resume recomputes the KDA state
-        # from an older checkpoint: AgentX c56 on MI355X ran 14.7k tok/s/GPU at
-        # level 2 against 16.9k at level 3 (P90 TTFT 57.8 s against 26.2 s).
-        logger.info("Kimi-K3.1 checkpoints KDA state at level 3 by default.")
-        overrides["hybrid_cache_checkpoints_level"] = 3
     return overrides
 
 

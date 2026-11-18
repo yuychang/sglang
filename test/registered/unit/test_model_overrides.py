@@ -181,7 +181,6 @@ class TestModelOverridableWhitelist(CustomTestCase):
                 {
                     "dtype",
                     "enable_tf32_matmul",
-                    "hybrid_cache_checkpoints_level",
                     "enable_multi_layer_eagle",
                     "swa_full_tokens_ratio",
                     "disable_hybrid_swa_memory",
@@ -372,27 +371,6 @@ class TestBoundaryReductionDefaults(CustomTestCase):
                 self.assertEqual(
                     load.call_count, int(requested == "auto" and not same_model)
                 )
-
-
-class TestKimiK31CheckpointLevel(CustomTestCase):
-    """Kimi-K3.1 checkpoints recurrent state at level 3 unless the user chose."""
-
-    @staticmethod
-    def _declare(explicitly_set: bool) -> dict:
-        from sglang.srt.arg_groups.model_overrides.kimi_k3 import _kimi_k31_overrides
-
-        args = SimpleNamespace(
-            dcp_size=1,
-            enable_flashmla_prefill_token_packing=True,
-            _hybrid_cache_checkpoints_level_explicitly_set=explicitly_set,
-        )
-        return _kimi_k31_overrides(args, None)
-
-    def test_default_is_level_3(self):
-        self.assertEqual(self._declare(False).get("hybrid_cache_checkpoints_level"), 3)
-
-    def test_explicit_level_is_kept(self):
-        self.assertNotIn("hybrid_cache_checkpoints_level", self._declare(True))
 
 
 class TestDSparkCheckpointConfig(CustomTestCase):

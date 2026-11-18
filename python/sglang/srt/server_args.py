@@ -815,18 +815,9 @@ def prepare_server_args(argv: list[str]) -> ServerArgs:
         for arg in argv
     )
 
-    hybrid_cache_checkpoints_level_explicitly_set = any(
-        arg == "--hybrid-cache-checkpoints-level"
-        or arg.startswith("--hybrid-cache-checkpoints-level=")
-        for arg in argv
-    )
-
     raw_args = parser.parse_args(argv)
     raw_args._radix_eviction_policy_explicitly_set = (
         radix_eviction_policy_explicitly_set
-    )
-    raw_args._hybrid_cache_checkpoints_level_explicitly_set = (
-        hybrid_cache_checkpoints_level_explicitly_set
     )
 
     # Set up basic logging before ServerArgs.__post_init__ so that
