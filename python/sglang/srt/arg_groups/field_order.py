@@ -576,5 +576,6 @@ POSITIONAL_FIELD_ORDER = (
     "enable_flashmla_prefill_token_packing",
     "decode_state_free_radix_default",
     "enable_dsa_fp4_indexer",
+    "_hybrid_cache_checkpoints_level_explicitly_set",
 )
 # fmt: on
