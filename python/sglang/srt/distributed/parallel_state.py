@@ -3298,6 +3298,7 @@ def destroy_model_parallel():
         _SHARED_EXPERTS_TP.destroy()
     _SHARED_EXPERTS_TP = None
 
+    tp_group_destroyed = _TP
     if _TP:
         _TP.destroy()
     _TP = None
@@ -3308,7 +3309,8 @@ def destroy_model_parallel():
     _PP = None
 
     global _DCP
-    if _DCP:
+    # _DCP aliases _TP when DCP spans the whole TP group on ROCm; _TP was destroyed above.
+    if _DCP and _DCP is not tp_group_destroyed:
         _DCP.destroy()
     _DCP = None
 
