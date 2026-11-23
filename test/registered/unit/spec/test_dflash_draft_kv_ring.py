@@ -1,5 +1,8 @@
 import contextlib
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -15,6 +18,7 @@ from sglang.srt.server_args import ServerArgs
 from sglang.srt.speculative.dflash_draft_ring import (
     DFlashDraftKVRing,
     draft_kv_ring_rows_per_req,
+    draft_kv_ring_unsupported_reason,
 )
 from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import CustomTestCase
@@ -256,6 +260,120 @@ class TestDraftKVRingPDTransfer(CustomTestCase):
         ptrs, lens, item_lens = ring.floor_buf_infos()
         self.assertEqual(ptrs, [ring.min_pos.data_ptr()])
         self.assertEqual((lens, item_lens), ([4 * 4], [4]))
+
+
+class TestSpeculatorsDSparkConfig(unittest.TestCase):
+    def test_speculators_dspark_config_flattens_layer_ids_and_aux_stream(self):
+        from sglang.srt.configs.speculators_dspark import (
+            try_load_speculators_dspark_config,
+        )
+        from sglang.srt.speculative.dflash_utils import (
+            get_dflash_aux_hidden_stream,
+        )
+
+        raw = {
+            "architectures": ["DSparkDraftModel"],
+            "speculators_model_type": "dspark",
+            "aux_hidden_state_layer_ids": [76, 80, 84, 88, 92],
+            "block_size": 7,
+            "markov_rank": 512,
+            "markov_head_type": "vanilla",
+            "mask_token_id": 163839,
+            "sample_from_anchor": True,
+            "sliding_window_non_causal": False,
+            "transformer_layer_config": {
+                "model_type": "qwen3",
+                "hidden_size": 7168,
+                "intermediate_size": 14336,
+                "num_hidden_layers": 5,
+                "num_attention_heads": 96,
+                "num_key_value_heads": 16,
+                "head_dim": 64,
+                "layer_types": ["sliding_attention"] * 5,
+                "sliding_window": 2048,
+                "vocab_size": 163840,
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "config.json").write_text(json.dumps(raw))
+            cfg = try_load_speculators_dspark_config(tmp, revision=None)
+        self.assertIsNotNone(cfg)
+        self.assertEqual(cfg.architectures, ["DSparkDraftModel"])
+        self.assertEqual(cfg.sliding_window, 2048)
+        self.assertTrue(cfg.is_causal)
+        self.assertEqual(cfg.dflash_config["target_layer_ids"], [75, 79, 83, 87, 91])
+        self.assertEqual(get_dflash_aux_hidden_stream(cfg), "prefix")
+
+    def _load(self, layer_config):
+        from sglang.srt.configs.speculators_dspark import (
+            try_load_speculators_dspark_config,
+        )
+
+        raw = {
+            "speculators_model_type": "dspark",
+            "aux_hidden_state_layer_ids": [2, 4],
+            "mask_token_id": 7,
+            "transformer_layer_config": layer_config,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "config.json").write_text(json.dumps(raw))
+            return try_load_speculators_dspark_config(tmp, revision=None)
+
+    def test_speculators_dspark_config_follows_the_layer_backbone(self):
+        cfg = self._load(
+            {"model_type": "llama", "hidden_size": 64, "num_attention_heads": 4}
+        )
+        self.assertEqual(cfg.model_type, "llama")
+        self.assertEqual(cfg.dflash_config["target_layer_ids"], [1, 3])
+
+    def test_speculators_dspark_config_without_layer_model_type_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "transformer_layer_config.model_type"):
+            self._load({"hidden_size": 64})
+
+
+class TestDSparkGqaDraftKVRingRocm(unittest.TestCase):
+    def _gqa_config(self):
+        return SimpleNamespace(
+            layer_types=["sliding_attention"] * 5,
+            sliding_window=2048,
+            num_hidden_layers=5,
+            dflash_config={
+                "mask_token_id": 163839,
+                "target_layer_ids": [75, 79, 83, 87, 91],
+                "aux_hidden_stream": "prefix",
+            },
+        )
+
+    def test_rocm_gqa_dspark_ring_allowed_on_triton_and_rejected_on_pd_or_cuda(self):
+        cfg = self._gqa_config()
+        self.assertIsNone(
+            draft_kv_ring_unsupported_reason(
+                lambda: cfg,
+                draft_backend="triton",
+                dcp_size=8,
+                is_cuda=False,
+                is_dspark=True,
+            )
+        )
+        self.assertIsNotNone(
+            draft_kv_ring_unsupported_reason(
+                lambda: cfg,
+                draft_backend="triton",
+                disaggregation_mode="prefill",
+                dcp_size=8,
+                is_cuda=False,
+                is_dspark=True,
+            )
+        )
+        self.assertIsNotNone(
+            draft_kv_ring_unsupported_reason(
+                lambda: cfg,
+                draft_backend="triton",
+                dcp_size=8,
+                is_cuda=True,
+                is_dspark=True,
+            )
+        )
 
 
 if __name__ == "__main__":

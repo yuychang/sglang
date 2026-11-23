@@ -883,6 +883,8 @@ def _handle_dspark(server_args: ServerArgs) -> None:
             "Max running requests is reset to 48 for speculative decoding. You can override this by explicitly setting --max-running-requests."
         )
 
+    _resolve_dflash_draft_kv_ring(server_args, is_dspark=True)
+
     from sglang.srt.speculative.ragged_verify import (
         RaggedVerifyMode,
         read_ragged_verify_mode,
@@ -1112,7 +1114,9 @@ def _resolve_dflash_mla_draft_window(server_args: ServerArgs) -> None:
         )
 
 
-def _resolve_dflash_draft_kv_ring(server_args: ServerArgs) -> None:
+def _resolve_dflash_draft_kv_ring(
+    server_args: ServerArgs, *, is_dspark: bool = False
+) -> None:
     """Runs after the draft backend is final, which it reads."""
     from sglang.srt.speculative.dflash_draft_ring import (
         draft_kv_ring_unsupported_reason,
@@ -1134,6 +1138,8 @@ def _resolve_dflash_draft_kv_ring(server_args: ServerArgs) -> None:
         enable_unified_memory=cfg.enable_unified_memory,
         dcp_size=cfg.dcp_size,
         draft_window_size=cfg.speculative_draft_window_size,
+        is_cuda=current_platform.is_cuda(),
+        is_dspark=is_dspark,
     )
     if reason is not None:
         if switch.is_set():
