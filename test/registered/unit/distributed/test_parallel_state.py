@@ -513,14 +513,16 @@ def test_dcp_disables_quick_allreduce_without_changing_tp_default():
             parallel_state.destroy_model_parallel()
 
 
-def _init_tp8_dcp(is_hip, dcp_size=8, tp_has_quick_allreduce=False):
+def _init_tp8_dcp(
+    is_hip, dcp_size=8, tp_has_quick_allreduce=False, qr_disabled=False
+):
     created = {}
 
     def mock_init_model_parallel_group(group_ranks, local_rank, backend, **kwargs):
         group = Mock()
         group.device_group = Mock()
         group.qr_comm = (
-            Mock()
+            Mock(disabled=qr_disabled)
             if tp_has_quick_allreduce and kwargs.get("group_name") == "tp"
             else None
         )
@@ -582,15 +584,26 @@ def test_non_hip_full_width_dcp_keeps_separate_group():
 
 
 def test_hip_full_width_dcp_keeps_separate_group_when_tp_has_quick_allreduce():
-    """DCP must not inherit TP's QuickAllReduce: a quantized QR regime would round
+    """DCP must not inherit an active QuickAllReduce: a quantized QR regime would round
     the bf16 all-reduce of DCP's MHA merge, so DCP keeps its own QR-free group."""
     created, tp, dcp, dcp_destroys, _ = _init_tp8_dcp(
-        is_hip=True, tp_has_quick_allreduce=True
+        is_hip=True, tp_has_quick_allreduce=True, qr_disabled=False
     )
     assert dcp is not tp
     assert created["dcp"] is dcp
     assert dcp.qr_comm is None
     assert dcp_destroys == 1
+
+
+def test_hip_full_width_dcp_reuses_tp_when_quick_allreduce_is_disabled():
+    """With ROCM_QUICK_REDUCE_QUANTIZATION=NONE, TP holds a disabled QuickAllReduce
+    object; full-width DCP still aliases TP to avoid a duplicate RCCL communicator."""
+    created, tp, dcp, _, tp_destroys = _init_tp8_dcp(
+        is_hip=True, tp_has_quick_allreduce=True, qr_disabled=True
+    )
+    assert "dcp" not in created
+    assert dcp is tp
+    assert tp_destroys == 1
 
 
 def test_destroy_model_parallel_destroys_each_aliased_group_once():
