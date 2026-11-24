@@ -2345,9 +2345,9 @@ class Envs:
     # and top-k across the attention-TP ranks and all-gather the top-k.
     # Unset picks the platform default (1024 on CUDA, 64 on ROCm).
     SGLANG_OPT_DSA_INDEXER_TP_SPLIT_MIN_ROWS = EnvInt(None)
-    # ROCm prefill indexer logits: aiter FlyDSL fp8_mqa_logits instead of Triton;
-    # same fp8 inputs and fp32 accumulation, only the summation order differs.
-    SGLANG_USE_FLYDSL_DSA_PREFILL_LOGITS = EnvBool(True)
+    # ROCm prefill indexer logits: 1 picks aiter's Triton fp8_mqa_logits (Gluon on gfx950 with
+    # Triton >= 3.6) instead of FlyDSL; same fp8 inputs and fp32 accumulation. Upstream: #52629.
+    SGLANG_USE_GLUON_DSA_PREFILL_LOGITS = EnvBool(False)
     # DCP local top-2048 on HIP: split rows longer than one block's registers over several
     # blocks, then merge (exact). Set 0 for the single-block-per-row kernel.
     SGLANG_DSA_DCP_TOPK_CHUNKED = EnvBool(True)
